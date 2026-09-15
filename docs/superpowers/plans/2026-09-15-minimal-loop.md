@@ -316,6 +316,8 @@ git commit -m "chore: 忽略本机依赖锁定文件"
 - [ ] **Step 1: 写失败的测试 `tests/core/test_models.py`**
 
 ```python
+from dataclasses import FrozenInstanceError
+
 import pytest
 
 from kb.core.models import (
@@ -346,6 +348,15 @@ def test_note_type_rejects_unknown_value():
         NoteType("学习笔记")
 
 
+def test_outcome_values_are_the_wire_contract():
+    """这三个字符串是与 LLM 的 wire 契约——Task 8 按它们解析模型输出。
+
+    假的保护长这样：`p.outcome is Outcome.CREATE` 是恒等比较，对 .value 不敏感，
+    把 FOLD 改成 "merge" 也不会红。必须断言 .value 本身。
+    """
+    assert [o.value for o in Outcome] == ["create", "fold", "pending"]
+
+
 def test_draft_holds_submitted_content_verbatim():
     """Q55：投递是纯粹的，正文原样保存。"""
     d = Draft(
@@ -363,6 +374,13 @@ def test_draft_project_is_optional():
     """Q30：允许没有项目——纯知识点场景。"""
     d = Draft(id="x", body="b", source=None, project=None, created_at="t")
     assert d.project is None
+
+
+def test_draft_is_immutable():
+    """Q55：草稿投递后原样保存，服务不改写——frozen 是这条承诺的机制保证。"""
+    d = Draft(id="x", body="原始正文", source=None, project=None, created_at="t")
+    with pytest.raises(FrozenInstanceError):
+        d.body = "被改写了"
 
 
 def test_plan_create_carries_path_and_frontmatter():
@@ -388,6 +406,7 @@ def test_plan_pending_requires_reason():
     )
     assert p.outcome is Outcome.PENDING
     assert p.target_path is None
+    assert p.pending_reason == "无法判断归属主题"
 
 
 def test_plan_defaults_are_independent():
@@ -521,7 +540,7 @@ class OrganizeResult:
 pytest tests/core/test_models.py -v
 ```
 
-预期：9 passed
+预期：11 passed
 
 - [ ] **Step 5: 提交**
 
