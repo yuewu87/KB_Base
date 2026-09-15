@@ -87,17 +87,20 @@ conda activate kn_base
 
 - [ ] **Step 2: 写 `requirements.txt`**
 
-（版本先不锁，Step 3 装完后用 `pip freeze` 回填）
+**下界 + 关键包上界**（Q57）。下界防止装到过老的版本；只有 `openai` 这类大版本会破坏 API 的 SDK 才加上界。
 
 ```
-fastapi
-uvicorn
-jinja2
-python-dotenv
-openai
-python-frontmatter
-httpx
-pytest
+# 下界约束 + 关键包破坏性大版本上界（Q57）
+# 精确版本锁文件 requirements.lock.txt 是 pip freeze 的本机产物，不入库
+
+fastapi>=0.141
+uvicorn>=0.53
+jinja2>=3.1
+python-dotenv>=1.0
+openai>=3.14,<4
+python-frontmatter>=1.3
+httpx>=0.28,<1
+pytest>=9,<10
 ```
 
 - [ ] **Step 3: 安装依赖**

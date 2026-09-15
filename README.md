@@ -263,7 +263,7 @@ KN_Base/
 ├── requirements.txt
 ├── CLAUDE.md
 ├── .env                   ← 本地配置与密钥（**不入库**）
-├── .env.example           ← 配置项清单，值留空（**入库**）
+├── .env.example           ← 配置项清单（**入库**）：密钥留空待填，其余给出可用默认值
 ├── logs/                  ← 运行日志，轮转保留（**不入库**）
 └── runtime/               ← 运行时文件，如 service.json（**不入库**）
 ```
