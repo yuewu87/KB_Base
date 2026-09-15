@@ -29,6 +29,9 @@ coverage.xml
 *.key
 *.pem
 
+# ---- 本机依赖锁定（含平台相关包，不跨平台）----
+requirements.lock.txt
+
 # ---- 运行时文件与日志（service.json 含端口与 pid；logs/ 为服务运行日志）----
 runtime/
 logs/
