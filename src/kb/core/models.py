@@ -2,26 +2,22 @@
 
 三条约定，下游所有模块都要守：
 
-1. **枚举成员是 `str` 子类，写进 frontmatter 或文本前必须取 `.value`。**
-   `f"{Outcome.CREATE}"` 得到的是 `'Outcome.CREATE'` 而不是 `'create'`；
-   直接塞进 PyYAML 还会抛 `RepresenterError`。
+1. **枚举是 `StrEnum`，写进 YAML frontmatter 前仍必须取 `.value`。**
+   取值语义与裸字符串一致（`f"{Outcome.CREATE}"` 就是 `'create'`），
+   但 **PyYAML 不认识枚举对象**——直接塞进 `frontmatter.Post(**{K_TYPE: NoteType.CONCEPT})`
+   会抛 `RepresenterError`。这处响亮失败是保留下来的，别指望枚举能直接进 YAML。
 2. **下游一律用 `is` 比较枚举，因此不得传入裸字符串。**
    （`str` 混入让 `Outcome.PENDING == "pending"` 成立，`is` 不成立——
    一旦实现里被喂进裸字符串，`is` 为假会静默走错分支。）
 3. **frontmatter 键名一律引用本模块的 `K_*` 常量，不要写字面量。**
    写错键名不会报错，只会静默返回 `None`——归类信号消失、索引页不生成，
    而你什么都看不到。
-
-枚举基类**有意写 `(str, Enum)` 而非 `enum.StrEnum`**（故压制 ruff 的 UP042）：
-`StrEnum` 会让 `f"{Outcome.CREATE}"` 静默变成 `'create'`，第 1 条约定里
-「不取 `.value` 就拿到明显错误的值」这个响亮的失败信号会消失，变成悄悄写对。
-两者对 PyYAML 都抛 `RepresenterError`，行为一致。
 """
 
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from enum import Enum
+from enum import StrEnum
 
 # ---------------------------------------------------------------- frontmatter 键名
 # 单一来源：这些键跨 vault / classify / journal / planning / organize 等多个模块使用
@@ -37,7 +33,7 @@ K_CREATED = "创建"
 K_UPDATED = "更新"
 
 
-class NoteType(str, Enum):  # noqa: UP042
+class NoteType(StrEnum):
     """笔记类型。固定枚举（Q24），不许自由发挥。"""
 
     CONCEPT = "概念"
@@ -49,7 +45,7 @@ class NoteType(str, Enum):  # noqa: UP042
     INDEX = "索引"
 
 
-class Outcome(str, Enum):  # noqa: UP042
+class Outcome(StrEnum):
     """整理**计划**（Q45）——LLM 打算做什么，尚未执行。
 
     与 ResultKind 的区别：这个是 LLM 产出的，可能幻觉；那个是实际发生的，不会。
@@ -96,7 +92,7 @@ class OrganizePlan:
     pending_reason: str | None = None
 
 
-class ResultKind(str, Enum):  # noqa: UP042
+class ResultKind(StrEnum):
     """一次整理的执行结果。
 
     与 Outcome 的区别：Outcome 是 LLM 的计划，ResultKind 是实际发生的事情。
