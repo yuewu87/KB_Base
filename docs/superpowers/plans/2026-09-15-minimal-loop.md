@@ -101,7 +101,10 @@ openai>=3.14,<4
 python-frontmatter>=1.3
 httpx>=0.28,<1
 pytest>=9,<10
+ruff>=0.9
 ```
+
+（`ruff` 已按用户决定加入。只做 lint，不做类型检查。）
 
 - [ ] **Step 3: 安装依赖**
 
@@ -119,9 +122,22 @@ pip freeze > requirements.lock.txt
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 pythonpath = ["src"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "UP", "B"]
 ```
 
 `pythonpath = ["src"]` 让测试里能直接 `from kb.config import ...`，无需安装包。
+
+跑 lint：
+
+```bash
+"D:/Conda_base/envs/kn_base/python.exe" -m ruff check .
+```
 
 - [ ] **Step 5: 写 `.env.example`**
 
@@ -312,6 +328,7 @@ git commit -m "chore: 忽略本机依赖锁定文件"
 **Files:**
 - Create: `src/kb/core/models.py`
 - Test: `tests/core/test_models.py`
+- Test: `tests/test_architecture.py`
 
 - [ ] **Step 1: 写失败的测试 `tests/core/test_models.py`**
 
@@ -321,6 +338,15 @@ from dataclasses import FrozenInstanceError
 import pytest
 
 from kb.core.models import (
+    K_CREATED,
+    K_ID,
+    K_PROJECT,
+    K_SOURCE,
+    K_STATUS,
+    K_SUBMITTED_AT,
+    K_TOPIC,
+    K_TYPE,
+    K_UPDATED,
     Draft,
     NoteType,
     OrganizePlan,
@@ -388,12 +414,11 @@ def test_plan_create_carries_path_and_frontmatter():
         draft_id="20260915-a3f2",
         outcome=Outcome.CREATE,
         target_path="20_知识/后端/并发写锁.md",
-        frontmatter={"类型": "概念", "主题": ["后端"]},
+        frontmatter={K_TYPE: NoteType.CONCEPT.value, K_TOPIC: ["后端"]},
         content="# 并发写锁\n",
-        links=["40_索引/后端"],
     )
     assert p.outcome is Outcome.CREATE
-    assert p.frontmatter["类型"] == "概念"
+    assert p.frontmatter[K_TYPE] == "概念"
     assert p.pending_reason is None
 
 
@@ -410,13 +435,24 @@ def test_plan_pending_requires_reason():
 
 
 def test_plan_defaults_are_independent():
-    """list/dict 默认值不能共享——否则会串数据。"""
+    """可变默认值不能共享——否则会串数据。"""
     a = OrganizePlan(draft_id="a", outcome=Outcome.PENDING)
     b = OrganizePlan(draft_id="b", outcome=Outcome.PENDING)
-    a.links.append("x")
     a.frontmatter["k"] = "v"
-    assert b.links == []
     assert b.frontmatter == {}
+
+
+def test_plan_defaults_cover_all_optional_fields():
+    """契约快照：最小构造下每个可选字段的默认值。
+
+    这些默认值会被落盘逻辑直接消费（`apply_plan` 把 `plan.content` 写盘），
+    改成 None 会让 frontmatter.Post 炸——而现有断言不会红。
+    """
+    p = OrganizePlan(draft_id="x", outcome=Outcome.CREATE)
+    assert p.target_path is None
+    assert p.frontmatter == {}
+    assert p.content == ""
+    assert p.pending_reason is None
 
 
 def test_result_kind_covers_all_execution_outcomes():
@@ -434,7 +470,26 @@ def test_organize_result_carries_error_separately():
     )
     assert r.kind is ResultKind.FAILED
     assert r.error is not None
-    assert r.links == []
+    assert r.detail == "模型返回格式不合规"
+
+
+def test_organize_result_is_immutable():
+    """与 Draft 同为「已发生的记录」，frozen 是真保护（字段全是不可变标量）。"""
+    r = OrganizeResult(draft_id="x", kind=ResultKind.CREATED, detail="d")
+    with pytest.raises(FrozenInstanceError):
+        r.detail = "被改了"
+
+
+def test_frontmatter_key_constants_are_stable():
+    """这些常量是跨模块契约——改名或写错会让读取端静默返回 None。"""
+    assert (K_STATUS, K_ID, K_SUBMITTED_AT, K_SOURCE, K_PROJECT) == (
+        "状态",
+        "id",
+        "投递时间",
+        "来源",
+        "项目",
+    )
+    assert (K_TYPE, K_TOPIC, K_CREATED, K_UPDATED) == ("类型", "主题", "创建", "更新")
 ```
 
 - [ ] **Step 2: 运行测试，确认失败**
@@ -448,12 +503,38 @@ pytest tests/core/test_models.py -v
 - [ ] **Step 3: 写 `src/kb/core/models.py`**
 
 ```python
-"""领域数据模型：只有数据与枚举，不含逻辑。"""
+"""领域数据模型：只有数据与枚举，不含逻辑。
+
+三条约定，下游所有模块都要守：
+
+1. **枚举成员是 `str` 子类，写进 frontmatter 或文本前必须取 `.value`。**
+   `f"{Outcome.CREATE}"` 得到的是 `'Outcome.CREATE'` 而不是 `'create'`；
+   直接塞进 PyYAML 还会抛 `RepresenterError`。
+2. **下游一律用 `is` 比较枚举，因此不得传入裸字符串。**
+   （`str` 混入让 `Outcome.PENDING == "pending"` 成立，`is` 不成立——
+   一旦实现里被喂进裸字符串，`is` 为假会静默走错分支。）
+3. **frontmatter 键名一律引用本模块的 `K_*` 常量，不要写字面量。**
+   写错键名不会报错，只会静默返回 `None`——归类信号消失、索引页不生成，
+   而你什么都看不到。
+"""
 
 from __future__ import annotations
 
 from dataclasses import dataclass, field
 from enum import Enum
+
+# ---------------------------------------------------------------- frontmatter 键名
+# 单一来源：这些键跨 vault / classify / journal / planning / organize 等多个模块使用
+
+K_STATUS = "状态"          # 草稿的待整理标记
+K_ID = "id"
+K_SUBMITTED_AT = "投递时间"
+K_SOURCE = "来源"
+K_PROJECT = "项目"
+K_TYPE = "类型"
+K_TOPIC = "主题"
+K_CREATED = "创建"
+K_UPDATED = "更新"
 
 
 class NoteType(str, Enum):
@@ -469,7 +550,10 @@ class NoteType(str, Enum):
 
 
 class Outcome(str, Enum):
-    """整理结果（Q45）。"""
+    """整理**计划**（Q45）——LLM 打算做什么，尚未执行。
+
+    与 ResultKind 的区别：这个是 LLM 产出的，可能幻觉；那个是实际发生的，不会。
+    """
 
     CREATE = "create"    # 新建笔记
     FOLD = "fold"        # 合并进已有笔记
@@ -492,17 +576,23 @@ class Draft:
 
 @dataclass
 class OrganizePlan:
-    """LLM 产出的变更计划。
+    """LLM 产出的变更计划（Q45）。
 
-    只描述「要做什么」，不执行任何文件操作。落盘由 organize 模块按计划执行（Q45）。
+    只描述「要做什么」，不执行任何文件操作。落盘由 organize 模块按计划执行。
+
+    **保持可变**：`frontmatter` 是 dict，`frozen=True` 挡不住它的内容被改，
+    买到的保护很弱。约定是「生产者一次性构造，读取方不得修改」。
+
+    **链接不单设字段**：唯一权威来源是 `content` 里的 `[[...]]`，
+    `validate_plan` 校验的也是它。单设一个 `links` 字段是冗余——
+    它会和 content 打架，且没有消费者。
     """
 
     draft_id: str
     outcome: Outcome
     target_path: str | None = None
-    frontmatter: dict = field(default_factory=dict)
+    frontmatter: dict[str, object] = field(default_factory=dict)
     content: str = ""
-    links: list[str] = field(default_factory=list)
     pending_reason: str | None = None
 
 
@@ -519,9 +609,12 @@ class ResultKind(str, Enum):
     FAILED = "failed"
 
 
-@dataclass
+@dataclass(frozen=True)
 class OrganizeResult:
     """单条草稿的整理结果。
+
+    与 `Draft` 同为「已发生的记录」，故一并 `frozen`。字段全是不可变标量，
+    这里的 frozen 是真保护（不像 OrganizePlan 那样被 dict 架空）。
 
     **报告与工作日志同源（Q50）**：服务产出本结构，然后渲染成两个出口——
     文本报告给会话，markdown 写进 vault 的整理日志。
@@ -530,7 +623,6 @@ class OrganizeResult:
     draft_id: str
     kind: ResultKind
     detail: str                       # 一行摘要，如「新建 并发写锁.md」
-    links: list[str] = field(default_factory=list)
     error: str | None = None
 ```
 
@@ -540,13 +632,85 @@ class OrganizeResult:
 pytest tests/core/test_models.py -v
 ```
 
-预期：11 passed
+预期：14 passed
 
-- [ ] **Step 5: 提交**
+- [ ] **Step 5: 写架构守卫测试 `tests/test_architecture.py`**
+
+「`core/` 与 `llm/` 不依赖接口层」这条约束（Q33）此前只靠人读代码保证。用 AST 检查把它变成机制——不用运行时 import，因为那要求目标模块能被成功导入，会掩盖问题。
+
+```python
+"""架构守卫：把「core/ 与 llm/ 不依赖接口层」从约定变成机制。
+
+Q33 定的硬约束：领域逻辑必须能脱离界面单独测试。
+"""
+
+import ast
+from pathlib import Path
+
+import pytest
+
+SRC = Path(__file__).resolve().parents[1] / "src" / "kb"
+
+GUARDED = ("core", "llm")
+FORBIDDEN = ("kb.api", "kb.web")
+
+
+def _python_files(package: str) -> list[Path]:
+    folder = SRC / package
+    return sorted(folder.rglob("*.py")) if folder.exists() else []
+
+
+def _imported_modules(path: Path) -> set[str]:
+    tree = ast.parse(path.read_text(encoding="utf-8"))
+    names: set[str] = set()
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Import):
+            names.update(alias.name for alias in node.names)
+        elif isinstance(node, ast.ImportFrom) and node.module:
+            names.add(node.module)
+    return names
+
+
+@pytest.mark.parametrize("package", GUARDED)
+def test_package_has_files(package):
+    """防止守卫在包为空时静默通过——空目录会让下面那条测试恒绿。"""
+    assert _python_files(package), f"src/kb/{package}/ 下没有 Python 文件，守卫失效"
+
+
+@pytest.mark.parametrize("package", GUARDED)
+def test_no_dependency_on_interface_layer(package):
+    violations = [
+        f"{path.relative_to(SRC.parent.parent)}: import {name}"
+        for path in _python_files(package)
+        for name in _imported_modules(path)
+        if name.startswith(FORBIDDEN)
+    ]
+    assert not violations, "领域层不得依赖接口层（Q33）：\n" + "\n".join(violations)
+```
+
+- [ ] **Step 6: 运行守卫测试，确认通过**
 
 ```bash
-git add src/kb/core/models.py tests/core/test_models.py
-git commit -m "feat: 领域数据模型与类型枚举"
+pytest tests/test_architecture.py -v
+```
+
+预期：4 passed
+
+**验证守卫真的有牙齿：** 临时在 `src/kb/core/models.py` 顶部加一行 `from kb.api import runtime  # noqa`，重跑应报 `领域层不得依赖接口层`；然后删掉那行。
+
+- [ ] **Step 7: 跑全部测试**
+
+```bash
+pytest -v
+```
+
+预期：25 passed（Task 1 的 7 条 + 本任务的 18 条）
+
+- [ ] **Step 8: 提交**
+
+```bash
+git add src/kb/core/models.py tests/core/test_models.py tests/test_architecture.py
+git commit -m "feat: 领域数据模型、类型枚举与架构守卫测试"
 ```
 
 ## Task 3: vault 读写
@@ -2085,7 +2249,6 @@ def _plan_json(**overrides) -> str:
         "target_path": f"{KNOWLEDGE}/后端/并发写锁.md",
         "frontmatter": {"类型": "概念", "主题": ["后端"]},
         "content": "# 并发写锁\n\n见 [[队列串行化]]\n",
-        "links": ["队列串行化"],
         "pending_reason": None,
     }
     data.update(overrides)
@@ -2124,7 +2287,7 @@ def test_parse_plan_builds_domain_object():
     assert plan.outcome is Outcome.CREATE
     assert plan.target_path == f"{KNOWLEDGE}/后端/并发写锁.md"
     assert plan.frontmatter["类型"] == "概念"
-    assert plan.links == ["队列串行化"]
+    assert plan.content == "# 并发写锁\n\n见 [[队列串行化]]\n"
 
 
 def test_parse_plan_rejects_unknown_outcome():
@@ -2144,7 +2307,6 @@ def test_parse_plan_tolerates_absent_optional_fields():
     )
     assert plan.target_path is None
     assert plan.frontmatter == {}
-    assert plan.links == []
 
 
 # ---------- 校验：pending ----------
@@ -2371,7 +2533,6 @@ SYSTEM_PROMPT = f"""你是知识库整理助手。你会收到一条待整理的
   "target_path": "相对 vault 根的路径",
   "frontmatter": {{"类型": "概念", "主题": ["后端"], "项目": "项目名"}},
   "content": "笔记正文（markdown）",
-  "links": ["要链接到的笔记名"],
   "pending_reason": "仅 outcome=pending 时填"
 }}
 
@@ -2480,17 +2641,12 @@ def parse_plan(draft_id: str, raw: str) -> OrganizePlan:
     if not isinstance(frontmatter, dict):
         raise PlanError("frontmatter 必须是对象")
 
-    links = data.get("links") or []
-    if not isinstance(links, list):
-        raise PlanError("links 必须是数组")
-
     return OrganizePlan(
         draft_id=draft_id,
         outcome=outcome,
         target_path=(data.get("target_path") or None),
         frontmatter=frontmatter,
         content=data.get("content") or "",
-        links=[str(x) for x in links],
         pending_reason=(data.get("pending_reason") or None),
     )
 
@@ -2635,7 +2791,6 @@ def _plan_json(**overrides) -> str:
         "target_path": f"{KNOWLEDGE}/后端/并发写锁.md",
         "frontmatter": {"类型": "概念", "主题": ["后端"]},
         "content": "# 并发写锁\n\n见 [[后端]]\n",
-        "links": ["后端"],
         "pending_reason": None,
     }
     data.update(overrides)
@@ -3613,7 +3768,6 @@ def _plan_json(**overrides) -> str:
         "target_path": f"{KNOWLEDGE}/后端/并发写锁.md",
         "frontmatter": {"类型": "概念", "主题": ["后端"]},
         "content": "# 并发写锁\n\n见 [[后端]]\n",
-        "links": ["后端"],
         "pending_reason": None,
     }
     data.update(overrides)
@@ -3790,7 +3944,6 @@ def _result_payload(result) -> dict:
         "draft_id": result.draft_id,
         "kind": result.kind.value,
         "detail": result.detail,
-        "links": result.links,
         "error": result.error,
     }
 
@@ -3959,7 +4112,6 @@ def fake_server(monkeypatch, cfg):
             "target_path": f"{KNOWLEDGE}/后端/并发写锁.md",
             "frontmatter": {"类型": "概念", "主题": ["后端"]},
             "content": "# 并发写锁\n\n见 [[后端]]\n",
-            "links": ["后端"],
             "pending_reason": None,
         },
         ensure_ascii=False,
