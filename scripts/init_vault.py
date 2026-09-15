@@ -2,14 +2,23 @@
 
 这个脚本是**知识库结构的唯一真源**：实际目录是它的产物。
 想调结构就改这里重跑，不要手工建目录。
+
+直接运行：
+
+    python scripts/init_vault.py [vault 路径]
 """
 
 from __future__ import annotations
 
 import subprocess
+import sys
 from pathlib import Path
 
-from kb.core.vault import (
+# 让脚本能直接跑：pytest 走 pyproject 里的 pythonpath，直接运行则没有，
+# 于是 `from kb...` 会 ModuleNotFoundError。
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
+
+from kb.core.vault import (  # noqa: E402 —— 必须在 sys.path 自举之后
     ATTACHMENTS,
     INBOX,
     INDEX,
@@ -103,8 +112,6 @@ def init_vault(vault_root: Path) -> list[str]:
 
 
 if __name__ == "__main__":
-    import sys
-
     root = Path(sys.argv[1]) if len(sys.argv) > 1 else Path(r"E:\KB_Library")
     done = init_vault(root)
     if done:
