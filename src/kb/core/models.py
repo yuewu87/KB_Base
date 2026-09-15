@@ -6,7 +6,7 @@ from dataclasses import dataclass, field
 from enum import Enum
 
 
-class NoteType(str, Enum):
+class NoteType(str, Enum):  # noqa: UP042
     """笔记类型。固定枚举（Q24），不许自由发挥。"""
 
     CONCEPT = "概念"
@@ -18,7 +18,7 @@ class NoteType(str, Enum):
     INDEX = "索引"
 
 
-class Outcome(str, Enum):
+class Outcome(str, Enum):  # noqa: UP042
     """整理结果（Q45）。"""
 
     CREATE = "create"    # 新建笔记
@@ -56,7 +56,7 @@ class OrganizePlan:
     pending_reason: str | None = None
 
 
-class ResultKind(str, Enum):
+class ResultKind(str, Enum):  # noqa: UP042
     """一次整理的执行结果。
 
     与 Outcome 的区别：Outcome 是 LLM 的计划，ResultKind 是实际发生的事情。
