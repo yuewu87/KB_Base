@@ -1,0 +1,169 @@
+"""命令行接口（Q28）。
+
+**CLI 是最通用的一层**——「能跑 shell」几乎是所有 agent harness 的底线能力，
+比 MCP 的覆盖面广得多。
+
+CLI 自己不碰文件：所有写入都走 HTTP 打到服务进程，服务没跑就自动拉起（Q29/Q39）。
+"""
+
+from __future__ import annotations
+
+import argparse
+import sys
+from pathlib import Path
+
+import httpx
+
+from kb.api import runtime
+from kb.config import Config, ConfigError, load_config
+
+TIMEOUT = 600.0          # 整理要调 LLM，给足时间
+
+
+def make_client(cfg: Config) -> httpx.Client:
+    """建立到服务进程的连接。服务没跑就拉起来（Q39）。"""
+    port = runtime.ensure_service(cfg)
+    return httpx.Client(base_url=f"http://127.0.0.1:{port}", timeout=TIMEOUT)
+
+
+def read_content(args) -> str:
+    """正文来源优先级：`--content` > `--file` > stdin。"""
+    if getattr(args, "content", None):
+        return args.content
+    if getattr(args, "file", None):
+        return Path(args.file).read_text(encoding="utf-8")
+    if not sys.stdin.isatty():
+        return sys.stdin.read()
+    return ""
+
+
+def default_project() -> str | None:
+    """Q30：默认取 **git 仓库根**的目录名，不是 cwd 的 basename。
+
+    用 git 根是因为 agent 可能停在子目录（如 `src/kb/core/`），
+    那样 basename 会取到 `core`，挂错项目。
+    """
+    from kb.core.vault import project_name_from_cwd
+
+    return project_name_from_cwd(Path.cwd())
+
+
+# ------------------------------------------------------------ 命令
+
+def cmd_push(args) -> int:
+    cfg = load_config()
+    content = read_content(args).strip()
+    if not content:
+        print("正文为空。用 --content / --file 传入，或从 stdin 管道输入。", file=sys.stderr)
+        return 2
+
+    project = args.project if args.project is not None else default_project()
+
+    with make_client(cfg) as client:
+        resp = client.post(
+            "/push",
+            json={"content": content, "project": project, "source": args.source},
+        )
+        resp.raise_for_status()
+        print(f"已收，id={resp.json()['id']}")
+    return 0
+
+
+def cmd_inbox(args) -> int:
+    cfg = load_config()
+    with make_client(cfg) as client:
+        data = client.get("/inbox").raise_for_status().json()
+
+    if not data["count"]:
+        print("收件箱是空的。")
+        return 0
+
+    print(f"收件箱：{data['count']} 条待整理")
+    for item in data["items"]:
+        flags = []
+        if item["pending"]:
+            flags.append("待归类")
+        if item["project"]:
+            flags.append(item["project"])
+        suffix = f"  [{'｜'.join(flags)}]" if flags else ""
+        print(f"  {item['id']}  {item['preview']}{suffix}")
+    return 0
+
+
+def cmd_organize(args) -> int:
+    cfg = load_config()
+    with make_client(cfg) as client:
+        resp = client.post("/organize", json={"draft_id": args.draft_id})
+        if resp.status_code == 404:
+            print(resp.json()["detail"], file=sys.stderr)
+            return 1
+        resp.raise_for_status()
+        data = resp.json()
+
+    if not data["count"]:
+        print("没有待整理的草稿。")
+        return 0
+
+    # 报告：与工作日志同源（Q50）——同一批 results 的另一个出口
+    print(f"整理完成，{data['count']} 条：")
+    for r in data["results"]:
+        line = f"  [{r['kind']}] {r['detail']}"
+        if r["error"]:
+            line += f" —— {r['error']}"
+        print(line)
+
+    failed = sum(1 for r in data["results"] if r["kind"] == "failed")
+    return 1 if failed == data["count"] else 0
+
+
+def cmd_status(args) -> int:
+    cfg = load_config()
+    port = runtime.running_port()
+    if port is None:
+        print("服务未在运行（下次调用会自动拉起）。")
+    else:
+        print(f"服务在运行：http://127.0.0.1:{port}")
+    print(f"vault: {cfg.vault_path}")
+    return 0
+
+
+# ------------------------------------------------------------ 入口
+
+def build_parser() -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser(prog="kb", description="KN_Base 知识库命令行")
+    sub = parser.add_subparsers(dest="command", required=True)
+
+    p_push = sub.add_parser("push", help="投递一条草稿到收件箱")
+    p_push.add_argument("--content", help="正文")
+    p_push.add_argument("--file", help="从文件读正文")
+    p_push.add_argument("--project", help="项目名（默认取 git 根目录名）")
+    p_push.add_argument("--source", help="来源：会话 / 书籍 / 网页 / 论文")
+    p_push.set_defaults(func=cmd_push)
+
+    p_org = sub.add_parser("organize", help="整理草稿（不填 id 则整理全部）")
+    p_org.add_argument("draft_id", nargs="?", help="只整理这一条")
+    p_org.set_defaults(func=cmd_organize)
+
+    p_inbox = sub.add_parser("inbox", help="查看收件箱")
+    p_inbox.set_defaults(func=cmd_inbox)
+
+    p_status = sub.add_parser("status", help="查看服务状态")
+    p_status.set_defaults(func=cmd_status)
+
+    return parser
+
+
+def main(argv: list[str] | None = None) -> int:
+    args = build_parser().parse_args(argv)
+    try:
+        return args.func(args)
+    except ConfigError as exc:
+        print(f"配置错误：{exc}", file=sys.stderr)
+        return 2
+    except httpx.HTTPError as exc:
+        print(f"与服务通信失败：{exc}", file=sys.stderr)
+        return 1
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
