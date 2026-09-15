@@ -3581,6 +3581,23 @@ def _git(vault_root: Path, *args: str) -> subprocess.CompletedProcess:
     )
 
 
+def _stageable(vault_root: Path, rels: list[str]) -> list[str]:
+    """筛掉 git 处理不了的路径。
+
+    **草稿是这里的关键**：它由 `/push` 写入、`/push` 不提交，所以整理时还是个
+    未跟踪文件；整理成功后又会被删掉。此时 `git add -- 00_收件箱/xxx.md` 会报
+    `pathspec did not match any files`——而 **git add 只要有一个 pathspec 失败就
+    整体放弃**，结果是一个文件都进不去、commit 根本不会发生。
+
+    保留规则：磁盘上还在的（新增/修改），或者已被跟踪的（删除）。
+    两者都不是的（从未跟踪、现已消失）跳过。
+    """
+    if not rels:
+        return []
+    tracked = set(_git(vault_root, "ls-files", "-z", "--", *rels).stdout.split("\0"))
+    return [r for r in rels if (vault_root / r).exists() or r in tracked]
+
+
 def commit_changes(
     vault_root: Path,
     touched: list[Path],
@@ -3599,6 +3616,7 @@ def commit_changes(
         except ValueError:
             continue
 
+    rels = _stageable(vault_root, rels)
     if not rels:
         return False
 

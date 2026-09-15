@@ -44,6 +44,10 @@ source "$(conda info --base)/etc/profile.d/conda.sh" && conda activate kn_base &
 
 Windows 下 `text=True` 按本地编码（GBK）解码，而 git 的输出（中文 commit message、含中文的路径）是 UTF-8。更糟的是解码异常抛在**子进程的读取线程**里，主流程只看到 `stdout=None`，症状与原因隔了十万八千里，极难排查。项目里所有调 git 的地方都遵守这条。
 
+**解析 git 输出的路径时还要加 `-c core.quotepath=false`。** 否则 git 把中文路径转成八进制转义（`"20_\347\237\245\350\257\206/..."`），按字面比对全部对不上。
+
+**`git add` 只要有一个 pathspec 不匹配就整体放弃**，一个文件都进不去。所以给 `git add` 传路径前必须先过滤掉 git 处理不了的（既不在磁盘上、也没被跟踪的）。
+
 ## 常用命令
 
 ```bash
