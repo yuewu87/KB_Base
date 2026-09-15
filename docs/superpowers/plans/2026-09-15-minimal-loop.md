@@ -4086,15 +4086,25 @@ def create_app(cfg: Config | None = None, llm: LLM | None = None) -> FastAPI:
         if not body:
             raise HTTPException(status_code=400, detail="正文不能为空")
 
-        draft = Draft(
-            id=new_draft_id(),
-            body=body + "\n",
-            source=req.source,
-            project=req.project,
-            created_at=f"{datetime.now():%Y-%m-%d %H:%M}",
-        )
-        write_draft(cfg.vault_path, draft)
-        return {"id": draft.id}
+        created_at = f"{datetime.now():%Y-%m-%d %H:%M}"
+
+        # id 只有 4 位随机十六进制（65536 种），撞号时**重试而非覆盖**。
+        # write_draft 遇冲突会抛 FileExistsError——这是刻意的，静默覆盖即数据丢失。
+        for _ in range(10):
+            draft = Draft(
+                id=new_draft_id(),
+                body=body + "\n",
+                source=req.source,
+                project=req.project,
+                created_at=created_at,
+            )
+            try:
+                write_draft(cfg.vault_path, draft)
+            except FileExistsError:
+                continue
+            return {"id": draft.id}
+
+        raise HTTPException(status_code=500, detail="连续 10 次撞上已存在的草稿 id")
 
     @app.get("/inbox")
     def inbox() -> dict:
