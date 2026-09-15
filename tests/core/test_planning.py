@@ -163,6 +163,22 @@ def test_validate_rejects_invented_topic(vault):
         validate_plan(plan, vault)
 
 
+def test_validate_rejects_nonexistent_project_dir(vault):
+    """Q30：服务从不自动新建项目文件夹——项目必须已经存在。
+
+    否则模型给一个不存在的项目名，就能凭空造出一个项目目录。
+    """
+    plan = parse_plan(
+        DRAFT.id,
+        _plan_json(
+            target_path="10_项目/工作/不存在的项目/不存在的项目-踩坑.md",
+            frontmatter={"类型": "踩坑", "主题": ["后端"], "项目": "不存在的项目"},
+        ),
+    )
+    with pytest.raises(PlanError, match="项目目录不存在"):
+        validate_plan(plan, vault)
+
+
 def test_validate_allows_existing_project_dir(vault):
     plan = parse_plan(
         DRAFT.id,

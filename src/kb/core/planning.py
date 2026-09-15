@@ -207,6 +207,18 @@ def allowed_prefixes(vault_root: Path) -> list[Path]:
     return prefixes
 
 
+def _is_existing_project_dir(vault_root: Path, path: Path) -> bool:
+    """`path` 是否为 `10_项目/<分组>/<项目名>` 这样的**既有**项目目录。
+
+    中间那一层（`<项目名>`）必须真的存在——服务从不自动新建项目文件夹（Q30）。
+    """
+    try:
+        rel = path.relative_to(vault_root / PROJECTS)
+    except ValueError:
+        return False
+    return len(rel.parts) == 2 and path.is_dir()
+
+
 def known_link_targets(vault_root: Path) -> set[str]:
     """正文里 [[链接]] 可以指向谁。
 
@@ -240,6 +252,15 @@ def validate_plan(plan: OrganizePlan, vault_root: Path) -> None:
     if not any(target.is_relative_to(p) for p in allowed_prefixes(vault_root)):
         raise PlanError(
             "target_path 不在允许范围内，必须落在 10_项目/ 或 20_知识/<既有主题>/ 下："
+            f"{plan.target_path}"
+        )
+
+    if target.is_relative_to(vault_root / PROJECTS) and not _is_existing_project_dir(
+        vault_root, target.parent
+    ):
+        raise PlanError(
+            "项目目录不存在，服务不会自动新建（Q30）。"
+            "请先手工建好 `10_项目/<分组>/<项目名>/`，或改走 20_知识/ 或 pending："
             f"{plan.target_path}"
         )
 
