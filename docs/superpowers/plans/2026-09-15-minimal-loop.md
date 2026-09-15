@@ -146,12 +146,17 @@ select = ["E", "F", "W", "I", "UP", "B"]
 
 ```
 # 复制本文件为 .env 并填写。.env 不入库。
+# KB_LLM_BASE_URL / KB_LLM_MODEL 为必填项，已给出 DeepSeek 的当前值。
 KB_LLM_API_KEY=
-KB_LLM_BASE_URL=https://api.deepseek.com/v1
-KB_LLM_MODEL=deepseek-chat
+KB_LLM_BASE_URL=https://api.deepseek.com
+KB_LLM_MODEL=deepseek-flash
+# 留空则用默认值 E:\KB_Library
 KB_VAULT_PATH=E:\KB_Library
+# 留空则自动寻找未占用端口
 KB_PORT=
 ```
+
+（值取自 DeepSeek 官方文档：模型名用 `deepseek-flash`，`deepseek-chat` 已弃用；`base_url` 用 `https://api.deepseek.com`。）
 
 - [ ] **Step 6: 建空包文件**
 
@@ -4672,7 +4677,9 @@ python scripts/init_vault.py "E:/KB_Library"
 cp .env.example .env
 ```
 
-编辑 `.env`，填入真实的 `KB_LLM_API_KEY`，并按供应商文档确认 `KB_LLM_BASE_URL` 与 `KB_LLM_MODEL` 的确切值。
+编辑 `.env`，填入真实的 `KB_LLM_API_KEY`。
+
+`KB_LLM_BASE_URL` 与 `KB_LLM_MODEL` 已按 [DeepSeek 官方文档](https://api-docs.deepseek.com/) 填好（`https://api.deepseek.com` / `deepseek-flash`），通常不用改。换供应商时才需要动。
 
 - [ ] **Step 5: 手动建一个主题目录和项目目录**
 
