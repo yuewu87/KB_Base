@@ -118,6 +118,65 @@ def test_ensure_service_honours_configured_port(monkeypatch):
     assert runtime.ensure_service(_cfg(52123)) == 52123
 
 
+# ---------- 服务跑的是不是旧代码 ----------
+
+def test_service_info_records_start_timestamp():
+    runtime.write_service_info(1234)
+    info = runtime.read_service_info()
+    assert isinstance(info["started_at"], float)
+
+
+def test_is_stale_false_without_service():
+    assert runtime.is_stale() is False
+
+
+def test_is_stale_false_when_code_older(monkeypatch):
+    runtime.write_service_info(1234)
+    monkeypatch.setattr(runtime, "source_mtime", lambda: 0.0)
+    assert runtime.is_stale() is False
+
+
+def test_is_stale_true_when_code_newer(monkeypatch):
+    """改了 src/kb 下的代码后，在跑的服务仍执行旧逻辑——必须能看出来。"""
+    runtime.write_service_info(1234)
+    monkeypatch.setattr(runtime, "source_mtime", lambda: 9e12)
+    assert runtime.is_stale() is True
+
+
+def test_is_stale_false_for_old_format_file(monkeypatch):
+    """兼容没有 started_at 的旧 service.json——不该因此报错或误报。"""
+    runtime.SERVICE_FILE.parent.mkdir(parents=True, exist_ok=True)
+    runtime.SERVICE_FILE.write_text('{"port": 1234}', encoding="utf-8")
+    monkeypatch.setattr(runtime, "source_mtime", lambda: 9e12)
+    assert runtime.is_stale() is False
+
+
+def test_source_mtime_sees_repo_files():
+    """真的去扫了源码目录，而不是永远返回 0。"""
+    assert runtime.source_mtime() > 0
+
+
+# ---------- 停服务 ----------
+
+def test_stop_service_when_not_running(monkeypatch):
+    monkeypatch.setattr(runtime, "running_port", lambda: None)
+    assert runtime.stop_service() is False
+
+
+def test_stop_service_kills_and_clears(monkeypatch):
+    runtime.write_service_info(1234, pid=999999)
+    monkeypatch.setattr(runtime, "running_port", lambda: 1234)
+
+    killed = []
+    monkeypatch.setattr(
+        runtime.subprocess, "run", lambda args, **kw: killed.append(args)
+    )
+
+    assert runtime.stop_service() is True
+    assert killed, "没有真的去停进程"
+    assert runtime.read_service_info() is None
+
+
 def test_ensure_service_times_out(monkeypatch):
     monkeypatch.setattr(runtime, "spawn_service", lambda p: None)
     monkeypatch.setattr(runtime, "is_alive", lambda p, timeout=0.5: False)

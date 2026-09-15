@@ -118,6 +118,40 @@ def test_create_sets_timestamps(vault):
     assert meta["更新"] == "2026-09-15"
 
 
+def test_create_empties_fabricated_user_judgment(vault):
+    """Q23：模型代填的「用户的判断」必须在落盘前被清掉。
+
+    首次真实 LLM 运行就踩了这个坑——模型把用户陈述的**事实**当成判断，
+    还追加了两点用户没说过的话。提示词拦不住，所以这里是机械清空。
+    """
+    _run(vault, FakeLLM(_plan_json(content=(
+        "# 并发写锁\n\n## 现象\n\n会锁表\n\n"
+        "## 用户的判断\n\n用户认为应该用队列解决，并补充说队列满时要限流。\n\n"
+        "## 相关\n\n- [[后端]]\n"
+    ))))
+
+    _, body = read_note(vault / KNOWLEDGE / "后端" / "并发写锁.md")
+    assert "用户认为应该用队列解决" not in body
+    assert "## 用户的判断" in body      # 标题留着，给用户自己填
+    assert "## 现象" in body            # 其余内容不受影响
+    assert "- [[后端]]" in body
+
+
+def test_fold_also_empties_fabricated_user_judgment(vault):
+    target = vault / KNOWLEDGE / "后端" / "队列串行化.md"
+    write_note(target, {"类型": "概念"}, "# 队列串行化\n\n原有内容\n")
+
+    _run(vault, FakeLLM(_plan_json(
+        outcome="fold",
+        target_path=f"{KNOWLEDGE}/后端/队列串行化.md",
+        content="## 用户的判断\n\n他更喜欢这个做法。\n\n## 相关\n\n- [[后端]]\n",
+    )))
+
+    _, body = read_note(target)
+    assert "他更喜欢这个做法" not in body
+    assert "原有内容" in body
+
+
 def test_create_result_detail_links_to_note(vault):
     result, _ = _run(vault, FakeLLM(_plan_json()))
     assert "[[并发写锁]]" in result.detail

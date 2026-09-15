@@ -341,6 +341,40 @@ def test_system_prompt_uses_frontmatter_key_constants():
         assert key in prompt
 
 
+# ---------- 用户的判断（Q23）----------
+
+def test_strip_user_judgment_empties_the_section():
+    content = "# 标题\n\n## 用户的判断\n\n他说这个方案更好。\n\n## 相关\n"
+    out = planning.strip_user_judgment(content)
+    assert "他说这个方案更好" not in out
+    # 标题与下一节之间要留空行，否则 Markdown 里两行标题会贴在一起
+    assert "## 用户的判断\n\n## 相关" in out
+
+
+def test_strip_user_judgment_keeps_other_sections():
+    content = "# 标题\n\n## 展开\n\n正文\n\n## 用户的判断\n\n代填\n\n## 相关\n\n- [[x]]\n"
+    out = planning.strip_user_judgment(content)
+    assert "正文" in out
+    assert "- [[x]]" in out
+    assert "代填" not in out
+
+
+def test_strip_user_judgment_when_last_section():
+    content = "# 标题\n\n## 用户的判断\n\n代填\n"
+    out = planning.strip_user_judgment(content)
+    assert "代填" not in out
+    assert out.rstrip().endswith("## 用户的判断")
+
+
+def test_strip_user_judgment_noop_when_absent():
+    content = "# 标题\n\n## 展开\n\n正文\n"
+    assert planning.strip_user_judgment(content) == content
+
+
+def test_strip_user_judgment_preserves_trailing_newline():
+    assert planning.strip_user_judgment("## 用户的判断\n\n代填\n").endswith("\n")
+
+
 # ---------- 模板接入 ----------
 
 def test_load_note_skeletons_reads_templates():

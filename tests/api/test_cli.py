@@ -169,6 +169,29 @@ def test_status_when_service_up(fake_server, monkeypatch, capsys):
     assert "51723" in capsys.readouterr().out
 
 
+def test_status_warns_when_service_is_stale(fake_server, monkeypatch, capsys):
+    """改了代码但服务还跑着旧的——必须明确告警，否则改动看起来没生效。"""
+    monkeypatch.setattr(cli.runtime, "running_port", lambda: 51723)
+    monkeypatch.setattr(cli.runtime, "is_stale", lambda: True)
+
+    cli.main(["status"])
+    out = capsys.readouterr().out
+    assert "比磁盘上的代码旧" in out
+    assert "kb stop" in out
+
+
+def test_stop_reports_when_nothing_running(fake_server, monkeypatch, capsys):
+    monkeypatch.setattr(cli.runtime, "stop_service", lambda: False)
+    assert cli.main(["stop"]) == 0
+    assert "本来就没在运行" in capsys.readouterr().out
+
+
+def test_stop_reports_success(fake_server, monkeypatch, capsys):
+    monkeypatch.setattr(cli.runtime, "stop_service", lambda: True)
+    assert cli.main(["stop"]) == 0
+    assert "已停止" in capsys.readouterr().out
+
+
 def test_config_error_exits_two(monkeypatch, capsys):
     def _boom():
         raise ConfigError("缺少必填配置 KB_LLM_API_KEY")

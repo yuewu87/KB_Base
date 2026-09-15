@@ -123,7 +123,18 @@ def cmd_status(args) -> int:
         print("服务未在运行（下次调用会自动拉起）。")
     else:
         print(f"服务在运行：http://127.0.0.1:{port}")
+        if runtime.is_stale():
+            print("⚠️  它比磁盘上的代码旧——仍在跑改动前的逻辑。")
+            print("    跑 `kb stop` 停掉，下次调用会自动用当前代码拉起。")
     print(f"vault: {cfg.vault_path}")
+    return 0
+
+
+def cmd_stop(args) -> int:
+    if runtime.stop_service():
+        print("服务已停止。下次调用会自动用当前代码拉起。")
+    else:
+        print("服务本来就没在运行。")
     return 0
 
 
@@ -149,6 +160,9 @@ def build_parser() -> argparse.ArgumentParser:
 
     p_status = sub.add_parser("status", help="查看服务状态")
     p_status.set_defaults(func=cmd_status)
+
+    p_stop = sub.add_parser("stop", help="停掉服务（改了代码之后用）")
+    p_stop.set_defaults(func=cmd_stop)
 
     return parser
 

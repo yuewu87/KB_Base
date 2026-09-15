@@ -137,19 +137,22 @@ def apply_plan(
     assert plan.target_path is not None      # 已在 validate_plan 保证
     target = vault_root / plan.target_path
 
+    # 「用户的判断」只由用户本人填写（Q23），这里机械清空——不靠模型自觉
+    body_content = planning.strip_user_judgment(plan.content)
+
     if plan.outcome is Outcome.CREATE:
         txn.touch_create(target)
         meta = dict(plan.frontmatter)
         meta.setdefault(K_CREATED, _today(when))
         meta[K_UPDATED] = _today(when)
-        _write_note_safe(target, meta, plan.content)
+        _write_note_safe(target, meta, body_content)
         _ensure_indexes(vault_root, plan, txn)
         kind = ResultKind.CREATED
     else:
         txn.touch_modify(target)
         meta, body = read_note(target)
         meta[K_UPDATED] = _today(when)
-        body = body.rstrip("\n") + "\n\n" + plan.content.strip() + "\n"
+        body = body.rstrip("\n") + "\n\n" + body_content.strip() + "\n"
         _write_note_safe(target, meta, body)
         kind = ResultKind.FOLDED
 

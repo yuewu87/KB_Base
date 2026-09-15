@@ -53,6 +53,36 @@ def load_note_skeletons() -> dict[str, str]:
     return skeletons
 
 
+JUDGMENT_HEADING = "## 用户的判断"
+
+
+def strip_user_judgment(content: str) -> str:
+    """清空「## 用户的判断」一节的正文，只保留标题。
+
+    Q23：这一节记录的是**用户本人的立场**，只能由用户自己在 Obsidian 里写。
+
+    不能靠提示词保证：模型面对一个空标题，默认行为就是把它填满，而且分不清
+    「用户陈述的事实」与「用户的观点」——实测第一条真实草稿就被代填了
+    （还写成第三人称「用户认为……」）。所以在这里机械清空，写了也丢掉。
+    """
+    out: list[str] = []
+    skipping = False
+    for line in content.splitlines():
+        stripped = line.strip()
+        if stripped == JUDGMENT_HEADING:
+            out.append(line)
+            out.append("")          # 留一个空行，别让标题贴住下一节
+            skipping = True
+            continue
+        if skipping and stripped.startswith("## "):
+            skipping = False
+        if not skipping:
+            out.append(line)
+
+    text = "\n".join(out)
+    return text + "\n" if content.endswith("\n") else text
+
+
 def _skeleton_block() -> str:
     skeletons = load_note_skeletons()
     if not skeletons:
@@ -94,6 +124,11 @@ def build_system_prompt() -> str:
 5. create 的目标路径不能已存在；fold 的目标路径必须已存在。
 6. 不要发明新的主题分类。都不合适就用 pending，并在 pending_reason 说明原因。
 7. 项目笔记的文件名必须带项目前缀，如 `项目名-踩坑.md`，避免 [[链接]] 歧义。
+8. 骨架里的「## 用户的判断」一节**必须留空**（保留标题，标题下什么都不写）。
+   这一节记录用户本人的立场，服务端会机械清空——写了也会被丢掉，别浪费。
+   绝不要替用户总结、推断或改写成第三人称（「用户认为……」是典型的伪造）。
+9. fold 时 content **只写要追加的段落**——不要带一级标题（`# `），不要写
+   frontmatter，也不要重复目标笔记已有的章节。追加不是嵌一篇新笔记进去。
 
 {_skeleton_block()}"""
 
