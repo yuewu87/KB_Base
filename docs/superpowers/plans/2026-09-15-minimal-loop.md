@@ -4655,10 +4655,12 @@ pytest -v
 - [ ] **Step 2: 建 vault**
 
 ```bash
-python -c "from pathlib import Path; import sys; sys.path.insert(0,'src'); from scripts.init_vault import init_vault; print(init_vault(Path(r'E:\KB_Library')))"
+python scripts/init_vault.py "E:/KB_Library"
 ```
 
-预期：打印建了哪些目录。**再跑一次**应打印 `[]`（幂等）。
+预期：打印建了哪些目录。**再跑一次**应打印「已是完整骨架，无需改动」（幂等）。
+
+（脚本自带 `sys.path` 自举，直接跑即可；不需要手动设 `PYTHONPATH`。）
 
 - [ ] **Step 3: 用 Obsidian 打开 vault**
 
