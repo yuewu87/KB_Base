@@ -15,18 +15,41 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Python 环境约定
 
-- 使用 **conda** 管理环境，环境名统一为 `kn_base`。
+- 使用 **conda** 管理环境，环境名 `kn_base`，**Python 3.11**。
+- 本机环境路径：`D:\Conda_base\envs\kn_base`。
 - **conda 环境内一律使用 `pip` 安装依赖**，不用 `conda install`（避免与 pip 混装产生依赖冲突）。
-- 环境**尚未创建**。方案定稿后按以下方式创建：
+- 依赖记录在项目根目录 `requirements.txt`（**版本未锁**）。`requirements.lock.txt` 是 `pip freeze` 的本机产物，**不入库**。
 
-  ```bash
-  conda create -n kn_base python=3.11 -y   # 版本号以方案定稿为准
-  conda activate kn_base
-  pip install -r requirements.txt
-  ```
+创建与安装：
 
-- 依赖统一记录在项目根目录的 `requirements.txt`。
-- 运行任何 Python 命令前先确认已激活环境：`conda activate kn_base`。
+```bash
+conda create -n kn_base python=3.11 -y
+conda activate kn_base
+pip install -r requirements.txt
+```
+
+**在脚本或工具里调用环境内 Python 的两种可靠方式**（⚠️ 本机 `conda run` 会报内部错误，**不要用**）：
+
+```bash
+# 方式一：直接绝对路径（最省事，推荐）
+"D:/Conda_base/envs/kn_base/python.exe" -m pytest -v
+
+# 方式二：先 source 再 activate
+source "$(conda info --base)/etc/profile.d/conda.sh" && conda activate kn_base && pytest -v
+```
+
+## 常用命令
+
+```bash
+# 跑全部测试
+"D:/Conda_base/envs/kn_base/python.exe" -m pytest -v
+
+# 跑单个测试文件 / 单个测试
+"D:/Conda_base/envs/kn_base/python.exe" -m pytest tests/test_config.py -v
+"D:/Conda_base/envs/kn_base/python.exe" -m pytest tests/test_config.py::test_reads_required_values -v
+```
+
+测试配置在 `pyproject.toml`（`pythonpath = ["src"]`），因此**无需安装包**即可 `from kb.config import ...`。
 
 ## 网络与代理
 
@@ -68,9 +91,16 @@ export https_proxy=http://127.0.0.1:5408
 - 新增功能、改动行为前先走 `superpowers:brainstorming` 明确需求，再进入实现。
 - 涉及 3 个以上步骤的任务，先写计划再动手。
 
+## 相关文档
+
+| 文档 | 作用 |
+|---|---|
+| `README.md` | 系统最终形态的架构总览 |
+| `docs/问题记录.md` | **全部设计决策与理由**，设计状态的唯一真源 |
+| `docs/superpowers/plans/` | 实施计划 |
+
+**过程规矩：没有讨论出结果的问题，不先动手实现。** 新问题记入 `docs/问题记录.md`，格式为「问题 → 结论」，未决的标 🔴。
+
 ## 待补充（方案定稿后回填）
 
-- [ ] 技术选型：文档解析、切分策略、embedding 模型、向量库、检索与生成链路
-- [ ] 目录结构与模块划分
-- [ ] 常用命令（构建、运行、测试、跑单个测试）
-- [ ] 配置文件与环境变量清单
+- [ ] 技术选型：文档解析、切分策略、embedding 模型、向量库、检索与生成链路（阶段二 RAG）
