@@ -65,7 +65,7 @@
 
 **所有写入必须经过服务进程。** CLI 和 MCP 都走 HTTP，不直接碰文件；服务没启动时 CLI 报错并提示，而不是自己偷偷写。这样写入天然**串行化**，不会出现两份逻辑打架。
 
-服务**按需自动拉起**：CLI 检测到端口无响应就后台启动服务再投递。你无需关心服务开没开，也不用开机常驻。
+服务**按需自动拉起**：服务启动后把端口写入 `runtime/service.json`，CLI 读这个文件去探测——通就直接投递，不通就后台拉起服务、等它就绪、再投递。你无需关心服务开没开，也不用开机常驻。
 
 ---
 
@@ -220,7 +220,7 @@ KN_Base/
 │   ├── web/               ← 管理界面
 │   │   ├── routes/        ← config.py / journal.py / status.py
 │   │   └── static/
-│   └── config.py          ← 读 ~/.kb/config.toml
+│   └── config.py          ← 读工程根目录的 .env
 ├── templates/             ← 笔记模板（.md 形式，代码读取，便于修改）
 ├── scripts/
 │   └── init_vault.py      ← 建 vault 骨架（幂等，可重复执行）
@@ -229,8 +229,25 @@ KN_Base/
 │   ├── 问题记录.md         ← 全部设计决策与理由
 │   └── 接入指南/           ← 各 harness 的接入说明（后置）
 ├── requirements.txt
-└── CLAUDE.md
+├── CLAUDE.md
+├── .env                   ← 本地配置与密钥（**不入库**）
+├── .env.example           ← 配置项清单，值留空（**入库**）
+└── runtime/               ← 运行时文件，如 service.json（**不入库**）
 ```
+
+### 配置
+
+**配置集中在本文件夹，不散到用户目录。** 全部走工程根目录的 `.env`（扁平键值）：
+
+| 键 | 必填 | 说明 |
+|---|---|---|
+| `KB_LLM_API_KEY` | 是 | LLM 的 API key |
+| `KB_LLM_BASE_URL` | 是 | API 地址 |
+| `KB_LLM_MODEL` | 是 | 模型名（deepseek-flash 起步） |
+| `KB_VAULT_PATH` | 否 | vault 路径，默认 `E:\KB_Library` |
+| `KB_PORT` | 否 | 指定端口；留空则自动寻找 |
+
+`.env` 不入库，`.env.example` 入库——**换机器时照着 example 填一份就够**，不用翻代码找配置项。
 
 ### 模块化三条规则
 
@@ -253,7 +270,7 @@ KN_Base/
 
 | 约束 | 原因 |
 |---|---|
-| **API key 绝不进 vault** | vault 是 git 仓库，写进配置会被提交进历史，删掉也还在。配置放 vault 外 |
+| **API key 绝不进 vault** | vault 是 git 仓库，写进配置会被提交进历史，删掉也还在。配置放 `KN_Base/.env`，且 `.env` 不入库 |
 | **所有写入经服务进程** | 两个进程同时写会冲突。写入天然串行化 |
 | **不允许孤儿笔记** | 每条正式笔记至少链到一处已有笔记或 MOC。孤儿是检索不精准的根因 |
 | **AI 不得自行发明分类** | 遇到放不进的分类，只能报告。否则半年后分类体系就烂了 |
@@ -296,6 +313,8 @@ KN_Base/
 conda create -n kn_base python=3.11 -y
 conda activate kn_base
 pip install -r requirements.txt
+
+cp .env.example .env      # 然后填入 API key
 ```
 
 **环境内一律用 pip**，不混用 `conda install`（避免依赖冲突）。

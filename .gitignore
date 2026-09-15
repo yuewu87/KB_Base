@@ -29,6 +29,9 @@ coverage.xml
 *.key
 *.pem
 
+# ---- 运行时文件（如 service.json，含端口与 pid）----
+runtime/
+
 # ---- 数据与产物（知识库项目：原始数据/向量库不入库）----
 data/
 !data/.gitkeep
