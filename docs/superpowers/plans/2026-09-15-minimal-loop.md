@@ -2652,7 +2652,38 @@ _LLM_ALLOWED_TYPES = [
     if t not in (NoteType.JOURNAL, NoteType.INDEX)
 ]
 
-SYSTEM_PROMPT = f"""你是知识库整理助手。你会收到一条待整理的草稿、可能相关的已有笔记、
+TEMPLATES_DIR = PROJECT_ROOT / "templates"
+
+
+def load_note_skeletons() -> dict[str, str]:
+    """读取各类型的正文骨架。
+
+    **每次现读不缓存**——模板是用户可以随手改的（Q26），缓存会让改动不生效。
+    文件缺失时跳过，不抛异常：模板没了不该让整个整理挂掉。
+    """
+    skeletons: dict[str, str] = {}
+    for note_type in _LLM_ALLOWED_TYPES:
+        path = TEMPLATES_DIR / f"{note_type.value}.md"
+        if path.exists():
+            skeletons[note_type.value] = path.read_text(encoding="utf-8").rstrip()
+    return skeletons
+
+
+def _skeleton_block() -> str:
+    skeletons = load_note_skeletons()
+    if not skeletons:
+        return ""
+
+    lines = ["## 各类型的正文骨架（create 时照此结构写，章节名不要改）", ""]
+    for name, body in skeletons.items():
+        lines += [f"### {name}", "```markdown", body, "```", ""]
+    return "\n".join(lines)
+
+
+def build_system_prompt() -> str:
+    """构造系统提示词。模板内容每次现读，用户改了 templates/*.md 后新会话即生效。"""
+    allowed = "、".join(t.value for t in _LLM_ALLOWED_TYPES)
+    return f"""你是知识库整理助手。你会收到一条待整理的草稿、可能相关的已有笔记、
 现有项目清单和知识区主题清单。
 
 你的任务：把草稿整理成一篇正式笔记（create）、合并进已有笔记（fold），
@@ -2676,7 +2707,8 @@ SYSTEM_PROMPT = f"""你是知识库整理助手。你会收到一条待整理的
 5. create 的目标路径不能已存在；fold 的目标路径必须已存在。
 6. 不要发明新的主题分类。都不合适就用 pending，并在 pending_reason 说明原因。
 7. 项目笔记的文件名必须带项目前缀，如 `项目名-踩坑.md`，避免 [[链接]] 歧义。
-"""
+
+{_skeleton_block()}"""
 
 
 class PlanError(ValueError):
@@ -2736,7 +2768,7 @@ id: {draft.id}
 {'、'.join(topics) if topics else '（无）'}
 """
     return [
-        {"role": "system", "content": SYSTEM_PROMPT},
+        {"role": "system", "content": build_system_prompt()},
         {"role": "user", "content": user},
     ]
 
@@ -2833,8 +2865,13 @@ def validate_plan(plan: OrganizePlan, vault_root: Path) -> None:
             raise PlanError(f"create 的目标已存在，不能覆盖：{plan.target_path}")
 
         note_type = plan.frontmatter.get(K_TYPE)
-        if note_type not in {t.value for t in NoteType}:
-            raise PlanError(f"类型 非法：{note_type!r}")
+        allowed_values = {t.value for t in _LLM_ALLOWED_TYPES}
+        if note_type not in allowed_values:
+            raise PlanError(
+                f"{K_TYPE} 非法：{note_type!r}。只能取 "
+                f"{'、'.join(t.value for t in _LLM_ALLOWED_TYPES)}"
+                "——日志与索引页由服务生成，不由模型产出"
+            )
 
         if not _LINK_RE.search(plan.content):
             raise PlanError("正文必须包含至少一个 [[双向链接]]（不允许孤儿笔记）")
