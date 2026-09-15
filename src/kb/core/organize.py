@@ -259,22 +259,27 @@ def organize_draft(
 
 # ------------------------------------------------------------ 批量编排
 
-def organize_all(
+def organize_selected(
     vault_root: Path,
+    paths: list[Path],
     llm: LLM,
     when: datetime | None = None,
     sleep=time.sleep,
     commit: bool = True,
 ) -> list[OrganizeResult]:
-    """整理收件箱里的全部草稿（含待归类），按条隔离。"""
+    """整理指定的若干条草稿，按条隔离（Q45）。
+
+    `organize_all`（全部）与「只整理某一条」（Q38）共用这一份收尾逻辑——
+    否则两条路径会各自实现「写日志 + 提交」，迟早对不上。
+    """
     when = when or datetime.now()
     results: list[OrganizeResult] = []
     touched: list[Path] = []
 
-    for path in list_drafts(vault_root):
-        result, paths = organize_draft(vault_root, path, llm, when, sleep)
+    for path in paths:
+        result, paths_touched = organize_draft(vault_root, path, llm, when, sleep)
         results.append(result)
-        touched.extend(paths)
+        touched.extend(paths_touched)
 
     if not results:
         return results
@@ -287,6 +292,17 @@ def organize_all(
         commit_changes(vault_root, touched, results, when)
 
     return results
+
+
+def organize_all(
+    vault_root: Path,
+    llm: LLM,
+    when: datetime | None = None,
+    sleep=time.sleep,
+    commit: bool = True,
+) -> list[OrganizeResult]:
+    """整理收件箱里的全部草稿（含待归类），按条隔离。"""
+    return organize_selected(vault_root, list_drafts(vault_root), llm, when, sleep, commit)
 
 
 # ------------------------------------------------------------ git（Q46）
