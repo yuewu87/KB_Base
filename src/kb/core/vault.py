@@ -34,6 +34,7 @@ INDEX = "40_索引"
 ATTACHMENTS = "90_附件"
 
 DRAFT_STATUS = "待整理"
+JOURNAL_DIR = "整理日志"
 
 _SEPARATOR_RE = re.compile(r"[-_\s]+")
 
@@ -231,6 +232,8 @@ def project_name_from_cwd(cwd: Path) -> str | None:
             cwd=cwd,
             capture_output=True,
             text=True,
+            encoding="utf-8",
+            errors="replace",
             timeout=5,
         )
         if proc.returncode == 0 and proc.stdout.strip():
