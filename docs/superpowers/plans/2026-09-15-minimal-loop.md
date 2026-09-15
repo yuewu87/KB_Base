@@ -1668,23 +1668,28 @@ class LLM(ABC):
 class FakeLLM(LLM):
     """测试用假实现。
 
-    传字符串 → 每次都返回它（不消耗队列）；
-    传列表   → 按顺序吐出，用完再调用则抛 LLMError。
+    传字符串 → 每次都返回它（永不耗尽）；
+    传列表   → 按顺序吐出，队列见底后再调用则抛 LLMError。
+
+    后者用来验证「重试 N 次后放弃」这类路径——所以列表必须真的会耗尽。
+
+    ⚠️ 别用「队列长度是否为 1」来区分这两种模式：那会让 `["a", "b"]`
+    在第 2 次调用后卡住不再消耗，永远不抛异常，测试也就永远走不到放弃分支。
+    必须记住**构造时**传入的是字符串还是列表。
     """
 
     def __init__(self, responses: str | list[str]):
-        self.responses: list[str] = (
-            [responses] if isinstance(responses, str) else list(responses)
-        )
+        self._fixed: str | None = responses if isinstance(responses, str) else None
+        self._queue: list[str] = [] if isinstance(responses, str) else list(responses)
         self.calls: list[tuple[str, str]] = []
 
     def complete(self, system: str, user: str) -> str:
         self.calls.append((system, user))
-        if not self.responses:
+        if self._fixed is not None:
+            return self._fixed
+        if not self._queue:
             raise LLMError("FakeLLM 的响应队列已空")
-        if len(self.responses) == 1:
-            return self.responses[0]
-        return self.responses.pop(0)
+        return self._queue.pop(0)
 ```
 
 - [ ] **Step 4: 运行测试，确认通过**
