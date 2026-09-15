@@ -6,7 +6,7 @@
 from __future__ import annotations
 
 import os
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 
 from dotenv import load_dotenv
@@ -23,7 +23,8 @@ class ConfigError(RuntimeError):
 
 @dataclass(frozen=True)
 class Config:
-    llm_api_key: str
+    # repr=False：key 不能进日志、终端或异常上下文
+    llm_api_key: str = field(repr=False)
     llm_base_url: str
     llm_model: str
     vault_path: Path
@@ -31,7 +32,11 @@ class Config:
 
 
 def load_config(env_file: Path | None = None) -> Config:
-    """从 .env 读取配置。缺必填项时抛 ConfigError。"""
+    """从 .env 读取配置。缺必填项时抛 ConfigError。
+
+    注意：load_dotenv 会写入进程级 os.environ，所以**同一个进程内只应调用一次**。
+    重复传入不同的 env_file 不会覆盖已设置的变量（override=False）。
+    """
     env_file = env_file or PROJECT_ROOT / ".env"
     load_dotenv(env_file, override=False)
 
