@@ -1518,8 +1518,19 @@ def vault_dirs(vault_root: Path) -> list[Path]:
 
 
 def _git(vault_root: Path, *args: str) -> subprocess.CompletedProcess:
+    """调用 git。
+
+    **必须显式指定 utf-8 与 errors="replace"。** Windows 下 `text=True` 会按
+    本地编码（GBK）解码，而 git 输出（中文 commit message、路径）是 UTF-8——
+    解码异常抛在子进程的读取线程里，主流程只看到 `stdout=None`，极难排查。
+    """
     return subprocess.run(
-        ["git", *args], cwd=vault_root, capture_output=True, text=True
+        ["git", *args],
+        cwd=vault_root,
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
     )
 
 
@@ -3512,8 +3523,19 @@ def build_commit_message(
 
 
 def _git(vault_root: Path, *args: str) -> subprocess.CompletedProcess:
+    """调用 git。
+
+    **必须显式指定 utf-8 与 errors="replace"。** Windows 下 `text=True` 会按
+    本地编码（GBK）解码，而 git 输出（中文 commit message、路径）是 UTF-8——
+    解码异常抛在子进程的读取线程里，主流程只看到 `stdout=None`，极难排查。
+    """
     return subprocess.run(
-        ["git", *args], cwd=vault_root, capture_output=True, text=True
+        ["git", *args],
+        cwd=vault_root,
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
     )
 
 

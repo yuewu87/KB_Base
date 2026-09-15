@@ -38,6 +38,12 @@ pip install -r requirements.txt
 source "$(conda info --base)/etc/profile.d/conda.sh" && conda activate kn_base && pytest -v
 ```
 
+## 平台陷阱
+
+**调 `subprocess.run` 一律显式写 `encoding="utf-8", errors="replace"`，不要只写 `text=True`。**
+
+Windows 下 `text=True` 按本地编码（GBK）解码，而 git 的输出（中文 commit message、含中文的路径）是 UTF-8。更糟的是解码异常抛在**子进程的读取线程**里，主流程只看到 `stdout=None`，症状与原因隔了十万八千里，极难排查。项目里所有调 git 的地方都遵守这条。
+
 ## 常用命令
 
 ```bash
