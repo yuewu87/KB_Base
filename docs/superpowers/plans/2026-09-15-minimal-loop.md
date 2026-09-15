@@ -18,7 +18,10 @@
 
 | 约束 | 出处 |
 |---|---|
-| `core/` 不许 import `web/` 或 `api/` | Q33 |
+| `core/` 与 `llm/` 不许 import `web/` 或 `api/` | Q33（由 `tests/test_architecture.py` 守卫） |
+| **frontmatter 键名一律引用 `kb.core.models` 的 `K_*` 常量**，不写字面量 | 字面量写错是静默失败（返回 `None` 而非报错） |
+| **测试里反而要用字面量字符串** | 契约快照测试必须硬编码期望值——用常量就抓不到常量被改错 |
+| 枚举写进 frontmatter/文本前取 `.value`；比较一律用 `is` | `str` 混入的坑，见 `models.py` 模块 docstring |
 | LLM 调用全部 mock，不跑真实 API | Q52 |
 | 所有写入经服务进程，CLI 不直接碰文件 | Q29 |
 | 投递是纯粹的——正文原样保存，不改写 | Q55 |
