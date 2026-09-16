@@ -11,6 +11,7 @@
 from __future__ import annotations
 
 import argparse
+import logging
 from datetime import datetime
 
 import uvicorn
@@ -33,6 +34,7 @@ from kb.core.vault import (
 )
 from kb.llm.base import LLM
 from kb.llm.providers.openai_compat import OpenAICompatLLM
+from kb.logging_setup import setup_logging
 
 # 草稿 id 只有 4 位随机十六进制（65536 种），撞号时重试而不是覆盖
 PUSH_ATTEMPTS = 10
@@ -112,6 +114,13 @@ def create_app(cfg: Config | None = None, llm: LLM | None = None) -> FastAPI:
                 write_draft(cfg.vault_path, draft)
             except FileExistsError:
                 continue
+            logging.getLogger("kb.push").info(
+                "收到草稿 id=%s 来源=%s 项目=%s%s",
+                draft.id,
+                req.source or "未说明",
+                req.project or "无",
+                f" 修改目标={req.revise_target}" if req.revise_target else "",
+            )
             return {"id": draft.id}
 
         raise HTTPException(
@@ -163,7 +172,15 @@ def create_app(cfg: Config | None = None, llm: LLM | None = None) -> FastAPI:
         else:
             paths = list_drafts(cfg.vault_path)
 
+        log = logging.getLogger("kb.organize")
+        log.info("开始整理 %d 条草稿", len(paths))
         results = organize.organize_selected(cfg.vault_path, paths, get_llm())
+        for r in results:
+            if r.error:
+                log.warning("草稿 %s → %s：%s", r.draft_id, r.kind.value, r.error)
+            else:
+                log.info("草稿 %s → %s：%s", r.draft_id, r.kind.value, r.detail)
+        log.info("整理结束：%d 条", len(results))
         return {
             "count": len(results),
             "results": [_result_payload(r) for r in results],
@@ -179,6 +196,11 @@ def main() -> None:
 
     cfg = load_config()
     port = args.port or cfg.port or runtime.find_free_port()
+
+    log_path = setup_logging()
+    logging.getLogger(__name__).info(
+        "服务启动 port=%s vault=%s 日志=%s", port, cfg.vault_path, log_path
+    )
 
     runtime.write_service_info(port)
     try:

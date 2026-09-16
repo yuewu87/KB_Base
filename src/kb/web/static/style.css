@@ -21,3 +21,33 @@ body.collapsed .sidebar { width: 48px; }
 .card.journal { background: var(--blue-soft); }
 .card.flow { background: var(--pink-soft); }
 .term { background: #1f2328; color: #d7dde5; padding: 14px; border-radius: 8px; font-family: Consolas, monospace; white-space: pre-wrap; }
+
+/* ---- 检索框 ---- */
+.searchbar { display: flex; gap: 8px; margin: 12px 0 20px; }
+.searchbar input {
+  flex: 1; padding: 9px 12px; border: 1px solid var(--line);
+  border-radius: 6px; font-size: 14px; font-family: inherit;
+}
+.searchbar input:focus { outline: none; border-color: var(--blue); }
+.searchbar button {
+  padding: 9px 18px; border: 0; border-radius: 6px;
+  background: var(--blue); color: #fff; font-size: 14px; cursor: pointer;
+}
+
+/* ---- 标签 ---- */
+.tags { margin: 6px 0 0; }
+.tag {
+  display: inline-block; margin: 0 6px 4px 0; padding: 2px 8px;
+  border-radius: 10px; background: #eef3f9; color: #46617f; font-size: 12px;
+}
+
+/* ---- 日志页 ---- */
+.day { margin: 22px 0 10px; font-size: 15px; color: #46617f; }
+.card h3 { margin: 0 0 8px; font-size: 14px; }
+.card ul { margin: 0; padding-left: 18px; }
+.card li { margin: 3px 0; font-size: 13px; line-height: 1.6; }
+.mono { font-family: Consolas, "Courier New", monospace; font-size: 12px; }
+code {
+  background: #f1f4f8; padding: 1px 5px; border-radius: 4px;
+  font-family: Consolas, "Courier New", monospace; font-size: 12px;
+}

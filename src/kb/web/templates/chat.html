@@ -1,7 +1,36 @@
 {% extends "base.html" %}
 {% block content %}
 <div class="chat-layout">
-  <section class="chat-main"><h1>ai对话</h1><p class="muted">界面占位——检索接在 Task 9 的 /search 上，下一轮接。</p></section>
-  <aside class="chat-history"><h2>会话历史</h2><p class="muted">（右侧栏，借鉴 DeepSeek 布局）</p></aside>
+  <section class="chat-main">
+    <h1>ai对话</h1>
+    <form class="searchbar" method="get" action="/">
+      <input type="text" name="q" value="{{ q }}" placeholder="说一个关键词，或描述一段话" autofocus>
+      <button type="submit">查找</button>
+    </form>
+
+    {% if q and not hits %}
+      <p class="muted">没找到跟「{{ q }}」相关的内容。</p>
+    {% endif %}
+
+    {% for hit in hits %}
+      <article class="card journal">
+        <h3>{{ hit.title }}</h3>
+        <p class="muted mono">{{ hit.path }}</p>
+        {% if hit.tags %}<p class="tags">{% for t in hit.tags %}<span class="tag">{{ t }}</span>{% endfor %}</p>{% endif %}
+      </article>
+    {% endfor %}
+
+    {% if not q %}
+      <p class="muted">
+        现在是「输入关键词 → 列命中」，还不是对话式。对话要等把这一层接到
+        会话层之后再做。
+      </p>
+    {% endif %}
+  </section>
+
+  <aside class="chat-history">
+    <h2>会话历史</h2>
+    <p class="muted">（右侧栏，借鉴 DeepSeek 布局）——对话功能还没做，这里是占位。</p>
+  </aside>
 </div>
 {% endblock %}
