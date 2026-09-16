@@ -1,17 +1,21 @@
 {% extends "base.html" %}
+{% block title %}运行日志 · KN_Base{% endblock %}
 {% block content %}
-<h1>运行日志</h1>
-<p class="muted mono">{{ log_path }}（末尾 {{ log_text.splitlines() | length }} 行）</p>
+<div class="page-head">
+  <h1>运行日志</h1>
+  <p>代码级输出，原样显示。留在服务侧，不进 vault——技术日志是噪音。</p>
+</div>
 
-{% if domains %}
-  <p class="muted">领域：{% for d in domains %}<span class="tag">{{ d }}</span>{% endfor %}</p>
-{% endif %}
+<p class="mono">
+  {{ log_path }}　·　末尾 {{ log_text.splitlines() | length }} 行
+  {%- if domains %}　·　领域：{% for d in domains %}{{ d }} {% endfor %}{% endif %}
+</p>
 
 {% if log_text %}
   <pre class="term">{{ log_text }}</pre>
 {% else %}
-  <p class="muted">
+  <div class="empty">
     日志还是空的。做一次整理（<code>kb organize</code>）就会写进来。
-  </p>
+  </div>
 {% endif %}
 {% endblock %}

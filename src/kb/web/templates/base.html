@@ -2,21 +2,70 @@
 <html lang="zh-CN">
 <head>
   <meta charset="utf-8">
-  <title>KN_Base</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{% block title %}KN_Base{% endblock %}</title>
   <link rel="stylesheet" href="/static/style.css">
 </head>
 <body>
   <div class="shell">
-    <nav class="sidebar" id="sidebar">
-      <button class="toggle" onclick="document.body.classList.toggle('collapsed')">≡</button>
-      <a href="/"           class="side-btn {{ 'active' if active == 'chat' }}">ai对话</a>
-      <a href="/journal"    class="side-btn {{ 'active' if active == 'journal' }}">整理日志</a>
-      <a href="/flow"       class="side-btn {{ 'active' if active == 'flow' }}">工作日志</a>
-      <a href="/runtime"    class="side-btn {{ 'active' if active == 'runtime' }}">运行日志</a>
+
+    <nav class="sidebar" aria-label="主导航">
+      <div class="brand">
+        <span class="brand-mark" aria-hidden="true">KB</span>
+        <span class="brand-name">KN_Base</span>
+      </div>
+
+      <button class="toggle" type="button"
+              onclick="document.body.classList.toggle('collapsed')"
+              aria-label="折叠/展开侧栏">
+        <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+             stroke-width="1.8" stroke-linecap="round" aria-hidden="true">
+          <path d="M4 6h16M4 12h16M4 18h16"/>
+        </svg>
+        <span class="side-label">收起</span>
+      </button>
+
+      <a href="/" class="side-btn {{ 'active' if active == 'chat' }}">
+        <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+             stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+          <path d="M21 12a8 8 0 0 1-8 8H7l-4 3V12a8 8 0 0 1 8-8h2a8 8 0 0 1 8 8z"/>
+        </svg>
+        <span class="side-label">ai对话</span>
+      </a>
+
+      <a href="/journal" class="side-btn {{ 'active' if active == 'journal' }}">
+        <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+             stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+          <path d="M4 5h16M4 10h16M4 15h10M4 20h7"/>
+        </svg>
+        <span class="side-label">整理日志</span>
+      </a>
+
+      <a href="/flow" class="side-btn {{ 'active' if active == 'flow' }}">
+        <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+             stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+          <path d="M3 7h6l2 3h10M3 17h6l2-3h10"/>
+        </svg>
+        <span class="side-label">工作日志</span>
+      </a>
+
+      <a href="/runtime" class="side-btn {{ 'active' if active == 'runtime' }}">
+        <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+             stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+          <path d="M5 7l5 5-5 5M13 17h6"/>
+        </svg>
+        <span class="side-label">运行日志</span>
+      </a>
+
+      <div class="side-foot">
+        vault<br>{{ vault }}
+      </div>
     </nav>
+
     <main class="main">
       {% block content %}{% endblock %}
     </main>
+
   </div>
 </body>
 </html>

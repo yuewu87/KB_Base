@@ -1,20 +1,22 @@
 {% extends "base.html" %}
+{% block title %}工作日志 · KN_Base{% endblock %}
 {% block content %}
-<h1>工作日志</h1>
+<div class="page-head">
+  <h1>工作日志</h1>
+  <p>每一次流转：谁发了什么命令、分给谁、谁做了什么、怎么返回。</p>
+</div>
 
 <article class="card flow">
   <h3>还没实现</h3>
   <p>
-    这一页要展示的是**流程日志**：每一个流转——谁发了什么命令、分给谁、
-    谁做了什么、怎么返回。
+    这一页要展示的是<strong>流程日志</strong>——请求从进来到返回，中间每一步的记录。
   </p>
   <p>
-    <strong>它的字段清单还没定</strong>（见 <code>docs/03_问题记录.md</code>
-    第十二节的待解决条目）。按项目规矩「没有讨论出结果的问题，不先动手实现」，
-    所以这页先空着。
+    <strong>它的字段清单还没定</strong>（见 <code>docs/03_问题记录.md</code> 的待解决条目）。
+    按项目规矩「没有讨论出结果的问题，不先动手实现」，所以这页先空着。
   </p>
   <p class="muted">
-    已经能看的是隔壁两页：<a href="/journal">整理日志</a>（整理了什么，进 vault）
+    现在能看的是隔壁两页：<a href="/journal">整理日志</a>（整理了什么，进 vault）
     与 <a href="/runtime">运行日志</a>（代码级输出，留在服务侧）。
   </p>
 </article>

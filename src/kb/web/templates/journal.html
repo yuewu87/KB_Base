@@ -1,10 +1,16 @@
 {% extends "base.html" %}
+{% block title %}整理日志 · KN_Base{% endblock %}
 {% block content %}
-<h1>整理日志</h1>
-<p class="muted">按天聚合。每张卡片是一次整理，颜色淡蓝。</p>
+<div class="page-head">
+  <h1>整理日志</h1>
+  <p>按天聚合，一次整理一张卡片。这一份是知识，进 vault，可被检索。</p>
+</div>
 
 {% if not days %}
-  <p class="muted">还没有整理记录。投一条草稿（<code>kb push</code>）然后 <code>kb organize</code> 试试。</p>
+  <div class="empty">
+    还没有整理记录。<br>
+    投一条草稿（<code>kb push</code>），再 <code>kb organize</code>。
+  </div>
 {% endif %}
 
 {% for date, sections in days %}
