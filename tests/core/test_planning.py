@@ -190,6 +190,48 @@ def test_validate_allows_existing_project_dir(vault):
     validate_plan(plan, vault)
 
 
+def test_validate_rejects_project_note_without_type_suffix(vault):
+    """Q13：项目笔记文件名必须是 `<项目名>-<类型>.md`。
+
+    不能是 `<项目名>-<内容标题>.md`——那样名字由模型定，路径就不可推导了。
+    """
+    plan = parse_plan(
+        DRAFT.id,
+        _plan_json(
+            target_path="10_项目/电商后台/电商后台-队列串行化.md",
+            frontmatter={"类型": "概念", "主题": ["后端"], "项目": "电商后台"},
+        ),
+    )
+    with pytest.raises(PlanError, match="文件名必须是"):
+        validate_plan(plan, vault)
+
+
+def test_validate_rejects_project_note_without_project_prefix(vault):
+    """Q13：不带项目前缀的文件名会和别的项目撞名，[[链接]] 产生歧义。"""
+    plan = parse_plan(
+        DRAFT.id,
+        _plan_json(
+            target_path="10_项目/电商后台/踩坑.md",
+            frontmatter={"类型": "踩坑", "主题": ["后端"], "项目": "电商后台"},
+        ),
+    )
+    with pytest.raises(PlanError, match="文件名必须是"):
+        validate_plan(plan, vault)
+
+
+def test_validate_rejects_project_note_type_mismatch(vault):
+    """文件名后缀与 `类型` 字段必须一致，否则 Dataview 按类型查出来的和文件名对不上。"""
+    plan = parse_plan(
+        DRAFT.id,
+        _plan_json(
+            target_path="10_项目/电商后台/电商后台-踩坑.md",
+            frontmatter={"类型": "决策", "主题": ["后端"], "项目": "电商后台"},
+        ),
+    )
+    with pytest.raises(PlanError, match="不一致"):
+        validate_plan(plan, vault)
+
+
 # ---------- 校验：create ----------
 
 def test_validate_create_rejects_existing_target(vault):

@@ -123,7 +123,10 @@ def build_system_prompt() -> str:
 4. content 必须至少包含一个 [[双向链接]]，指向已有笔记或索引页。
 5. create 的目标路径不能已存在；fold 的目标路径必须已存在。
 6. 不要发明新的主题分类。都不合适就用 pending，并在 pending_reason 说明原因。
-7. 项目笔记的文件名必须带项目前缀，如 `项目名-踩坑.md`，避免 [[链接]] 歧义。
+7. 项目笔记的文件名必须是 `<项目名>-<类型>.md`，后缀与 `{K_TYPE}` 一致——
+   项目「电商后台」的踩坑笔记就叫 `电商后台-踩坑.md`。
+   **不要拿内容标题做文件名**（`电商后台-队列串行化.md` 是错的，会被校验拒掉）。
+   同一项目同一类型只有这一个文件；新的同类内容走 fold 追加进去，不要另起名字。
 8. 骨架里的「## 用户的判断」一节**必须留空**（保留标题，标题下什么都不写）。
    这一节记录用户本人的立场，服务端会机械清空——写了也会被丢掉，别浪费。
    绝不要替用户总结、推断或改写成第三人称（「用户认为……」是典型的伪造）。
@@ -254,6 +257,26 @@ def _is_existing_project_dir(vault_root: Path, path: Path) -> bool:
     return len(rel.parts) == 1 and path.is_dir()
 
 
+def _project_note_name_error(target: Path) -> str | None:
+    """Q13：项目笔记文件名必须是 `<项目名>-<类型>.md`。合法返回 None。
+
+    条目名由**类型**决定，不由内容决定——这样路径完全可推导，会话层不必先
+    搜一遍就能说出「改 KN_Base 的踩坑」。
+
+    这条**必须由代码强制**，不能只写在提示词里。首次真实运行就验证过：光靠
+    提示词，模型会取 `<项目名>-<内容标题>.md`。
+    """
+    allowed = [t.value for t in _LLM_ALLOWED_TYPES]
+    project, _, suffix = target.stem.rpartition("-")
+    if project == target.parent.name and suffix in allowed:
+        return None
+    options = "、".join(f"`{target.parent.name}-{t}.md`" for t in allowed)
+    return (
+        "项目笔记的文件名必须是 `<项目名>-<类型>.md`（Q13）："
+        f"应为 {options} 之一，实际是 `{target.stem}.md`"
+    )
+
+
 def known_link_targets(vault_root: Path) -> set[str]:
     """正文里 [[链接]] 可以指向谁。
 
@@ -299,6 +322,11 @@ def validate_plan(plan: OrganizePlan, vault_root: Path) -> None:
             f"{plan.target_path}"
         )
 
+    if target.is_relative_to(vault_root / PROJECTS):
+        name_error = _project_note_name_error(target)
+        if name_error:
+            raise PlanError(name_error)
+
     if plan.outcome is Outcome.CREATE:
         if target.exists():
             raise PlanError(f"create 的目标已存在，不能覆盖：{plan.target_path}")
@@ -310,6 +338,14 @@ def validate_plan(plan: OrganizePlan, vault_root: Path) -> None:
                 f"{K_TYPE} 非法：{note_type!r}。只能取 "
                 f"{'、'.join(t.value for t in _LLM_ALLOWED_TYPES)}"
                 "——日志与索引页由服务生成，不由模型产出"
+            )
+
+        if target.is_relative_to(vault_root / PROJECTS) and target.stem != (
+            f"{target.parent.name}-{note_type}"
+        ):
+            raise PlanError(
+                f"项目笔记的文件名后缀与 {K_TYPE} 不一致："
+                f"文件名是 `{target.stem}.md`，但 {K_TYPE} 是「{note_type}」"
             )
 
         if not _LINK_RE.search(plan.content):
