@@ -1,0 +1,24 @@
+# 行尾符统一 LF。
+#
+# 不声明的话，Windows 上 core.autocrlf=true 会让 git 把 LF 文件误报成「已修改」——
+# 而本项目所有文件本来都是 LF（Python 写、Python 读）。
+# 症状是 git status 撒谎：文件显示被改过，git diff 却是空的。
+#
+# 参考：docs/04_踩坑与经验.md
+* text=auto eol=lf
+
+# Windows 批处理必须 CRLF——cmd.exe 对 LF 行尾的 .bat 解析不可靠（尤其带 label/goto 时）
+*.bat text eol=crlf
+*.cmd text eol=crlf
+
+# 二进制文件不做任何转换
+*.png    binary
+*.jpg    binary
+*.jpeg   binary
+*.gif    binary
+*.ico    binary
+*.pdf    binary
+*.zip    binary
+*.xlsx   binary
+*.sqlite binary
+*.db     binary
