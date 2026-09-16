@@ -16,9 +16,12 @@ import frontmatter
 from kb.core.models import (
     K_ID,
     K_PROJECT,
+    K_REVISE,
     K_SOURCE,
     K_STATUS,
     K_SUBMITTED_AT,
+    K_SUPERSEDED,
+    K_SUPERSEDED_BY,
     K_TOPIC,
     K_TYPE,
     Draft,
@@ -95,6 +98,8 @@ def write_draft(vault_root: Path, draft: Draft) -> Path:
         meta[K_SOURCE] = draft.source
     if draft.project:
         meta[K_PROJECT] = draft.project
+    if draft.revise_target:
+        meta[K_REVISE] = draft.revise_target
 
     post = frontmatter.Post(draft.body, **meta)
     atomic_write(path, frontmatter.dumps(post, allow_unicode=True))
@@ -109,6 +114,7 @@ def read_draft(path: Path) -> Draft:
         source=_optional_str(post.get(K_SOURCE)),
         project=_optional_str(post.get(K_PROJECT)),
         created_at=str(post.get(K_SUBMITTED_AT) or ""),
+        revise_target=_optional_str(post.get(K_REVISE)),
     )
 
 
@@ -189,7 +195,42 @@ def list_domains(vault_root: Path) -> list[str]:
     )
 
 
+def list_classifications(vault_root: Path, domain: str) -> list[str]:
+    """某个领域下已有的分类目录（相对领域根的路径，递归）。"""
+    root = vault_root / domain
+    if not root.is_dir():
+        return []
+    return sorted(
+        p.relative_to(root).as_posix()
+        for p in root.rglob("*")
+        if p.is_dir()
+    )
+
+
+# ---------------------------------------------------------------- 修改与失效（Q59/Q60）
+
+def find_note_by_stem(vault_root: Path, stem: str) -> Path | None:
+    """全库按文件名（不含 .md）搜唯一匹配。找不到或有多个 → None，不猜。"""
+    if not stem:
+        return None
+    matches = [p for p in list_notes(vault_root) if p.stem == stem]
+    return matches[0] if len(matches) == 1 else None
+
+
+def is_superseded(meta: dict) -> bool:
+    return bool(meta.get(K_SUPERSEDED))
+
+
+def mark_superseded(path: Path, by: str) -> None:
+    """把一篇笔记标记失效。正文一个字节不动——「当初为什么那么想」比结论有用。"""
+    meta, body = read_note(path)
+    meta[K_SUPERSEDED] = True
+    meta[K_SUPERSEDED_BY] = by
+    write_note(path, meta, body)
+
+
 # ---------------------------------------------------------------- 项目名（Q30）
+
 
 def project_name_from_cwd(cwd: Path) -> str | None:
     """取 git 仓库根的目录名作为项目名（Q30）。

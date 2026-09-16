@@ -62,7 +62,12 @@ def cmd_push(args) -> int:
     with make_client(cfg) as client:
         resp = client.post(
             "/push",
-            json={"content": content, "project": project, "source": args.source},
+            json={
+                "content": content,
+                "project": project,
+                "source": args.source,
+                "revise_target": args.revise,
+            },
         )
         resp.raise_for_status()
         print(f"已收，id={resp.json()['id']}")
@@ -116,6 +121,24 @@ def cmd_organize(args) -> int:
     return 1 if failed == data["count"] else 0
 
 
+def cmd_search(args) -> int:
+    cfg = load_config()
+    with make_client(cfg) as client:
+        resp = client.get("/search", params={"q": args.query})
+        resp.raise_for_status()
+        data = resp.json()
+
+    if not data["count"]:
+        print("没找到。")
+        return 0
+    print(f"找到 {data['count']} 条：")
+    for item in data["items"]:
+        tags = "、".join(item["tags"]) or "无"
+        print(f"  {item['path']}")
+        print(f"    {item['title']}｜标签：{tags}")
+    return 0
+
+
 def cmd_status(args) -> int:
     cfg = load_config()
     port = runtime.running_port()
@@ -149,6 +172,7 @@ def build_parser() -> argparse.ArgumentParser:
     p_push.add_argument("--file", help="从文件读正文")
     p_push.add_argument("--project", help="项目名（默认取 git 根目录名）")
     p_push.add_argument("--source", help="来源：会话 / 书籍 / 网页 / 论文")
+    p_push.add_argument("--revise", help="修改已有笔记：指定目标文件名（不含 .md）")
     p_push.set_defaults(func=cmd_push)
 
     p_org = sub.add_parser("organize", help="整理草稿（不填 id 则整理全部）")
@@ -157,6 +181,10 @@ def build_parser() -> argparse.ArgumentParser:
 
     p_inbox = sub.add_parser("inbox", help="查看收件箱")
     p_inbox.set_defaults(func=cmd_inbox)
+
+    p_search = sub.add_parser("search", help="检索笔记")
+    p_search.add_argument("query", help="关键词")
+    p_search.set_defaults(func=cmd_search)
 
     p_status = sub.add_parser("status", help="查看服务状态")
     p_status.set_defaults(func=cmd_status)

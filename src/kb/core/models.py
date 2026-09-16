@@ -27,10 +27,13 @@ K_ID = "id"
 K_SUBMITTED_AT = "投递时间"
 K_SOURCE = "来源"
 K_PROJECT = "项目"
+K_REVISE = "修改目标"      # 草稿上记 --revise 指定的目标，整理时读回
 K_TYPE = "类型"
 K_TOPIC = "主题"
 K_CREATED = "创建"
 K_UPDATED = "更新"
+K_SUPERSEDED = "失效"
+K_SUPERSEDED_BY = "被取代于"
 
 
 class NoteType(StrEnum):
@@ -68,6 +71,7 @@ class Draft:
     source: str | None
     project: str | None
     created_at: str
+    revise_target: str | None = None      # --revise 指定的目标文件名（不含 .md）
 
 
 @dataclass
@@ -90,6 +94,7 @@ class OrganizePlan:
     frontmatter: dict[str, object] = field(default_factory=dict)
     content: str = ""
     pending_reason: str | None = None
+    revise_target: str | None = None      # 从草稿带过来（Task 8）
 
 
 class ResultKind(StrEnum):

@@ -14,7 +14,7 @@ import time
 from datetime import datetime
 from pathlib import Path
 
-from kb.core import planning
+from kb.core import planning, review
 from kb.core.classify import find_candidates
 from kb.core.journal import append_results
 from kb.core.models import (
@@ -30,8 +30,10 @@ from kb.core.models import (
 from kb.core.planning import PlanError
 from kb.core.vault import (
     ensure_topic_index,
+    find_note_by_stem,
     list_domains,
     list_drafts,
+    mark_superseded,
     move_to_pending,
     read_draft,
     read_note,
@@ -156,6 +158,15 @@ def apply_plan(
         _write_note_safe(target, meta, body)
         kind = ResultKind.FOLDED
 
+    if plan.revise_target:
+        old = find_note_by_stem(vault_root, plan.revise_target)
+        if old is None:
+            raise PlanError(
+                f"--revise 指定的目标找不到或不唯一：{plan.revise_target}"
+            )
+        txn.touch_modify(old)
+        mark_superseded(old, by=Path(plan.target_path).stem)
+
     txn.touch_delete(draft_path)
     draft_path.unlink(missing_ok=True)
 
@@ -202,7 +213,10 @@ def make_plan(
         try:
             raw = _complete(vault_root, draft, llm, hint)
             plan = planning.parse_plan(draft.id, raw)
+            plan.revise_target = draft.revise_target
             planning.validate_plan(plan, vault_root)
+            plan = review.review_plan(plan, vault_root, llm)
+            planning.validate_plan(plan, vault_root)      # 审核的输出也要过静态校验
             return plan
         except LLMError as exc:
             last_error = exc                       # 网络类：直接重试

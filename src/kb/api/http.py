@@ -21,12 +21,14 @@ from kb.api import runtime
 from kb.config import Config, load_config
 from kb.core import organize
 from kb.core.models import Draft, OrganizeResult
+from kb.core.search import search_notes
 from kb.core.vault import (
     PENDING,
     find_draft,
     list_drafts,
     new_draft_id,
     read_draft,
+    read_note,
     write_draft,
 )
 from kb.llm.base import LLM
@@ -40,6 +42,7 @@ class PushRequest(BaseModel):
     content: str
     project: str | None = None
     source: str | None = None
+    revise_target: str | None = None
 
 
 class OrganizeRequest(BaseModel):
@@ -103,6 +106,7 @@ def create_app(cfg: Config | None = None, llm: LLM | None = None) -> FastAPI:
                 source=req.source,
                 project=req.project,
                 created_at=created_at,
+                revise_target=req.revise_target,
             )
             try:
                 write_draft(cfg.vault_path, draft)
@@ -131,6 +135,19 @@ def create_app(cfg: Config | None = None, llm: LLM | None = None) -> FastAPI:
                     "pending": path.parent.name == PENDING,
                 }
             )
+        return {"count": len(items), "items": items}
+
+    @app.get("/search")
+    def search(q: str = "") -> dict:
+        hits = search_notes(cfg.vault_path, q)
+        items = []
+        for path in hits:
+            meta, _ = read_note(path)
+            items.append({
+                "path": path.relative_to(cfg.vault_path).as_posix(),
+                "title": path.stem,
+                "tags": meta.get("主题") or [],
+            })
         return {"count": len(items), "items": items}
 
     @app.post("/organize")

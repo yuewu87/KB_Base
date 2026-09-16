@@ -23,7 +23,13 @@ from kb.core.models import (
     OrganizePlan,
     Outcome,
 )
-from kb.core.vault import INDEX, clean_title, list_domains, list_notes
+from kb.core.vault import (
+    INDEX,
+    clean_title,
+    list_classifications,
+    list_domains,
+    list_notes,
+)
 
 TEMPLATES_DIR = PROJECT_ROOT / "templates"
 
@@ -167,6 +173,14 @@ def build_messages(
     else:
         cand_lines = "（没有明显相关的已有笔记）"
 
+    if topics:
+        cls_lines = "\n".join(
+            f"- {domain}：{'、'.join(list_classifications(vault_root, domain)) or '（无）'}"
+            for domain in topics
+        )
+    else:
+        cls_lines = "（无）"
+
     user = f"""## 待整理的草稿
 
 id: {draft.id}
@@ -180,9 +194,13 @@ id: {draft.id}
 
 {cand_lines}
 
-## 知识区现有主题
+## 现有领域
 
 {'、'.join(topics) if topics else '（无）'}
+
+## 领域下已有分类
+
+{cls_lines}
 """
     return [
         {"role": "system", "content": build_system_prompt()},

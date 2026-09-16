@@ -13,6 +13,7 @@ from kb.core.vault import (
     draft_path,
     ensure_topic_index,
     find_draft,
+    list_classifications,
     list_domains,
     list_drafts,
     list_notes,
@@ -230,6 +231,27 @@ def test_list_domains_ignores_files(tmp_path):
     (tmp_path / "计算机").mkdir()
     (tmp_path / "note.md").write_text("x", encoding="utf-8")
     assert list_domains(tmp_path) == ["计算机"]
+
+
+# ---------- 领域下的分类（提示词要列给模型看）----------
+
+def test_list_classifications_empty_domain(tmp_path):
+    """空领域与不存在的领域都返回空列表，不抛异常。"""
+    (tmp_path / "艺术").mkdir()
+    assert list_classifications(tmp_path, "艺术") == []
+    assert list_classifications(tmp_path, "根本没有这个领域") == []
+
+
+def test_list_classifications_one_layer(tmp_path):
+    (tmp_path / "计算机" / "git").mkdir(parents=True)
+    (tmp_path / "计算机" / "版本控制").mkdir(parents=True)
+    assert list_classifications(tmp_path, "计算机") == ["git", "版本控制"]
+
+
+def test_list_classifications_two_layers(tmp_path):
+    """是递归的：路径相对领域根，不是只取一层。"""
+    (tmp_path / "计算机" / "git" / "底层").mkdir(parents=True)
+    assert list_classifications(tmp_path, "计算机") == ["git", "git/底层"]
 
 
 # ---------- 标题清洗（Q72）----------
