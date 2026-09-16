@@ -274,6 +274,18 @@ def test_allowed_types_match_prompt_and_validator():
     assert len(_LLM_ALLOWED_TYPES) == len(NoteType) - 2
 
 
+def test_system_prompt_distinguishes_project_from_knowledge():
+    """10_项目/ 与 20_知识/ 靠「换个项目还用得上吗」区分。
+
+    这条只能写在提示词里——「可不可复用」是判断题，代码判不了。但没有它时
+    模型只能靠常识猜；猜错的代价是内容整批落错区，而且错得看不出来。
+    """
+    prompt = build_system_prompt()
+    assert "换个项目还用得上吗" in prompt
+    assert "20_知识/" in prompt
+    assert "10_项目/" in prompt
+
+
 def test_validate_create_rejects_orphan_note(vault):
     """Q21：不允许孤儿笔记——正文必须至少有一个 [[链接]]。"""
     plan = parse_plan(DRAFT.id, _plan_json(content="# 没有链接的笔记\n"))
