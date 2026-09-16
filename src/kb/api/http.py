@@ -74,6 +74,13 @@ def create_app(cfg: Config | None = None, llm: LLM | None = None) -> FastAPI:
 
     app = FastAPI(title="KN_Base 知识库服务")
 
+    from fastapi.staticfiles import StaticFiles
+
+    from kb.web.router import STATIC_DIR, build_router
+
+    app.include_router(build_router(cfg))
+    app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
+
     @app.get("/health")
     def health() -> dict:
         return {"status": "ok"}

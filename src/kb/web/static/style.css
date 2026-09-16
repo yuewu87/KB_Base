@@ -1,0 +1,23 @@
+:root {
+  --blue: #2f6fb3;
+  --blue-soft: #eaf2fb;    /* 整理日志卡片 */
+  --pink-soft: #fdeef2;    /* 工作日志卡片 */
+  --ink: #1f2328;
+  --line: #dde3ea;
+}
+* { box-sizing: border-box; }
+body { margin: 0; font-family: -apple-system, "Segoe UI", "Microsoft YaHei", sans-serif; color: var(--ink); background: #fff; }
+.shell { display: flex; min-height: 100vh; }
+.sidebar { width: 200px; border-right: 1px solid var(--line); padding: 12px; display: flex; flex-direction: column; gap: 6px; transition: width .15s; }
+body.collapsed .sidebar { width: 48px; }
+.side-btn { padding: 8px 10px; border-radius: 6px; text-decoration: none; color: var(--ink); white-space: nowrap; overflow: hidden; }
+.side-btn.active { background: var(--blue); color: #fff; }
+.main { flex: 1; padding: 20px; min-width: 0; }
+.muted { color: #6b7280; }
+.chat-layout { display: flex; gap: 16px; height: 70vh; }
+.chat-main { flex: 1; }
+.chat-history { width: 260px; border-left: 1px solid var(--line); padding-left: 12px; }
+.card { border-radius: 8px; padding: 12px 14px; margin-bottom: 10px; }
+.card.journal { background: var(--blue-soft); }
+.card.flow { background: var(--pink-soft); }
+.term { background: #1f2328; color: #d7dde5; padding: 14px; border-radius: 8px; font-family: Consolas, monospace; white-space: pre-wrap; }

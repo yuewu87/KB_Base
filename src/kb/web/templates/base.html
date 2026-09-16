@@ -1,0 +1,22 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <title>KN_Base</title>
+  <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+  <div class="shell">
+    <nav class="sidebar" id="sidebar">
+      <button class="toggle" onclick="document.body.classList.toggle('collapsed')">≡</button>
+      <a href="/"           class="side-btn {{ 'active' if active == 'chat' }}">ai对话</a>
+      <a href="/journal"    class="side-btn {{ 'active' if active == 'journal' }}">整理日志</a>
+      <a href="/flow"       class="side-btn {{ 'active' if active == 'flow' }}">工作日志</a>
+      <a href="/runtime"    class="side-btn {{ 'active' if active == 'runtime' }}">运行日志</a>
+    </nav>
+    <main class="main">
+      {% block content %}{% endblock %}
+    </main>
+  </div>
+</body>
+</html>
