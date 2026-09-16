@@ -30,7 +30,7 @@ DRAFT = Draft(
 def vault(tmp_path: Path) -> Path:
     """一个最小可用的 vault：有一个主题、一个索引页、一个项目。"""
     (tmp_path / KNOWLEDGE / "后端").mkdir(parents=True)
-    (tmp_path / "10_项目" / "工作" / "电商后台").mkdir(parents=True)
+    (tmp_path / "10_项目" / "电商后台").mkdir(parents=True)
     ensure_topic_index(tmp_path, "后端")
     write_note(
         tmp_path / KNOWLEDGE / "后端" / "队列串行化.md",
@@ -171,7 +171,7 @@ def test_validate_rejects_nonexistent_project_dir(vault):
     plan = parse_plan(
         DRAFT.id,
         _plan_json(
-            target_path="10_项目/工作/不存在的项目/不存在的项目-踩坑.md",
+            target_path="10_项目/不存在的项目/不存在的项目-踩坑.md",
             frontmatter={"类型": "踩坑", "主题": ["后端"], "项目": "不存在的项目"},
         ),
     )
@@ -183,7 +183,7 @@ def test_validate_allows_existing_project_dir(vault):
     plan = parse_plan(
         DRAFT.id,
         _plan_json(
-            target_path="10_项目/工作/电商后台/电商后台-踩坑.md",
+            target_path="10_项目/电商后台/电商后台-踩坑.md",
             frontmatter={"类型": "踩坑", "主题": ["后端"], "项目": "电商后台"},
         ),
     )
@@ -303,9 +303,7 @@ def test_build_messages_includes_draft_body(vault):
 
 
 def test_build_messages_lists_topics_and_projects(vault):
-    msgs = build_messages(
-        DRAFT, [], [("工作", vault / "10_项目" / "工作" / "电商后台")], ["后端"], vault
-    )
+    msgs = build_messages(DRAFT, [], [vault / "10_项目" / "电商后台"], ["后端"], vault)
     assert "后端" in msgs[1]["content"]
     assert "电商后台" in msgs[1]["content"]
 

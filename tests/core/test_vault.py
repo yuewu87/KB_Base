@@ -192,39 +192,43 @@ def test_normalize_project(raw, expected):
 
 
 def test_find_project_dir_unique_match(tmp_path):
-    target = tmp_path / "10_项目" / "工作" / "电商后台"
+    target = tmp_path / "10_项目" / "电商后台"
     target.mkdir(parents=True)
     assert find_project_dir(tmp_path, "电商后台") == target
 
 
 def test_find_project_dir_matches_across_separator_styles(tmp_path):
-    target = tmp_path / "10_项目" / "个人" / "KN_Base"
+    target = tmp_path / "10_项目" / "KN_Base"
     target.mkdir(parents=True)
     assert find_project_dir(tmp_path, "kn-base") == target
 
 
 def test_find_project_dir_returns_none_when_absent(tmp_path):
-    (tmp_path / "10_项目" / "个人").mkdir(parents=True)
+    (tmp_path / "10_项目").mkdir(parents=True)
     assert find_project_dir(tmp_path, "不存在") is None
 
 
 def test_find_project_dir_returns_none_for_empty_name(tmp_path):
-    (tmp_path / "10_项目" / "个人").mkdir(parents=True)
+    (tmp_path / "10_项目").mkdir(parents=True)
     assert find_project_dir(tmp_path, "") is None
 
 
 def test_find_project_dir_returns_none_on_ambiguity(tmp_path):
-    """同名项目出现在两个分组下 → 不猜，返回 None，走待归类。"""
-    (tmp_path / "10_项目" / "个人" / "P").mkdir(parents=True)
-    (tmp_path / "10_项目" / "工作" / "P").mkdir(parents=True)
-    assert find_project_dir(tmp_path, "P") is None
+    """规范化后同名 → 不猜，返回 None，走待归类。
+
+    用 `KN_Base` 与 `kn-base` 两个真实不同的目录（Windows 大小写不敏感，
+    `KN_Base`/`kn_base` 会是同一个目录），它们的 `normalize_project` 都得到
+    `kn-base`。
+    """
+    (tmp_path / "10_项目" / "KN_Base").mkdir(parents=True)
+    (tmp_path / "10_项目" / "kn-base").mkdir(parents=True)
+    assert find_project_dir(tmp_path, "kn-base") is None
 
 
-def test_list_projects_returns_group_and_path(tmp_path):
-    (tmp_path / "10_项目" / "个人" / "A").mkdir(parents=True)
-    (tmp_path / "10_项目" / "工作" / "B").mkdir(parents=True)
-    got = list_projects(tmp_path)
-    assert [(g, p.name) for g, p in got] == [("个人", "A"), ("工作", "B")]
+def test_list_projects_returns_paths(tmp_path):
+    (tmp_path / "10_项目" / "A").mkdir(parents=True)
+    (tmp_path / "10_项目" / "B").mkdir(parents=True)
+    assert [p.name for p in list_projects(tmp_path)] == ["A", "B"]
 
 
 def test_list_projects_empty_when_absent(tmp_path):

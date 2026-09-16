@@ -10,7 +10,7 @@ from kb.core.vault import (
     PENDING,
     PROJECTS,
 )
-from scripts.init_vault import KNOWLEDGE_TOPICS, PROJECT_GROUPS, init_vault, vault_dirs
+from scripts.init_vault import KNOWLEDGE_TOPICS, init_vault, vault_dirs
 
 
 def test_creates_all_skeleton_dirs(tmp_path):
@@ -28,12 +28,10 @@ def test_creates_all_skeleton_dirs(tmp_path):
         assert (tmp_path / rel).is_dir(), f"缺少目录 {rel}"
 
 
-def test_creates_topic_and_group_dirs(tmp_path):
+def test_creates_topic_dirs(tmp_path):
     init_vault(tmp_path)
     for topic in KNOWLEDGE_TOPICS:
         assert (tmp_path / KNOWLEDGE / topic).is_dir()
-    for group in PROJECT_GROUPS:
-        assert (tmp_path / PROJECTS / group).is_dir()
 
 
 def test_writes_gitignore_ignoring_workspace(tmp_path):

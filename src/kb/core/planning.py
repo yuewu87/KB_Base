@@ -117,7 +117,7 @@ def build_system_prompt() -> str:
 }}
 
 硬规则：
-1. target_path 必须落在 `10_项目/<分组>/<项目名>/` 或 `20_知识/<既有主题>/` 下。
+1. target_path 必须落在 `10_项目/<项目名>/` 或 `20_知识/<既有主题>/` 下。
 2. {K_TYPE} 只能取：{allowed}。
 3. {K_TOPIC} 只能取「知识区现有主题」里列出的名字。
 4. content 必须至少包含一个 [[双向链接]]，指向已有笔记或索引页。
@@ -145,7 +145,7 @@ def _rel(path: Path, vault_root: Path) -> str:
 def build_messages(
     draft: Draft,
     candidates: list[Candidate],
-    projects: list[tuple[str, Path]],
+    projects: list[Path],
     topics: list[str],
     vault_root: Path,
 ) -> list[dict]:
@@ -159,7 +159,7 @@ def build_messages(
         cand_lines = "（没有明显相关的已有笔记）"
 
     proj_lines = (
-        "\n".join(f"- {p.name}（分组：{g}）" for g, p in projects)
+        "\n".join(f"- {p.name}" for p in projects)
         if projects
         else "（知识库里还没有任何项目文件夹）"
     )
@@ -243,15 +243,15 @@ def allowed_prefixes(vault_root: Path) -> list[Path]:
 
 
 def _is_existing_project_dir(vault_root: Path, path: Path) -> bool:
-    """`path` 是否为 `10_项目/<分组>/<项目名>` 这样的**既有**项目目录。
+    """`path` 是否为 `10_项目/<项目名>` 这样的**既有**项目目录。
 
-    中间那一层（`<项目名>`）必须真的存在——服务从不自动新建项目文件夹（Q30）。
+    项目目录必须真的存在——服务从不自动新建项目文件夹（Q30）。
     """
     try:
         rel = path.relative_to(vault_root / PROJECTS)
     except ValueError:
         return False
-    return len(rel.parts) == 2 and path.is_dir()
+    return len(rel.parts) == 1 and path.is_dir()
 
 
 def known_link_targets(vault_root: Path) -> set[str]:
@@ -295,7 +295,7 @@ def validate_plan(plan: OrganizePlan, vault_root: Path) -> None:
     ):
         raise PlanError(
             "项目目录不存在，服务不会自动新建（Q30）。"
-            "请先手工建好 `10_项目/<分组>/<项目名>/`，或改走 20_知识/ 或 pending："
+            "请先手工建好 `10_项目/<项目名>/`，或改走 20_知识/ 或 pending："
             f"{plan.target_path}"
         )
 

@@ -184,7 +184,7 @@ def normalize_project(name: str) -> str:
 
 
 def find_project_dir(vault_root: Path, name: str) -> Path | None:
-    """在 `10_项目/<分组>/<项目名>` 下搜唯一匹配。
+    """在 `10_项目/<项目名>` 下搜唯一匹配。
 
     找不到或有多个同名 → 返回 None（不猜，走待归类）。
     """
@@ -195,29 +195,19 @@ def find_project_dir(vault_root: Path, name: str) -> Path | None:
         return None
 
     target = normalize_project(name)
-    matches: list[Path] = []
-    for group in sorted(root.iterdir()):
-        if not group.is_dir():
-            continue
-        for project in sorted(group.iterdir()):
-            if project.is_dir() and normalize_project(project.name) == target:
-                matches.append(project)
+    matches = [
+        p for p in sorted(root.iterdir())
+        if p.is_dir() and normalize_project(p.name) == target
+    ]
     return matches[0] if len(matches) == 1 else None
 
 
-def list_projects(vault_root: Path) -> list[tuple[str, Path]]:
-    """列出 `10_项目/<分组>/<项目名>` 下的所有项目，返回 (分组名, 项目路径)。"""
+def list_projects(vault_root: Path) -> list[Path]:
+    """列出 `10_项目/<项目名>` 下的所有项目。"""
     root = vault_root / PROJECTS
     if not root.exists():
         return []
-    found: list[tuple[str, Path]] = []
-    for group in sorted(root.iterdir()):
-        if not group.is_dir():
-            continue
-        for project in sorted(group.iterdir()):
-            if project.is_dir():
-                found.append((group.name, project))
-    return found
+    return [p for p in sorted(root.iterdir()) if p.is_dir()]
 
 
 def project_name_from_cwd(cwd: Path) -> str | None:
