@@ -8,7 +8,7 @@ from fastapi.testclient import TestClient
 import kb.api.http as http_mod
 from kb.api.http import create_app
 from kb.config import Config
-from kb.core.vault import KNOWLEDGE, list_drafts, read_draft
+from kb.core.vault import INBOX, list_drafts, read_draft
 from kb.llm.base import FakeLLM
 
 
@@ -26,9 +26,9 @@ def _git(vault: Path, *args: str) -> subprocess.CompletedProcess:
 def _plan_json(**overrides) -> str:
     data = {
         "outcome": "create",
-        "target_path": f"{KNOWLEDGE}/后端/并发写锁.md",
-        "frontmatter": {"类型": "概念", "主题": ["后端"]},
-        "content": "# 并发写锁\n\n见 [[后端]]\n",
+        "target_path": "计算机/并发写锁.md",
+        "frontmatter": {"类型": "概念", "主题": ["计算机"]},
+        "content": "# 并发写锁\n\n见 [[计算机]]\n",
         "pending_reason": None,
     }
     data.update(overrides)
@@ -38,7 +38,7 @@ def _plan_json(**overrides) -> str:
 @pytest.fixture
 def client(tmp_path: Path) -> TestClient:
     """带 git 的 vault + 一个返回固定计划的假模型。"""
-    (tmp_path / KNOWLEDGE / "后端").mkdir(parents=True)
+    (tmp_path / "计算机").mkdir(parents=True)
     _git(tmp_path, "init", "-b", "main")
     _git(
         tmp_path,
@@ -73,8 +73,8 @@ def test_push_creates_draft(client, tmp_path):
 def test_push_returns_immediately_without_organizing(client, tmp_path):
     """异步（Q55）：投递只落草稿，不做任何整理。"""
     client.post("/push", json={"content": "内容"})
-    assert not (tmp_path / KNOWLEDGE / "后端" / "并发写锁.md").exists()
-    assert (tmp_path / "00_收件箱").exists()
+    assert not (tmp_path / "计算机" / "并发写锁.md").exists()
+    assert (tmp_path / INBOX).exists()
 
 
 def test_push_rejects_empty_content(client):
@@ -125,7 +125,7 @@ def test_organize_all(client, tmp_path):
     assert resp.status_code == 200
     body = resp.json()
     assert body["results"][0]["kind"] == "created"
-    assert (tmp_path / KNOWLEDGE / "后端" / "并发写锁.md").exists()
+    assert (tmp_path / "计算机" / "并发写锁.md").exists()
     assert list_drafts(tmp_path) == []
 
 
@@ -159,7 +159,7 @@ def test_organize_unknown_id_returns_404(client):
 
 
 def test_organize_reports_failures(tmp_path):
-    (tmp_path / KNOWLEDGE / "后端").mkdir(parents=True)
+    (tmp_path / "计算机").mkdir(parents=True)
     cfg = Config("k", "u", "m", tmp_path, None)
     bad = TestClient(create_app(cfg, llm=FakeLLM("坏输出")))
     bad.post("/push", json={"content": "内容"})

@@ -5,12 +5,10 @@ from kb.core.vault import (
     INBOX,
     INDEX,
     JOURNAL_DIR,
-    KNOWLEDGE,
-    MATERIALS,
     PENDING,
-    PROJECTS,
+    SEED_DOMAINS,
 )
-from scripts.init_vault import KNOWLEDGE_TOPICS, init_vault, vault_dirs
+from scripts.init_vault import init_vault, vault_dirs
 
 
 def test_creates_all_skeleton_dirs(tmp_path):
@@ -18,20 +16,12 @@ def test_creates_all_skeleton_dirs(tmp_path):
     for rel in (
         INBOX,
         f"{INBOX}/{PENDING}",
-        PROJECTS,
-        KNOWLEDGE,
-        MATERIALS,
         INDEX,
         f"{INDEX}/{JOURNAL_DIR}",
         ATTACHMENTS,
+        *SEED_DOMAINS,
     ):
         assert (tmp_path / rel).is_dir(), f"缺少目录 {rel}"
-
-
-def test_creates_topic_dirs(tmp_path):
-    init_vault(tmp_path)
-    for topic in KNOWLEDGE_TOPICS:
-        assert (tmp_path / KNOWLEDGE / topic).is_dir()
 
 
 def test_writes_gitignore_ignoring_workspace(tmp_path):
@@ -77,7 +67,7 @@ def test_is_idempotent(tmp_path):
 def test_second_run_keeps_existing_notes(tmp_path):
     """幂等：不能删掉用户已经写进去的内容。"""
     init_vault(tmp_path)
-    note = tmp_path / KNOWLEDGE / "后端" / "已有笔记.md"
+    note = tmp_path / "计算机" / "已有笔记.md"
     note.write_text("内容", encoding="utf-8")
     init_vault(tmp_path)
     assert note.read_text(encoding="utf-8") == "内容"

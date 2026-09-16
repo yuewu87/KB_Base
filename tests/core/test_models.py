@@ -78,8 +78,8 @@ def test_plan_create_carries_path_and_frontmatter():
     p = OrganizePlan(
         draft_id="20260915-a3f2",
         outcome=Outcome.CREATE,
-        target_path="20_知识/后端/并发写锁.md",
-        frontmatter={K_TYPE: NoteType.CONCEPT.value, K_TOPIC: ["后端"]},
+        target_path="计算机/并发写锁.md",
+        frontmatter={K_TYPE: NoteType.CONCEPT.value, K_TOPIC: ["计算机"]},
         content="# 并发写锁\n",
     )
     assert p.outcome is Outcome.CREATE

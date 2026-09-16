@@ -8,7 +8,8 @@ import pytest
 from kb.core import organize
 from kb.core.models import Draft, OrganizeResult, ResultKind
 from kb.core.vault import (
-    KNOWLEDGE,
+    ATTACHMENTS,
+    INDEX,
     PENDING,
     list_drafts,
     read_note,
@@ -32,9 +33,9 @@ DRAFT = Draft(
 def _plan_json(**overrides) -> str:
     data = {
         "outcome": "create",
-        "target_path": f"{KNOWLEDGE}/后端/并发写锁.md",
-        "frontmatter": {"类型": "概念", "主题": ["后端"]},
-        "content": "# 并发写锁\n\n见 [[后端]]\n",
+        "target_path": "计算机/并发写锁.md",
+        "frontmatter": {"类型": "概念", "主题": ["计算机"]},
+        "content": "# 并发写锁\n\n见 [[计算机]]\n",
         "pending_reason": None,
     }
     data.update(overrides)
@@ -62,8 +63,7 @@ def _git(vault: Path, *args: str) -> subprocess.CompletedProcess:
 
 @pytest.fixture
 def vault(tmp_path: Path) -> Path:
-    (tmp_path / KNOWLEDGE / "后端").mkdir(parents=True)
-    (tmp_path / "10_项目" / "工作" / "电商后台").mkdir(parents=True)
+    (tmp_path / "计算机").mkdir(parents=True)
     _git(tmp_path, "init", "-b", "main")
     _git(
         tmp_path,
@@ -84,13 +84,13 @@ def test_create_writes_note_and_removes_draft(vault):
     result, _ = _run(vault, FakeLLM(_plan_json()))
 
     assert result.kind is ResultKind.CREATED
-    note = vault / KNOWLEDGE / "后端" / "并发写锁.md"
+    note = vault / "计算机" /"并发写锁.md"
     assert note.exists()
 
     meta, body = read_note(note)
     assert meta["类型"] == "概念"
-    assert meta["主题"] == ["后端"]
-    assert "见 [[后端]]" in body
+    assert meta["主题"] == ["计算机"]
+    assert "见 [[计算机]]" in body
 
     assert list_drafts(vault) == []      # 草稿已消费
 
@@ -98,13 +98,13 @@ def test_create_writes_note_and_removes_draft(vault):
 def test_create_ensures_topic_index_page(vault):
     """空库第一天：索引页由服务自动建，第一条笔记才有东西可链（Q21）。"""
     _run(vault, FakeLLM(_plan_json()))
-    idx = vault / "40_索引" / "后端.md"
+    idx = vault / INDEX / "计算机.md"
     assert idx.exists()
     assert "索引" in idx.read_text(encoding="utf-8")
 
 
 def test_create_does_not_touch_existing_index_page(vault):
-    idx = vault / "40_索引" / "后端.md"
+    idx = vault / INDEX / "计算机.md"
     idx.parent.mkdir(parents=True, exist_ok=True)
     idx.write_text("用户自己写的", encoding="utf-8")
     _run(vault, FakeLLM(_plan_json()))
@@ -113,7 +113,7 @@ def test_create_does_not_touch_existing_index_page(vault):
 
 def test_create_sets_timestamps(vault):
     _run(vault, FakeLLM(_plan_json()))
-    meta, _ = read_note(vault / KNOWLEDGE / "后端" / "并发写锁.md")
+    meta, _ = read_note(vault / "计算机" /"并发写锁.md")
     assert meta["创建"] == "2026-09-15"
     assert meta["更新"] == "2026-09-15"
 
@@ -127,24 +127,24 @@ def test_create_empties_fabricated_user_judgment(vault):
     _run(vault, FakeLLM(_plan_json(content=(
         "# 并发写锁\n\n## 现象\n\n会锁表\n\n"
         "## 用户的判断\n\n用户认为应该用队列解决，并补充说队列满时要限流。\n\n"
-        "## 相关\n\n- [[后端]]\n"
+        "## 相关\n\n- [[计算机]]\n"
     ))))
 
-    _, body = read_note(vault / KNOWLEDGE / "后端" / "并发写锁.md")
+    _, body = read_note(vault / "计算机" /"并发写锁.md")
     assert "用户认为应该用队列解决" not in body
     assert "## 用户的判断" in body      # 标题留着，给用户自己填
     assert "## 现象" in body            # 其余内容不受影响
-    assert "- [[后端]]" in body
+    assert "- [[计算机]]" in body
 
 
 def test_fold_also_empties_fabricated_user_judgment(vault):
-    target = vault / KNOWLEDGE / "后端" / "队列串行化.md"
+    target = vault / "计算机" /"队列串行化.md"
     write_note(target, {"类型": "概念"}, "# 队列串行化\n\n原有内容\n")
 
     _run(vault, FakeLLM(_plan_json(
         outcome="fold",
-        target_path=f"{KNOWLEDGE}/后端/队列串行化.md",
-        content="## 用户的判断\n\n他更喜欢这个做法。\n\n## 相关\n\n- [[后端]]\n",
+        target_path="计算机/队列串行化.md",
+        content="## 用户的判断\n\n他更喜欢这个做法。\n\n## 相关\n\n- [[计算机]]\n",
     )))
 
     _, body = read_note(target)
@@ -158,14 +158,14 @@ def test_create_result_detail_links_to_note(vault):
 
 
 def test_fold_appends_to_existing_note(vault):
-    target = vault / KNOWLEDGE / "后端" / "队列串行化.md"
-    write_note(target, {"类型": "概念", "主题": ["后端"]}, "# 队列串行化\n\n原有内容\n")
+    target = vault / "计算机" /"队列串行化.md"
+    write_note(target, {"类型": "概念", "主题": ["计算机"]}, "# 队列串行化\n\n原有内容\n")
 
     result, _ = _run(
         vault,
         FakeLLM(_plan_json(
             outcome="fold",
-            target_path=f"{KNOWLEDGE}/后端/队列串行化.md",
+            target_path="计算机/队列串行化.md",
             content="补充：队列满时要限流\n",
         )),
     )
@@ -178,12 +178,12 @@ def test_fold_appends_to_existing_note(vault):
 
 
 def test_fold_bumps_update_date(vault):
-    target = vault / KNOWLEDGE / "后端" / "队列串行化.md"
+    target = vault / "计算机" /"队列串行化.md"
     write_note(target, {"类型": "概念", "更新": "2020-01-01"}, "# 队列串行化\n")
 
     _run(vault, FakeLLM(_plan_json(
         outcome="fold",
-        target_path=f"{KNOWLEDGE}/后端/队列串行化.md",
+        target_path="计算机/队列串行化.md",
         content="补充内容\n",
     )))
 
@@ -200,7 +200,7 @@ def test_pending_moves_draft_aside(vault):
     assert result.kind is ResultKind.PENDING
     assert "无法判断主题" in result.detail
     assert list_drafts(vault)[0].parent.name == PENDING
-    assert not (vault / KNOWLEDGE / "后端" / "并发写锁.md").exists()
+    assert not (vault / "计算机" /"并发写锁.md").exists()
 
 
 # ---------- 失败路径（Q45：失败什么也不写）----------
@@ -216,21 +216,21 @@ def test_llm_error_leaves_everything_untouched(vault):
     assert "网络炸了" in result.error
     assert touched == []
     assert len(list_drafts(vault)) == 1          # 草稿原样留着，下次还能重试
-    assert not (vault / KNOWLEDGE / "后端" / "并发写锁.md").exists()
+    assert not (vault / "计算机" /"并发写锁.md").exists()
 
 
 def test_invalid_plan_leaves_everything_untouched(vault):
-    result, touched = _run(vault, FakeLLM(_plan_json(target_path="90_附件/x.md")))
+    result, touched = _run(vault, FakeLLM(_plan_json(target_path="_附件/x.md")))
 
     assert result.kind is ResultKind.FAILED
     assert touched == []
-    assert not (vault / "90_附件" / "x.md").exists()
+    assert not (vault / ATTACHMENTS / "x.md").exists()
 
 
 def test_orphan_plan_is_rejected_and_nothing_written(vault):
     result, _ = _run(vault, FakeLLM(_plan_json(content="# 没有链接\n")))
     assert result.kind is ResultKind.FAILED
-    assert not (vault / KNOWLEDGE / "后端" / "并发写锁.md").exists()
+    assert not (vault / "计算机" /"并发写锁.md").exists()
 
 
 def test_bad_json_then_valid_json_succeeds(vault):
@@ -281,7 +281,7 @@ def test_failure_reason_prevents_silent_loss(vault):
 
 def test_rollback_restores_vault_on_write_failure(vault, monkeypatch):
     """落盘中途失败 → 精确回滚，且不动用户未提交的改动。"""
-    untouched = vault / KNOWLEDGE / "后端" / "用户手写的.md"
+    untouched = vault / "计算机" /"用户手写的.md"
     write_note(untouched, {"类型": "概念"}, "# 用户手写的\n")
 
     def _boom(*a, **kw):
@@ -293,13 +293,13 @@ def test_rollback_restores_vault_on_write_failure(vault, monkeypatch):
 
     assert result.kind is ResultKind.FAILED
     assert "磁盘满了" in result.error
-    assert not (vault / KNOWLEDGE / "后端" / "并发写锁.md").exists()
+    assert not (vault / "计算机" /"并发写锁.md").exists()
     assert untouched.read_text(encoding="utf-8").startswith("---")
 
 
 def test_rollback_does_not_revert_user_changes(vault, monkeypatch):
     """Q45：禁用 `git checkout .`——那会连用户未提交的改动一起还原。"""
-    user_file = vault / KNOWLEDGE / "后端" / "用户手写的.md"
+    user_file = vault / "计算机" /"用户手写的.md"
     write_note(user_file, {"类型": "概念"}, "# 原始\n")
     user_file.write_text("用户刚改的内容", encoding="utf-8")   # 未提交
 
@@ -314,7 +314,7 @@ def test_rollback_does_not_revert_user_changes(vault, monkeypatch):
 
 def test_rollback_restores_fold_target(vault, monkeypatch):
     """fold 中途失败时，被改写的目标笔记要还原成原样。"""
-    target = vault / KNOWLEDGE / "后端" / "队列串行化.md"
+    target = vault / "计算机" /"队列串行化.md"
     write_note(target, {"类型": "概念"}, "# 队列串行化\n\n原有内容\n")
     before = target.read_bytes()
 
@@ -331,7 +331,7 @@ def test_rollback_restores_fold_target(vault, monkeypatch):
 
     result, _ = _run(vault, FakeLLM(_plan_json(
         outcome="fold",
-        target_path=f"{KNOWLEDGE}/后端/队列串行化.md",
+        target_path="计算机/队列串行化.md",
         content="补充内容\n",
     )))
 
@@ -420,7 +420,7 @@ def test_commit_message_survives_chinese(vault):
 
 def test_commit_only_stages_touched_files(vault):
     """Q46：禁用 `git add -A`，否则会把用户未提交的编辑裹进来。"""
-    user_file = vault / KNOWLEDGE / "后端" / "用户手写的.md"
+    user_file = vault / "计算机" /"用户手写的.md"
     write_note(user_file, {"类型": "概念"}, "# 用户手写的\n")
 
     path = write_draft(vault, DRAFT)
@@ -442,7 +442,7 @@ def test_full_run_writes_journal_and_commits(vault):
     write_draft(vault, DRAFT)
     organize.organize_all(vault, FakeLLM(_plan_json()), when=WHEN, sleep=NO_SLEEP)
 
-    journal = vault / "40_索引" / "整理日志" / "2026-09-15.md"
+    journal = vault / INDEX / "整理日志" / "2026-09-15.md"
     assert journal.exists()
     assert "新建" in journal.read_text(encoding="utf-8")
 

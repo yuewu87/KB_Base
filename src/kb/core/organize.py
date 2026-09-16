@@ -15,7 +15,7 @@ from datetime import datetime
 from pathlib import Path
 
 from kb.core import planning
-from kb.core.classify import find_candidates, knowledge_topics
+from kb.core.classify import find_candidates
 from kb.core.journal import append_results
 from kb.core.models import (
     K_CREATED,
@@ -30,6 +30,7 @@ from kb.core.models import (
 from kb.core.planning import PlanError
 from kb.core.vault import (
     ensure_topic_index,
+    list_domains,
     list_drafts,
     move_to_pending,
     read_draft,
@@ -105,7 +106,7 @@ def _ensure_indexes(vault_root: Path, plan: OrganizePlan, txn: Transaction) -> N
     if isinstance(topics, str):
         topics = [topics]
 
-    known = set(knowledge_topics(vault_root))
+    known = set(list_domains(vault_root))
     for topic in topics:
         if topic not in known:
             continue
@@ -171,7 +172,7 @@ def _complete(vault_root: Path, draft: Draft, llm: LLM, hint: str | None) -> str
     messages = planning.build_messages(
         draft,
         find_candidates(vault_root, draft.body),
-        knowledge_topics(vault_root),
+        list_domains(vault_root),
         vault_root,
     )
     user = messages[1]["content"]

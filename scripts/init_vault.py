@@ -23,13 +23,9 @@ from kb.core.vault import (  # noqa: E402 —— 必须在 sys.path 自举之后
     INBOX,
     INDEX,
     JOURNAL_DIR,
-    KNOWLEDGE,
-    MATERIALS,
     PENDING,
-    PROJECTS,
+    SEED_DOMAINS,
 )
-
-KNOWLEDGE_TOPICS = ["后端", "前端", "工具链", "方法论"]
 
 VAULT_GITIGNORE = """\
 # Obsidian 工作区状态——每次开关都变，入库会淹没历史（Q53）
@@ -48,14 +44,11 @@ def vault_dirs(vault_root: Path) -> list[Path]:
     dirs = [
         vault_root / INBOX,
         vault_root / INBOX / PENDING,
-        vault_root / PROJECTS,
-        vault_root / KNOWLEDGE,
-        vault_root / MATERIALS,
         vault_root / INDEX,
         vault_root / INDEX / JOURNAL_DIR,
         vault_root / ATTACHMENTS,
     ]
-    dirs += [vault_root / KNOWLEDGE / t for t in KNOWLEDGE_TOPICS]
+    dirs += [vault_root / d for d in SEED_DOMAINS]
     return dirs
 
 

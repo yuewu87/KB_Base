@@ -13,7 +13,7 @@ import re
 from pathlib import Path
 
 from kb.config import PROJECT_ROOT
-from kb.core.classify import Candidate, knowledge_topics
+from kb.core.classify import Candidate
 from kb.core.models import (
     K_PROJECT,
     K_TOPIC,
@@ -23,7 +23,7 @@ from kb.core.models import (
     OrganizePlan,
     Outcome,
 )
-from kb.core.vault import INDEX, KNOWLEDGE, PROJECTS, list_notes
+from kb.core.vault import INDEX, clean_title, list_domains, list_notes
 
 TEMPLATES_DIR = PROJECT_ROOT / "templates"
 
@@ -95,13 +95,13 @@ def _skeleton_block() -> str:
 
 
 def build_system_prompt() -> str:
-    """构造系统提示词。
+    """系统提示词。规则见 `docs/01_架构.md` 第五、六、七节。
 
     模板内容在每次调用时现读，所以用户改了 `templates/*.md` 之后新会话即生效。
     """
     allowed = "、".join(t.value for t in _LLM_ALLOWED_TYPES)
     return f"""你是知识库整理助手。你会收到一条待整理的草稿、可能相关的已有笔记、
-现有项目清单和知识区主题清单。
+现有领域清单，以及领域下已有的分类。
 
 你的任务：把草稿整理成一篇正式笔记（create）、合并进已有笔记（fold），
 或判断为无法归类（pending）。
@@ -111,27 +111,29 @@ def build_system_prompt() -> str:
 {{
   "outcome": "create" | "fold" | "pending",
   "target_path": "相对 vault 根的路径",
-  "frontmatter": {{"{K_TYPE}": "概念", "{K_TOPIC}": ["后端"], "{K_PROJECT}": "项目名"}},
+  "frontmatter": {{"{K_TYPE}": "概念", "{K_TOPIC}": ["计算机", "git"], "{K_PROJECT}": "项目名"}},
+  "target_tags": ["计算机", "git", "版本控制"],
   "content": "笔记正文（markdown）",
   "pending_reason": "仅 outcome=pending 时填"
 }}
 
 硬规则：
-1. target_path 必须落在 `10_项目/<项目名>/` 或 `20_知识/<既有主题>/` 下。
-   这两个目录靠一个问题区分：**换个项目还用得上吗？**
-   - **用得上**——跨项目的知识、方法、工具坑、平台坑 → `20_知识/<既有主题>/`
-   - **用不上**——只对这个项目成立的架构、决策、取舍 → `10_项目/<项目名>/`
-   草稿带了项目名**不等于**必须进 `10_项目/`。一个项目的会话里产出的东西，
-   多数是可复用知识，该进 `20_知识/`——别因为给了项目名就一律往项目里塞。
-2. {K_TYPE} 只能取：{allowed}。
-3. {K_TOPIC} 只能取「知识区现有主题」里列出的名字。
+1. target_path 必须落在**某个既有领域**下，形如 `<领域>/…/<标题>.md`。
+   领域是 vault 的一级目录，由人维护，**不许新建**。清单见「现有领域」一节。
+   领域内的子分类**由你决定**——但要遵守第 6 条。
+2. 文件名（`<标题>.md` 的标题部分）必须是**清洗过的内容标题**：
+   不含 `\\ / : * ? " < > |`，不以点结尾，不超过 60 字。
+3. {K_TYPE} 只能取：{allowed}。
 4. content 必须至少包含一个 [[双向链接]]，指向已有笔记或索引页。
 5. create 的目标路径不能已存在；fold 的目标路径必须已存在。
-6. 不要发明新的主题分类。都不合适就用 pending，并在 pending_reason 说明原因。
-7. 项目笔记的文件名必须是 `<项目名>-<类型>.md`，后缀与 `{K_TYPE}` 一致——
-   项目「电商后台」的踩坑笔记就叫 `电商后台-踩坑.md`。
-   **不要拿内容标题做文件名**（`电商后台-队列串行化.md` 是错的，会被校验拒掉）。
-   同一项目同一类型只有这一个文件；新的同类内容走 fold 追加进去，不要另起名字。
+6. **分类能复用就复用——能用已有的就用已有的。** 「领域下已有分类」里列出的名字，只要装得下这条内容，
+   就**必须用它**，不许另起一个近义的（有「版本控制」就别建「git」）。
+   真的都装不下，才新建一层或一个新分类——新建要在 `pending_reason` 里说明理由。
+7. {K_TOPIC} 与 `target_tags` 按**标签规则**填：
+   - 路径派生：目标路径上的**每一级目录名**都要进 `target_tags`，领域名排最前
+   - 另提语义：再补 0-3 个跨领域的标签（如一篇讲「用代码生成艺术」的笔记，
+     除路径派生外还可以带 `艺术`）
+   - 英文标签一律小写；中间空白折成 `-`；单个标签不超过 20 字符
 8. 骨架里的「## 用户的判断」一节**必须留空**（保留标题，标题下什么都不写）。
    这一节记录用户本人的立场，服务端会机械清空——写了也会被丢掉，别浪费。
    绝不要替用户总结、推断或改写成第三人称（「用户认为……」是典型的伪造）。
@@ -246,7 +248,7 @@ def known_link_targets(vault_root: Path) -> set[str]:
     for path in list_notes(vault_root):
         names.add(path.stem)
         names.add(path.relative_to(vault_root).with_suffix("").as_posix())
-    for topic in knowledge_topics(vault_root):
+    for topic in list_domains(vault_root):
         names.add(topic)
         names.add(f"{INDEX}/{topic}")
     return names
@@ -284,6 +286,12 @@ def validate_plan(plan: OrganizePlan, vault_root: Path) -> None:
                 f"{K_TYPE} 非法：{note_type!r}。只能取 "
                 f"{'、'.join(t.value for t in _LLM_ALLOWED_TYPES)}"
                 "——日志与索引页由服务生成，不由模型产出"
+            )
+
+        stem = Path(plan.target_path).stem
+        if clean_title(stem) != stem:
+            raise PlanError(
+                f"文件名不合规，必须是清洗过的内容标题（见架构第五节）：{stem}"
             )
 
         if not _LINK_RE.search(plan.content):

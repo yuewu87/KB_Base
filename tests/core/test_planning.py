@@ -15,7 +15,7 @@ from kb.core.planning import (
     parse_plan,
     validate_plan,
 )
-from kb.core.vault import KNOWLEDGE, ensure_topic_index, write_note
+from kb.core.vault import INDEX, ensure_topic_index, write_note
 
 DRAFT = Draft(
     id="20260915-a3f2",
@@ -42,7 +42,7 @@ def vault(tmp_path: Path) -> Path:
 def _plan_json(**overrides) -> str:
     data = {
         "outcome": "create",
-        "target_path": f"{KNOWLEDGE}/后端/并发写锁.md",
+        "target_path": "计算机/并发写锁.md",
         "frontmatter": {"类型": "概念", "主题": ["后端"]},
         "content": "# 并发写锁\n\n见 [[队列串行化]]\n",
         "pending_reason": None,
@@ -81,7 +81,7 @@ def test_parse_plan_builds_domain_object():
     plan = parse_plan(DRAFT.id, _plan_json())
     assert plan.draft_id == DRAFT.id
     assert plan.outcome is Outcome.CREATE
-    assert plan.target_path == f"{KNOWLEDGE}/后端/并发写锁.md"
+    assert plan.target_path == "计算机/并发写锁.md"
     assert plan.frontmatter["类型"] == "概念"
     assert plan.content == "# 并发写锁\n\n见 [[队列串行化]]\n"
 
@@ -149,15 +149,15 @@ def test_validate_rejects_unsafe_paths(vault, bad):
 
 
 def test_validate_rejects_path_outside_allowed_dirs(vault):
-    """只允许落在 10_项目/ 或 20_知识/<既有主题>/ 下。"""
-    plan = parse_plan(DRAFT.id, _plan_json(target_path="90_附件/x.md"))
+    """只允许落在既有领域下。"""
+    plan = parse_plan(DRAFT.id, _plan_json(target_path="_附件/x.md"))
     with pytest.raises(PlanError, match="允许范围"):
         validate_plan(plan, vault)
 
 
 def test_validate_rejects_invented_topic(vault):
     """Q11：AI 不得自行发明分类——新主题必须走 pending。"""
-    plan = parse_plan(DRAFT.id, _plan_json(target_path=f"{KNOWLEDGE}/运维/新笔记.md"))
+    plan = parse_plan(DRAFT.id, _plan_json(target_path="运维/新笔记.md"))
     with pytest.raises(PlanError, match="允许范围"):
         validate_plan(plan, vault)
 
@@ -165,7 +165,7 @@ def test_validate_rejects_invented_topic(vault):
 # ---------- 校验：create ----------
 
 def test_validate_create_rejects_existing_target(vault):
-    existing = f"{KNOWLEDGE}/后端/队列串行化.md"
+    existing = "计算机/队列串行化.md"
     plan = parse_plan(DRAFT.id, _plan_json(target_path=existing))
     with pytest.raises(PlanError, match="已存在"):
         validate_plan(plan, vault)
@@ -221,7 +221,9 @@ def test_validate_create_rejects_link_to_missing_note(vault):
 
 def test_validate_create_accepts_link_to_index_page(vault):
     """索引页由服务自动创建，所以空库第一天也有东西可链。"""
-    plan = parse_plan(DRAFT.id, _plan_json(content="# 并发写锁\n\n见 [[40_索引/后端]]\n"))
+    plan = parse_plan(
+        DRAFT.id, _plan_json(content=f"# 并发写锁\n\n见 [[{INDEX}/计算机]]\n")
+    )
     validate_plan(plan, vault)
 
 
@@ -229,12 +231,22 @@ def test_validate_create_passes_for_good_plan(vault):
     validate_plan(parse_plan(DRAFT.id, _plan_json()), vault)
 
 
+def test_validate_rejects_illegal_filename(vault):
+    """文件名必须是清洗过的内容标题（Q72）。"""
+    plan = parse_plan(
+        DRAFT.id,
+        _plan_json(target_path="计算机/队列串行化: 补充.md"),
+    )
+    with pytest.raises(PlanError, match="文件名不合规"):
+        validate_plan(plan, vault)
+
+
 # ---------- 校验：fold ----------
 
 def test_validate_fold_requires_existing_target(vault):
     plan = parse_plan(
         DRAFT.id,
-        _plan_json(outcome="fold", target_path=f"{KNOWLEDGE}/后端/不在这里.md"),
+        _plan_json(outcome="fold", target_path="计算机/不在这里.md"),
     )
     with pytest.raises(PlanError, match="不存在"):
         validate_plan(plan, vault)
@@ -245,7 +257,7 @@ def test_validate_fold_requires_content(vault):
         DRAFT.id,
         _plan_json(
             outcome="fold",
-            target_path=f"{KNOWLEDGE}/后端/队列串行化.md",
+            target_path="计算机/队列串行化.md",
             content="   ",
         ),
     )
@@ -258,7 +270,7 @@ def test_validate_fold_passes(vault):
         DRAFT.id,
         _plan_json(
             outcome="fold",
-            target_path=f"{KNOWLEDGE}/后端/队列串行化.md",
+            target_path="计算机/队列串行化.md",
             content="补充：队列满时要限流\n",
         ),
     )
@@ -296,6 +308,27 @@ def test_system_prompt_lists_allowed_note_types():
         if t in (NoteType.JOURNAL, NoteType.INDEX):
             continue          # 日志与索引页由服务生成，不由 LLM 产出
         assert t.value in prompt
+
+
+def test_system_prompt_targets_domains():
+    """路径只允许落在领域下（Q67）。"""
+    prompt = build_system_prompt()
+    assert "领域" in prompt
+    assert "10_项目" not in prompt
+    assert "20_知识" not in prompt
+
+
+def test_system_prompt_states_tag_rule():
+    """标签规则要写进提示词（Q76）。"""
+    prompt = build_system_prompt()
+    assert "路径派生" in prompt
+    assert "最多 3 个" in prompt or "0-3" in prompt
+
+
+def test_system_prompt_states_reuse_classification_rule():
+    """能复用已有分类就复用（Q77）。"""
+    prompt = build_system_prompt()
+    assert "能用已有的就用已有的" in prompt
 
 
 def test_system_prompt_uses_frontmatter_key_constants():

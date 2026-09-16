@@ -4,11 +4,10 @@ from kb.core.classify import (
     bigrams,
     find_candidates,
     first_heading,
-    knowledge_topics,
     note_title_and_tags,
     similarity,
 )
-from kb.core.vault import KNOWLEDGE, write_note
+from kb.core.vault import write_note
 
 
 def _note(root: Path, rel: str, body: str, tags: list[str] | None = None) -> Path:
@@ -67,8 +66,8 @@ def test_first_heading_of_empty_body():
 # ---------- 候选召回 ----------
 
 def test_find_candidates_ranks_similar_first(tmp_path):
-    _note(tmp_path, f"{KNOWLEDGE}/后端/并发写锁.md", "# 并发写入会锁表\n")
-    _note(tmp_path, f"{KNOWLEDGE}/前端/居中布局.md", "# 用 flex 居中\n")
+    _note(tmp_path, "计算机/后端/并发写锁.md", "# 并发写入会锁表\n")
+    _note(tmp_path, "计算机/前端/居中布局.md", "# 用 flex 居中\n")
 
     got = find_candidates(tmp_path, "并发写入的时候会锁表，怎么办")
     assert got[0].title == "并发写入会锁表"
@@ -76,7 +75,7 @@ def test_find_candidates_ranks_similar_first(tmp_path):
 
 def test_find_candidates_respects_limit(tmp_path):
     for i in range(5):
-        _note(tmp_path, f"{KNOWLEDGE}/后端/n{i}.md", f"# 并发写入会锁表 {i}\n")
+        _note(tmp_path, f"计算机/后端/n{i}.md", f"# 并发写入会锁表 {i}\n")
     assert len(find_candidates(tmp_path, "并发写入会锁表", limit=3)) == 3
 
 
@@ -86,20 +85,20 @@ def test_find_candidates_returns_empty_for_empty_vault(tmp_path):
 
 def test_find_candidates_uses_tags_as_signal(tmp_path):
     """标题不含关键词，但主题标签命中的笔记也应被召回。"""
-    _note(tmp_path, f"{KNOWLEDGE}/后端/杂记.md", "# 一些零散的记录\n", tags=["并发", "锁"])
+    _note(tmp_path, "计算机/后端/杂记.md", "# 一些零散的记录\n", tags=["并发", "锁"])
     got = find_candidates(tmp_path, "并发 锁")
     assert got[0].path.name == "杂记.md"
 
 
 def test_candidates_are_sorted_by_score_desc(tmp_path):
-    _note(tmp_path, f"{KNOWLEDGE}/后端/a.md", "# 并发写入会锁表\n")
-    _note(tmp_path, f"{KNOWLEDGE}/后端/b.md", "# 并发\n")
+    _note(tmp_path, "计算机/后端/a.md", "# 并发写入会锁表\n")
+    _note(tmp_path, "计算机/后端/b.md", "# 并发\n")
     got = find_candidates(tmp_path, "并发写入会锁表")
     assert [c.score for c in got] == sorted([c.score for c in got], reverse=True)
 
 
 def test_candidate_carries_path_and_tags(tmp_path):
-    path = _note(tmp_path, f"{KNOWLEDGE}/后端/杂记.md", "# 记录\n", tags=["后端"])
+    path = _note(tmp_path, "计算机/后端/杂记.md", "# 记录\n", tags=["后端"])
     got = find_candidates(tmp_path, "记录")
     assert got[0].path == path
     assert got[0].tags == ["后端"]
@@ -122,16 +121,3 @@ def test_note_title_and_tags_normalizes_single_string_tag(tmp_path):
     path.write_text("---\n主题: 后端\n---\n\n# 标题\n", encoding="utf-8")
     _, tags = note_title_and_tags(path)
     assert tags == ["后端"]
-
-
-# ---------- 既有主题 ----------
-
-def test_knowledge_topics_lists_dirs(tmp_path):
-    (tmp_path / KNOWLEDGE / "后端").mkdir(parents=True)
-    (tmp_path / KNOWLEDGE / "前端").mkdir(parents=True)
-    (tmp_path / KNOWLEDGE / "散笔记.md").write_text("x", encoding="utf-8")
-    assert knowledge_topics(tmp_path) == ["前端", "后端"]
-
-
-def test_knowledge_topics_empty_when_absent(tmp_path):
-    assert knowledge_topics(tmp_path) == []

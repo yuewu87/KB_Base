@@ -9,9 +9,11 @@ from kb.core.vault import (
     INDEX,
     PENDING,
     atomic_write,
+    clean_title,
     draft_path,
     ensure_topic_index,
     find_draft,
+    list_domains,
     list_drafts,
     list_notes,
     move_to_pending,
@@ -149,11 +151,11 @@ def test_move_to_pending_is_idempotent(tmp_path):
 # ---------- 笔记读写 ----------
 
 def test_write_then_read_note_roundtrip(tmp_path):
-    path = tmp_path / "20_知识" / "后端" / "并发写锁.md"
-    write_note(path, {"类型": "概念", "主题": ["后端"]}, "# 并发写锁\n")
+    path = tmp_path / "计算机" / "并发写锁.md"
+    write_note(path, {"类型": "概念", "主题": ["计算机"]}, "# 并发写锁\n")
     meta, body = read_note(path)
     assert meta["类型"] == "概念"
-    assert meta["主题"] == ["后端"]
+    assert meta["主题"] == ["计算机"]
     assert body.strip() == "# 并发写锁"
 
 
@@ -177,18 +179,18 @@ def test_list_notes_covers_domains_and_meta(tmp_path):
 
 def test_ensure_topic_index_creates_dataview_page(tmp_path):
     """空库第一天也要有东西可链，否则第一条笔记必然违反 Q21。"""
-    path = ensure_topic_index(tmp_path, "后端")
-    assert path == tmp_path / INDEX / "后端.md"
+    path = ensure_topic_index(tmp_path, "计算机")
+    assert path == tmp_path / INDEX / "计算机.md"
     meta, body = read_note(path)
     assert meta["类型"] == "索引"
-    assert 'FROM "20_知识/后端"' in body
+    assert 'FROM "计算机"' in body
 
 
 def test_ensure_topic_index_never_overwrites_user_edits(tmp_path):
     """幂等：用户手改过的索引页不能被服务覆盖回去。"""
-    first = ensure_topic_index(tmp_path, "后端")
+    first = ensure_topic_index(tmp_path, "计算机")
     first.write_text("用户自己改的内容", encoding="utf-8")
-    second = ensure_topic_index(tmp_path, "后端")
+    second = ensure_topic_index(tmp_path, "计算机")
     assert second.read_text(encoding="utf-8") == "用户自己改的内容"
 
 
@@ -205,3 +207,49 @@ def test_atomic_write_creates_parent_dirs(tmp_path):
     target = tmp_path / "深层" / "目录" / "x.md"
     atomic_write(target, "内容")
     assert target.read_text(encoding="utf-8") == "内容"
+
+
+# ---------- 领域（Q67）----------
+
+def test_list_domains_reads_top_level_dirs(tmp_path):
+    """一级目录里不带 _ 前缀的就是领域。"""
+    (tmp_path / "计算机").mkdir()
+    (tmp_path / "艺术").mkdir()
+    (tmp_path / "_收件箱").mkdir()
+    (tmp_path / "_索引").mkdir()
+    (tmp_path / ".obsidian").mkdir()
+    assert list_domains(tmp_path) == ["艺术", "计算机"]
+
+
+def test_list_domains_empty_when_only_meta(tmp_path):
+    (tmp_path / "_收件箱").mkdir()
+    assert list_domains(tmp_path) == []
+
+
+def test_list_domains_ignores_files(tmp_path):
+    (tmp_path / "计算机").mkdir()
+    (tmp_path / "note.md").write_text("x", encoding="utf-8")
+    assert list_domains(tmp_path) == ["计算机"]
+
+
+# ---------- 标题清洗（Q72）----------
+
+@pytest.mark.parametrize(
+    ("raw", "expected"),
+    [
+        ("正常标题", "正常标题"),
+        ("含/斜杠", "含斜杠"),
+        (r'含\反斜杠', "含反斜杠"),
+        ('含:冒号*星号?问号"引号<尖>括号|竖线', "含冒号星号问号引号尖括号竖线"),
+        ("  首尾空格  ", "首尾空格"),
+        ("结尾有点...", "结尾有点"),
+        ("a" * 80, "a" * 60),
+    ],
+)
+def test_clean_title(raw, expected):
+    assert clean_title(raw) == expected
+
+
+def test_clean_title_rejects_empty():
+    with pytest.raises(ValueError):
+        clean_title("///")

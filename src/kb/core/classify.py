@@ -11,7 +11,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from kb.core.models import K_TOPIC
-from kb.core.vault import KNOWLEDGE, list_notes, read_note
+from kb.core.vault import list_notes, read_note
 
 DEFAULT_LIMIT = 8
 
@@ -90,15 +90,3 @@ def find_candidates(
         )
     scored.sort(key=lambda c: (-c.score, str(c.path)))
     return scored[:limit]
-
-
-def knowledge_topics(vault_root: Path) -> list[str]:
-    """`20_知识/` 下已有的主题目录名。
-
-    服务的主题必须落在这些既有主题里——**新主题要用户决定**
-    （Q11：AI 不得自行发明分类）。
-    """
-    root = vault_root / KNOWLEDGE
-    if not root.exists():
-        return []
-    return sorted(p.name for p in root.iterdir() if p.is_dir())

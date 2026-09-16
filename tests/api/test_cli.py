@@ -8,16 +8,16 @@ import pytest
 
 from kb.api import cli
 from kb.config import Config, ConfigError
-from kb.core.vault import KNOWLEDGE, list_drafts, read_draft
+from kb.core.vault import list_drafts, read_draft
 from kb.llm.base import FakeLLM
 
 
 def _plan_json(**overrides) -> str:
     data = {
         "outcome": "create",
-        "target_path": f"{KNOWLEDGE}/后端/并发写锁.md",
-        "frontmatter": {"类型": "概念", "主题": ["后端"]},
-        "content": "# 并发写锁\n\n见 [[后端]]\n",
+        "target_path": "计算机/并发写锁.md",
+        "frontmatter": {"类型": "概念", "主题": ["计算机"]},
+        "content": "# 并发写锁\n\n见 [[计算机]]\n",
         "pending_reason": None,
     }
     data.update(overrides)
@@ -35,7 +35,7 @@ class _Args:
 
 @pytest.fixture
 def cfg(tmp_path: Path) -> Config:
-    (tmp_path / KNOWLEDGE / "后端").mkdir(parents=True)
+    (tmp_path / "计算机").mkdir(parents=True)
     return Config("k", "u", "m", tmp_path, None)
 
 
@@ -116,7 +116,7 @@ def test_push_then_inbox_then_organize(fake_server, capsys):
     assert cli.main(["organize"]) == 0
     assert "[created]" in capsys.readouterr().out
 
-    assert (fake_server.vault_path / KNOWLEDGE / "后端" / "并发写锁.md").exists()
+    assert (fake_server.vault_path / "计算机" / "并发写锁.md").exists()
 
 
 def test_push_defaults_project_from_cwd(fake_server, monkeypatch, tmp_path):

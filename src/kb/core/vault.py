@@ -6,6 +6,7 @@
 from __future__ import annotations
 
 import random
+import re
 import subprocess
 from datetime import datetime
 from pathlib import Path
@@ -24,16 +25,21 @@ from kb.core.models import (
     NoteType,
 )
 
-INBOX = "00_收件箱"
+# ---------------------------------------------------------------- 路径常量
+
+INBOX = "_收件箱"
 PENDING = "待归类"
-PROJECTS = "10_项目"
-KNOWLEDGE = "20_知识"
-MATERIALS = "30_素材"
-INDEX = "40_索引"
-ATTACHMENTS = "90_附件"
+INDEX = "_索引"
+ATTACHMENTS = "_附件"
+JOURNAL_DIR = "整理日志"
+
+# 内置领域——`init_vault.py` 用它建目录。运行时的领域清单以磁盘为准。
+SEED_DOMAINS = ["计算机", "艺术", "文学"]
+
+# 机器目录前缀——一级目录里带这个前缀的不是领域
+META_PREFIX = "_"
 
 DRAFT_STATUS = "待整理"
-JOURNAL_DIR = "整理日志"
 
 
 # ---------------------------------------------------------------- 原子写
@@ -159,15 +165,28 @@ def write_note(path: Path, metadata: dict, body: str) -> None:
 
 
 def list_notes(vault_root: Path) -> list[Path]:
-    """列出正式笔记（项目档案 + 知识区），供查重预筛取候选。
+    """列出正式笔记（各领域下的全部 *.md）。
 
-    不含 `40_索引/`——索引页与整理日志是结构性文件，不是知识笔记。
+    不含 `_索引/`——索引页与整理日志是结构性文件，不是知识笔记。
     """
     found: list[Path] = []
-    for folder in (vault_root / PROJECTS, vault_root / KNOWLEDGE):
-        if folder.exists():
-            found.extend(p for p in folder.rglob("*.md") if p.is_file())
+    for name in list_domains(vault_root):
+        found.extend(p for p in (vault_root / name).rglob("*.md") if p.is_file())
     return sorted(found)
+
+
+def list_domains(vault_root: Path) -> list[str]:
+    """vault 一级目录里的领域名。
+
+    机器目录（`_` 前缀）与隐藏目录（`.` 前缀）不算领域。
+    """
+    if not vault_root.exists():
+        return []
+    return sorted(
+        p.name
+        for p in vault_root.iterdir()
+        if p.is_dir() and not p.name.startswith((META_PREFIX, "."))
+    )
 
 
 # ---------------------------------------------------------------- 项目名（Q30）
@@ -202,9 +221,9 @@ def topic_index_path(vault_root: Path, topic: str) -> Path:
 
 
 def ensure_topic_index(vault_root: Path, topic: str) -> Path:
-    """确保 `40_索引/<主题>.md` 存在，返回其路径。
+    """确保 `_索引/<领域>.md` 存在，返回其路径。
 
-    索引页是**自动生成的 Dataview 查询页**，零维护——永远自动列出该主题下的所有笔记。
+    索引页是**自动生成的 Dataview 查询页**，零维护——永远自动列出该领域下的所有笔记。
     它让「不允许孤儿笔记」（Q21）从空库第一天起就成立：第一条笔记就有东西可链。
 
     已存在则原样返回，**不覆盖**——用户可能自己改过。
@@ -217,9 +236,27 @@ def ensure_topic_index(vault_root: Path, topic: str) -> Path:
         f"# {topic}\n\n"
         "```dataview\n"
         "LIST\n"
-        f'FROM "{KNOWLEDGE}/{topic}"\n'
+        f'FROM "{topic}"\n'
         "SORT file.name ASC\n"
         "```\n"
     )
     write_note(path, {K_TYPE: NoteType.INDEX.value, K_TOPIC: [topic]}, body)
     return path
+
+
+# ---------------------------------------------------------------- 文件名（Q72）
+
+_ILLEGAL_CHARS = re.compile(r'[\\/:*?"<>|]')
+_TITLE_MAX = 60
+
+
+def clean_title(raw: str) -> str:
+    """把笔记标题清洗成合法文件名。非法或全空 → 抛 ValueError。
+
+    规则见 `docs/01_架构.md` 第五节。
+    """
+    cleaned = _ILLEGAL_CHARS.sub("", raw).strip().rstrip(".")
+    cleaned = cleaned[:_TITLE_MAX]
+    if not cleaned:
+        raise ValueError(f"标题清洗后为空：{raw!r}")
+    return cleaned
