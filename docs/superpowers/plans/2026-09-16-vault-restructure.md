@@ -489,13 +489,31 @@ def test_creates_all_skeleton_dirs(tmp_path):
 
 删掉 `test_creates_topic_dirs`（领域断言已并入上面）。`test_second_run_keeps_existing_notes` 里的 `KNOWLEDGE / "后端"` 改成 `"计算机"`。
 
-- [ ] **Step 9: 改测试里的硬编码旧路径**
+- [ ] **Step 9: 改测试里对旧常量的引用**
+
+**⚠️ 这一步比看起来大。** 两类都要改，别只改字面量：
 
 ```bash
+# ① 硬编码的目录名字面量
 grep -rn '"20_知识"\|"40_索引"\|"10_项目"\|"00_收件箱"\|"90_附件"\|"30_素材"' tests/
+# ② 已被删掉的常量——这类才是大头，删了常量后整个文件都会 ImportError
+grep -rn '\bKNOWLEDGE\b\|\bPROJECTS\b\|\bMATERIALS\b' tests/
 ```
 
-逐处替换：`"40_索引"` → `INDEX` 或 `"_索引"`，`"20_知识"/"后端"` → `"计算机"`，`"10_项目"` → 删（Task 3 已处理）。已知位置：`test_organize.py:101,107,443`、`test_vault.py:171,173`。
+**实测（2026-09-16 清理阶段跑出来的）：** `KNOWLEDGE` 被 6 个测试文件引用约 55 处——`test_organize.py`（约 25）、`test_classify.py`（10）、`test_planning.py`（7）、`test_http.py`（6）、`test_cli.py`（4）、`test_init_vault.py`（3）。**这些文件全部要改，否则 Task 4 Step 10 不可能全绿。**
+
+替换规则：
+
+| 旧 | 新 |
+|---|---|
+| `KNOWLEDGE / "后端"` | `"计算机"` |
+| `KNOWLEDGE`（单独用） | 删掉，或换成具体的领域名 |
+| `f"{KNOWLEDGE}/后端/…"` | `"计算机/…"` |
+| `"40_索引"` / `INDEX` | `INDEX`（常量本身改成 `_索引`，不用动引用） |
+| `"20_知识"` / `"40_索引"` 字面量 | 同上 |
+| `PROJECTS` / `MATERIALS` | 删（没有对应物） |
+
+**`INDEX`、`INBOX`、`ATTACHMENTS`、`JOURNAL_DIR` 这几个常量的引用不用动**——它们的值在 Step 1 已经改了，引用处自动跟着变。
 
 - [ ] **Step 10: 跑全量测试**
 
@@ -1335,23 +1353,19 @@ def build_router(cfg: Config) -> APIRouter:
 
     @router.get("/", response_class=HTMLResponse)
     def chat(request: Request):
-        return templates.TemplateResponse("chat.html", {"request": request, **_ctx("chat")})
+        return templates.TemplateResponse(request, "chat.html", _ctx("chat"))
 
     @router.get("/journal", response_class=HTMLResponse)
     def journal(request: Request):
-        return templates.TemplateResponse(
-            "journal.html", {"request": request, **_ctx("journal")}
-        )
+        return templates.TemplateResponse(request, "journal.html", _ctx("journal"))
 
     @router.get("/flow", response_class=HTMLResponse)
     def flow(request: Request):
-        return templates.TemplateResponse("flow.html", {"request": request, **_ctx("flow")})
+        return templates.TemplateResponse(request, "flow.html", _ctx("flow"))
 
     @router.get("/runtime", response_class=HTMLResponse)
     def runtime_page(request: Request):
-        return templates.TemplateResponse(
-            "runtime.html", {"request": request, **_ctx("runtime")}
-        )
+        return templates.TemplateResponse(request, "runtime.html", _ctx("runtime"))
 
     return router
 ```
