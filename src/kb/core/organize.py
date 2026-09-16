@@ -164,6 +164,12 @@ def apply_plan(
             raise PlanError(
                 f"--revise 指定的目标找不到或不唯一：{plan.revise_target}"
             )
+        # 兜底：一份笔记不能声明被自己取代。validate_plan 已经拦了正常路径，
+        # 这里防的是别处绕过校验直接落盘的调用（落成这个状态很难看出来）。
+        if old == target:
+            raise PlanError(
+                f"修改请求的目标与被修订的笔记是同一篇：{plan.revise_target}"
+            )
         txn.touch_modify(old)
         mark_superseded(old, by=Path(plan.target_path).stem)
 

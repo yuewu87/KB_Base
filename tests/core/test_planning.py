@@ -405,3 +405,31 @@ def test_system_prompt_survives_missing_templates(monkeypatch, tmp_path):
     prompt = planning.build_system_prompt()
     assert "你是知识库整理助手" in prompt
     assert "各类型的正文骨架" not in prompt
+
+
+# ---------- 校验：修改请求（Q59/Q60）----------
+
+def test_validate_rejects_revise_folding_into_superseded_note(vault):
+    """`--revise` 是「这条取代那条」，新内容不能折进被取代的那一篇。
+
+    2026-09-16 端到端验收跑出来的真 bug：模型看到内容相似就选了 fold，
+    把新说法追加进原笔记，随后 revise 逻辑又把这同一篇标记失效——
+    落成 `失效: true` + `被取代于: 自己`。同一个文件里新旧两种说法并存，
+    再声明它被取代，自相矛盾。
+    """
+    plan = parse_plan(
+        DRAFT.id,
+        _plan_json(outcome="fold", target_path="计算机/队列串行化.md"),
+    )
+    plan.revise_target = "队列串行化"
+    with pytest.raises(PlanError, match="另起一篇"):
+        validate_plan(plan, vault)
+
+
+def test_validate_allows_revise_creating_new_note(vault):
+    """正常形态：新建一篇，旧的那篇在落盘时才标记失效。"""
+    plan = parse_plan(
+        DRAFT.id, _plan_json(target_path="计算机/队列串行化的修订.md")
+    )
+    plan.revise_target = "队列串行化"
+    validate_plan(plan, vault)

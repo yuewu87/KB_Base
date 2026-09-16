@@ -293,6 +293,14 @@ def validate_plan(plan: OrganizePlan, vault_root: Path) -> None:
             f"{plan.target_path}"
         )
 
+    if plan.revise_target and target.stem == plan.revise_target:
+        raise PlanError(
+            f"这是修改请求（--revise {plan.revise_target}），新内容必须另起一篇笔记。"
+            "不能 fold 进被取代的那一篇——那样同一个文件里会同时有新说法和旧说法，"
+            "落盘时再把它标记失效就自相矛盾（2026-09-16 端到端验收跑出来的实例）。"
+            "请改成 create，并另取一个内容标题。"
+        )
+
     if plan.outcome is Outcome.CREATE:
         if target.exists():
             raise PlanError(f"create 的目标已存在，不能覆盖：{plan.target_path}")
