@@ -28,13 +28,12 @@ DRAFT = Draft(
 
 @pytest.fixture
 def vault(tmp_path: Path) -> Path:
-    """一个最小可用的 vault：有一个主题、一个索引页、一个项目。"""
-    (tmp_path / KNOWLEDGE / "后端").mkdir(parents=True)
-    (tmp_path / "10_项目" / "电商后台").mkdir(parents=True)
-    ensure_topic_index(tmp_path, "后端")
+    """一个最小可用的 vault：一个领域、一个索引页、一篇笔记。"""
+    (tmp_path / "计算机").mkdir(parents=True)
+    ensure_topic_index(tmp_path, "计算机")
     write_note(
-        tmp_path / KNOWLEDGE / "后端" / "队列串行化.md",
-        {"类型": "概念", "主题": ["后端"]},
+        tmp_path / "计算机" / "队列串行化.md",
+        {"类型": "概念", "主题": ["计算机"]},
         "# 队列串行化\n",
     )
     return tmp_path
@@ -163,75 +162,6 @@ def test_validate_rejects_invented_topic(vault):
         validate_plan(plan, vault)
 
 
-def test_validate_rejects_nonexistent_project_dir(vault):
-    """Q30：服务从不自动新建项目文件夹——项目必须已经存在。
-
-    否则模型给一个不存在的项目名，就能凭空造出一个项目目录。
-    """
-    plan = parse_plan(
-        DRAFT.id,
-        _plan_json(
-            target_path="10_项目/不存在的项目/不存在的项目-踩坑.md",
-            frontmatter={"类型": "踩坑", "主题": ["后端"], "项目": "不存在的项目"},
-        ),
-    )
-    with pytest.raises(PlanError, match="项目目录不存在"):
-        validate_plan(plan, vault)
-
-
-def test_validate_allows_existing_project_dir(vault):
-    plan = parse_plan(
-        DRAFT.id,
-        _plan_json(
-            target_path="10_项目/电商后台/电商后台-踩坑.md",
-            frontmatter={"类型": "踩坑", "主题": ["后端"], "项目": "电商后台"},
-        ),
-    )
-    validate_plan(plan, vault)
-
-
-def test_validate_rejects_project_note_without_type_suffix(vault):
-    """Q13：项目笔记文件名必须是 `<项目名>-<类型>.md`。
-
-    不能是 `<项目名>-<内容标题>.md`——那样名字由模型定，路径就不可推导了。
-    """
-    plan = parse_plan(
-        DRAFT.id,
-        _plan_json(
-            target_path="10_项目/电商后台/电商后台-队列串行化.md",
-            frontmatter={"类型": "概念", "主题": ["后端"], "项目": "电商后台"},
-        ),
-    )
-    with pytest.raises(PlanError, match="文件名必须是"):
-        validate_plan(plan, vault)
-
-
-def test_validate_rejects_project_note_without_project_prefix(vault):
-    """Q13：不带项目前缀的文件名会和别的项目撞名，[[链接]] 产生歧义。"""
-    plan = parse_plan(
-        DRAFT.id,
-        _plan_json(
-            target_path="10_项目/电商后台/踩坑.md",
-            frontmatter={"类型": "踩坑", "主题": ["后端"], "项目": "电商后台"},
-        ),
-    )
-    with pytest.raises(PlanError, match="文件名必须是"):
-        validate_plan(plan, vault)
-
-
-def test_validate_rejects_project_note_type_mismatch(vault):
-    """文件名后缀与 `类型` 字段必须一致，否则 Dataview 按类型查出来的和文件名对不上。"""
-    plan = parse_plan(
-        DRAFT.id,
-        _plan_json(
-            target_path="10_项目/电商后台/电商后台-踩坑.md",
-            frontmatter={"类型": "决策", "主题": ["后端"], "项目": "电商后台"},
-        ),
-    )
-    with pytest.raises(PlanError, match="不一致"):
-        validate_plan(plan, vault)
-
-
 # ---------- 校验：create ----------
 
 def test_validate_create_rejects_existing_target(vault):
@@ -272,18 +202,6 @@ def test_allowed_types_match_prompt_and_validator():
     for t in _LLM_ALLOWED_TYPES:
         assert t.value in prompt
     assert len(_LLM_ALLOWED_TYPES) == len(NoteType) - 2
-
-
-def test_system_prompt_distinguishes_project_from_knowledge():
-    """10_项目/ 与 20_知识/ 靠「换个项目还用得上吗」区分。
-
-    这条只能写在提示词里——「可不可复用」是判断题，代码判不了。但没有它时
-    模型只能靠常识猜；猜错的代价是内容整批落错区，而且错得看不出来。
-    """
-    prompt = build_system_prompt()
-    assert "换个项目还用得上吗" in prompt
-    assert "20_知识/" in prompt
-    assert "10_项目/" in prompt
 
 
 def test_validate_create_rejects_orphan_note(vault):
@@ -350,27 +268,25 @@ def test_validate_fold_passes(vault):
 # ---------- 提示词 ----------
 
 def test_build_messages_includes_draft_body(vault):
-    msgs = build_messages(DRAFT, [], [], ["后端"], vault)
+    msgs = build_messages(DRAFT, [], ["后端"], vault)
     assert msgs[0]["role"] == "system"
     assert msgs[1]["role"] == "user"
     assert "并发写入会锁表" in msgs[1]["content"]
 
 
 def test_build_messages_lists_topics_and_projects(vault):
-    msgs = build_messages(DRAFT, [], [vault / "10_项目" / "电商后台"], ["后端"], vault)
+    msgs = build_messages(DRAFT, [], ["后端"], vault)
     assert "后端" in msgs[1]["content"]
-    assert "电商后台" in msgs[1]["content"]
 
 
 def test_build_messages_handles_empty_vault(tmp_path):
-    msgs = build_messages(DRAFT, [], [], [], tmp_path)
+    msgs = build_messages(DRAFT, [], [], tmp_path)
     assert "没有明显相关的已有笔记" in msgs[1]["content"]
-    assert "还没有任何项目文件夹" in msgs[1]["content"]
 
 
 def test_build_messages_lists_candidates(vault):
     cands = find_candidates(vault, DRAFT.body)
-    msgs = build_messages(DRAFT, cands, [], ["后端"], vault)
+    msgs = build_messages(DRAFT, cands, ["后端"], vault)
     assert "队列串行化" in msgs[1]["content"]
 
 

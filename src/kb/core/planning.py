@@ -153,7 +153,6 @@ def _rel(path: Path, vault_root: Path) -> str:
 def build_messages(
     draft: Draft,
     candidates: list[Candidate],
-    projects: list[Path],
     topics: list[str],
     vault_root: Path,
 ) -> list[dict]:
@@ -165,12 +164,6 @@ def build_messages(
         )
     else:
         cand_lines = "（没有明显相关的已有笔记）"
-
-    proj_lines = (
-        "\n".join(f"- {p.name}" for p in projects)
-        if projects
-        else "（知识库里还没有任何项目文件夹）"
-    )
 
     user = f"""## 待整理的草稿
 
@@ -184,10 +177,6 @@ id: {draft.id}
 ## 可能相关的已有笔记
 
 {cand_lines}
-
-## 知识库现有项目
-
-{proj_lines}
 
 ## 知识区现有主题
 
@@ -244,42 +233,8 @@ def parse_plan(draft_id: str, raw: str) -> OrganizePlan:
 # ------------------------------------------------------------ 校验
 
 def allowed_prefixes(vault_root: Path) -> list[Path]:
-    """允许写入的目录。主题必须已经存在——新主题要用户决定（Q11）。"""
-    prefixes = [vault_root / PROJECTS]
-    prefixes += [vault_root / KNOWLEDGE / t for t in knowledge_topics(vault_root)]
-    return prefixes
-
-
-def _is_existing_project_dir(vault_root: Path, path: Path) -> bool:
-    """`path` 是否为 `10_项目/<项目名>` 这样的**既有**项目目录。
-
-    项目目录必须真的存在——服务从不自动新建项目文件夹（Q30）。
-    """
-    try:
-        rel = path.relative_to(vault_root / PROJECTS)
-    except ValueError:
-        return False
-    return len(rel.parts) == 1 and path.is_dir()
-
-
-def _project_note_name_error(target: Path) -> str | None:
-    """Q13：项目笔记文件名必须是 `<项目名>-<类型>.md`。合法返回 None。
-
-    条目名由**类型**决定，不由内容决定——这样路径完全可推导，会话层不必先
-    搜一遍就能说出「改 KN_Base 的踩坑」。
-
-    这条**必须由代码强制**，不能只写在提示词里。首次真实运行就验证过：光靠
-    提示词，模型会取 `<项目名>-<内容标题>.md`。
-    """
-    allowed = [t.value for t in _LLM_ALLOWED_TYPES]
-    project, _, suffix = target.stem.rpartition("-")
-    if project == target.parent.name and suffix in allowed:
-        return None
-    options = "、".join(f"`{target.parent.name}-{t}.md`" for t in allowed)
-    return (
-        "项目笔记的文件名必须是 `<项目名>-<类型>.md`（Q13）："
-        f"应为 {options} 之一，实际是 `{target.stem}.md`"
-    )
+    """允许写入的目录。领域是固定的几个，子分类由 LLM 自建。"""
+    return [vault_root / domain for domain in list_domains(vault_root)]
 
 
 def known_link_targets(vault_root: Path) -> set[str]:
@@ -314,23 +269,9 @@ def validate_plan(plan: OrganizePlan, vault_root: Path) -> None:
     target = vault_root / rel
     if not any(target.is_relative_to(p) for p in allowed_prefixes(vault_root)):
         raise PlanError(
-            "target_path 不在允许范围内，必须落在 10_项目/ 或 20_知识/<既有主题>/ 下："
+            "target_path 不在允许范围内，必须落在既有领域下："
             f"{plan.target_path}"
         )
-
-    if target.is_relative_to(vault_root / PROJECTS) and not _is_existing_project_dir(
-        vault_root, target.parent
-    ):
-        raise PlanError(
-            "项目目录不存在，服务不会自动新建（Q30）。"
-            "请先手工建好 `10_项目/<项目名>/`，或改走 20_知识/ 或 pending："
-            f"{plan.target_path}"
-        )
-
-    if target.is_relative_to(vault_root / PROJECTS):
-        name_error = _project_note_name_error(target)
-        if name_error:
-            raise PlanError(name_error)
 
     if plan.outcome is Outcome.CREATE:
         if target.exists():
@@ -343,14 +284,6 @@ def validate_plan(plan: OrganizePlan, vault_root: Path) -> None:
                 f"{K_TYPE} 非法：{note_type!r}。只能取 "
                 f"{'、'.join(t.value for t in _LLM_ALLOWED_TYPES)}"
                 "——日志与索引页由服务生成，不由模型产出"
-            )
-
-        if target.is_relative_to(vault_root / PROJECTS) and target.stem != (
-            f"{target.parent.name}-{note_type}"
-        ):
-            raise PlanError(
-                f"项目笔记的文件名后缀与 {K_TYPE} 不一致："
-                f"文件名是 `{target.stem}.md`，但 {K_TYPE} 是「{note_type}」"
             )
 
         if not _LINK_RE.search(plan.content):

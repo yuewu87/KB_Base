@@ -6,7 +6,6 @@
 from __future__ import annotations
 
 import random
-import re
 import subprocess
 from datetime import datetime
 from pathlib import Path
@@ -35,8 +34,6 @@ ATTACHMENTS = "90_附件"
 
 DRAFT_STATUS = "待整理"
 JOURNAL_DIR = "整理日志"
-
-_SEPARATOR_RE = re.compile(r"[-_\s]+")
 
 
 # ---------------------------------------------------------------- 原子写
@@ -174,41 +171,6 @@ def list_notes(vault_root: Path) -> list[Path]:
 
 
 # ---------------------------------------------------------------- 项目名（Q30）
-
-def normalize_project(name: str) -> str:
-    """项目名规范化：转小写，`-`、`_`、空格视为等价。
-
-    避免 `KN_Base` / `kn_base` / `KN-Base` 被当成三个项目。
-    """
-    return _SEPARATOR_RE.sub("-", name.strip().lower())
-
-
-def find_project_dir(vault_root: Path, name: str) -> Path | None:
-    """在 `10_项目/<项目名>` 下搜唯一匹配。
-
-    找不到或有多个同名 → 返回 None（不猜，走待归类）。
-    """
-    if not name:
-        return None
-    root = vault_root / PROJECTS
-    if not root.exists():
-        return None
-
-    target = normalize_project(name)
-    matches = [
-        p for p in sorted(root.iterdir())
-        if p.is_dir() and normalize_project(p.name) == target
-    ]
-    return matches[0] if len(matches) == 1 else None
-
-
-def list_projects(vault_root: Path) -> list[Path]:
-    """列出 `10_项目/<项目名>` 下的所有项目。"""
-    root = vault_root / PROJECTS
-    if not root.exists():
-        return []
-    return [p for p in sorted(root.iterdir()) if p.is_dir()]
-
 
 def project_name_from_cwd(cwd: Path) -> str | None:
     """取 git 仓库根的目录名作为项目名（Q30）。

@@ -12,13 +12,10 @@ from kb.core.vault import (
     draft_path,
     ensure_topic_index,
     find_draft,
-    find_project_dir,
     list_drafts,
     list_notes,
-    list_projects,
     move_to_pending,
     new_draft_id,
-    normalize_project,
     read_draft,
     read_note,
     write_draft,
@@ -167,72 +164,13 @@ def test_write_note_drops_none_values(tmp_path):
     assert "null" not in path.read_text(encoding="utf-8")
 
 
-def test_list_notes_covers_projects_and_knowledge(tmp_path):
-    write_note(tmp_path / "20_知识" / "后端" / "a.md", {"类型": "概念"}, "a")
-    write_note(tmp_path / "10_项目" / "个人" / "P" / "P-踩坑.md", {"类型": "踩坑"}, "b")
-    write_note(tmp_path / "40_索引" / "后端.md", {"类型": "索引"}, "不该被扫到")
+def test_list_notes_covers_domains_and_meta(tmp_path):
+    """扫正式笔记，不扫 _索引/。"""
+    write_note(tmp_path / "计算机" / "a.md", {"类型": "概念"}, "a")
+    write_note(tmp_path / "计算机" / "b.md", {"类型": "踩坑"}, "b")
+    write_note(tmp_path / "_索引" / "计算机.md", {"类型": "索引"}, "不该被扫到")
     names = {p.name for p in list_notes(tmp_path)}
-    assert names == {"a.md", "P-踩坑.md"}
-
-
-# ---------- 项目名匹配（Q30）----------
-
-@pytest.mark.parametrize(
-    ("raw", "expected"),
-    [
-        ("KN_Base", "kn-base"),
-        ("kn-base", "kn-base"),
-        ("KN Base", "kn-base"),
-        ("  KN_Base  ", "kn-base"),
-        ("电商后台", "电商后台"),
-    ],
-)
-def test_normalize_project(raw, expected):
-    assert normalize_project(raw) == expected
-
-
-def test_find_project_dir_unique_match(tmp_path):
-    target = tmp_path / "10_项目" / "电商后台"
-    target.mkdir(parents=True)
-    assert find_project_dir(tmp_path, "电商后台") == target
-
-
-def test_find_project_dir_matches_across_separator_styles(tmp_path):
-    target = tmp_path / "10_项目" / "KN_Base"
-    target.mkdir(parents=True)
-    assert find_project_dir(tmp_path, "kn-base") == target
-
-
-def test_find_project_dir_returns_none_when_absent(tmp_path):
-    (tmp_path / "10_项目").mkdir(parents=True)
-    assert find_project_dir(tmp_path, "不存在") is None
-
-
-def test_find_project_dir_returns_none_for_empty_name(tmp_path):
-    (tmp_path / "10_项目").mkdir(parents=True)
-    assert find_project_dir(tmp_path, "") is None
-
-
-def test_find_project_dir_returns_none_on_ambiguity(tmp_path):
-    """规范化后同名 → 不猜，返回 None，走待归类。
-
-    用 `KN_Base` 与 `kn-base` 两个真实不同的目录（Windows 大小写不敏感，
-    `KN_Base`/`kn_base` 会是同一个目录），它们的 `normalize_project` 都得到
-    `kn-base`。
-    """
-    (tmp_path / "10_项目" / "KN_Base").mkdir(parents=True)
-    (tmp_path / "10_项目" / "kn-base").mkdir(parents=True)
-    assert find_project_dir(tmp_path, "kn-base") is None
-
-
-def test_list_projects_returns_paths(tmp_path):
-    (tmp_path / "10_项目" / "A").mkdir(parents=True)
-    (tmp_path / "10_项目" / "B").mkdir(parents=True)
-    assert [p.name for p in list_projects(tmp_path)] == ["A", "B"]
-
-
-def test_list_projects_empty_when_absent(tmp_path):
-    assert list_projects(tmp_path) == []
+    assert names == {"a.md", "b.md"}
 
 
 # ---------- 索引页（Q56）----------

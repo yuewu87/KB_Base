@@ -84,7 +84,7 @@ def test_push_rejects_empty_content(client):
 
 
 def test_push_accepts_content_without_project(client):
-    """Q30：允许没有项目——纯知识点场景。"""
+    """没项目不是错误——`项目` 只是可选字段，不影响归到哪个领域。"""
     assert client.post("/push", json={"content": "GIL 是怎么回事"}).status_code == 200
 
 

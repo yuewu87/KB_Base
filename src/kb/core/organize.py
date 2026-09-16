@@ -31,7 +31,6 @@ from kb.core.planning import PlanError
 from kb.core.vault import (
     ensure_topic_index,
     list_drafts,
-    list_projects,
     move_to_pending,
     read_draft,
     read_note,
@@ -172,7 +171,6 @@ def _complete(vault_root: Path, draft: Draft, llm: LLM, hint: str | None) -> str
     messages = planning.build_messages(
         draft,
         find_candidates(vault_root, draft.body),
-        list_projects(vault_root),
         knowledge_topics(vault_root),
         vault_root,
     )
