@@ -20,13 +20,7 @@
   </article>
 
   <form class="sweep-reply" method="post" action="/sweep/reply">
-    <button name="reply" value="知道了">我知道了</button>
-    <button name="reply" value="调整" formnovalidate
-            onclick="document.getElementById('sweep-note').hidden = false">
-      还需调整
-    </button>
-    <input id="sweep-note" name="note" required hidden
-           placeholder="要改哪里？比如「别并到 X，并到 Y」">
+    <button type="submit">我知道了</button>
   </form>
 {% else %}
   <div class="empty">还没巡检过。点下面的按钮跑一次，或等服务自己触发（超过 6 天会跑）。</div>

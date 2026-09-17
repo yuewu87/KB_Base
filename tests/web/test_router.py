@@ -206,7 +206,7 @@ def test_push_from_web_rejects_empty(client):
     assert resp.status_code == 400
 
 
-# ---------- 巡检页（报告 + 两个回复按钮 + 一键巡检） ----------
+# ---------- 巡检页（报告 + 「我知道了」+ 一键巡检） ----------
 
 
 def test_sweep_page_shows_the_report(client, vault):
@@ -225,13 +225,15 @@ def test_flow_page_has_no_sweep_report(client, vault):
     assert "合并了 2 组近义标签" not in client.get("/flow").text
 
 
-def test_sweep_page_has_two_reply_buttons(client, vault):
+def test_sweep_page_has_the_acknowledge_button(client, vault):
+    """报告下面**只有一个**「我知道了」——它就是个提醒，不做别的。"""
     from kb.core.sweep_state import save_report
 
     save_report(vault, {"summary": "x", "tag_merges": [], "dir_merges": []})
     body = client.get("/sweep").text
     assert "我知道了" in body
-    assert "还需调整" in body
+    assert "还需调整" not in body                 # 2026-09-17 删了，不留半截
+    assert 'id="sweep-note"' not in body
 
 
 def test_reply_known_marks_read(client, vault):
@@ -244,49 +246,6 @@ def test_reply_known_marks_read(client, vault):
     body = client.get("/sweep").text
     assert "合并了 2 组近义标签" in body                          # **读过了也还显示**
     assert "card sweep read" in body                            # 只是不再高亮
-
-
-def test_reply_adjust_reruns_the_sweep_with_the_note(vault, monkeypatch):
-    """「还需调整」——带着你写的话把巡检**重跑一遍**（Q96）。
-
-    旧行为是把你的意见当一条**草稿**投进收件箱，走整理那条链；可要改的
-    往往是**上一次巡检刚做的事**，两边对不上（`apply_plan` 单向，也没留
-    反演信息，所以「撤销」不是一条可走的路）。
-    """
-    from kb.core.sweep_state import load_state, save_report
-    from kb.web import router as web_router
-
-    seen: list[str] = []
-
-    class _CaptureLLM:
-        def complete(self, system: str, user: str) -> str:
-            seen.append(system + user)
-            return '{"tag_merges": [], "dir_merges": [], "summary": "无"}'
-
-    sent: list[str] = []
-    monkeypatch.setattr(
-        web_router,
-        "push_and_organize",
-        lambda *a, **kw: sent.append(str(a)) or "",
-    )
-
-    cfg = Config(
-        llm_api_key="k", llm_base_url="http://x", llm_model="m",
-        vault_path=vault, port=None,
-    )
-    c = TestClient(create_app(cfg, llm=_CaptureLLM(), data_dir=vault))
-
-    save_report(vault, {"summary": "x", "tag_merges": [], "dir_merges": []})
-    resp = c.post(
-        "/sweep/reply",
-        data={"reply": "调整", "note": "别把 shell 并进命令行"},
-        follow_redirects=False,
-    )
-    assert resp.status_code == 303
-    assert any("别把 shell 并进命令行" in p for p in seen)       # 真的送到了模型手里
-    assert sent == []                                          # 不再投草稿
-    # 重跑出一份**新报告**，是未读的——页面会重新高亮它
-    assert load_state(vault)["report"]["read"] is False
 
 
 def test_sweep_run_button_lives_on_the_sweep_page(client):

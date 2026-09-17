@@ -152,14 +152,14 @@ def build_router(
             ),
         )
 
-    def _run_sweep_or_report(requirement: str | None) -> RedirectResponse:
+    def _run_sweep_or_report() -> RedirectResponse:
         """跑一次巡检，失败就落一份没读的报告——**人在这儿等着，不能甩 500**。
 
         写成报告的语义和后台那条失败路径一致（`_sweep_in_background` 也这么落），
         巡检页上看得见原因。
         """
         try:
-            run_sweep(cfg.vault_path, data_dir, get_llm(), requirement=requirement)
+            run_sweep(cfg.vault_path, data_dir, get_llm())
         except sweep.SweepError as exc:
             sweep_state.save_report(
                 data_dir,
@@ -172,20 +172,17 @@ def build_router(
         return RedirectResponse("/sweep", status_code=303)
 
     @router.post("/sweep/reply")
-    def sweep_reply(reply: str = Form(...), note: str = Form("")):
-        """报告下面那两个按钮（「我知道了」/「还需调整」）。
+    def sweep_reply():
+        """报告下面那个按钮。
 
-        **只有 Form 版**：JSON 版那条曾经写在 `api/http.py` 里，是死代码——
-        同一个路径注册两次，`include_router` 先于 app 级路由，先注册的赢。
+        **「我知道了」= 把报告标成已读。** 它就只做这件事——是不再高亮的提醒，
+        不是审批，也不触发任何动作。
 
-        「还需调整」是**带着你写的话把巡检重跑一遍**（Q96）——不是投一条草稿，
-        也不是撤销上次的改动（`apply_plan` 单向，没留反演信息）。
+        （原来这里还有个「还需调整」，点了会带着用户写的话把巡检重跑一遍。
+        2026-09-17 删了：巡检只会合并、且刻意不看笔记正文，所以「拆开某个分类」
+        这类调整在结构上无法表达——后端能力与用户预期对不上，不留半截。）
         """
-        if reply == "知道了":
-            sweep_state.mark_read(data_dir)
-        elif note.strip():
-            # 意见交给 `make_plan` 当 `requirement`——重跑一次，出一个新方案
-            return _run_sweep_or_report(note.strip())
+        sweep_state.mark_read(data_dir)
         return RedirectResponse("/sweep", status_code=303)
 
     @router.post("/sweep/run")
@@ -198,11 +195,11 @@ def build_router(
         **同步跑**，和 `/new` 一个路子：点完等它跑完，页面转到巡检页看报告。
         巡检比单条投递慢（全库过一遍 + 一次 LLM），但它是低频动作。
         """
-        return _run_sweep_or_report(None)
+        return _run_sweep_or_report()
 
     @router.get("/sweep", response_class=HTMLResponse)
     def sweep_page(request: Request):
-        """巡检页——报告与两个按钮的家（Q93）。
+        """巡检页——报告与「我知道了」的家（Q93）。
 
         **报告读过了也显示**，只是不再高亮：这一页就是它的家。原来那条
         「没读才冒出来」的逻辑是侧栏时代的（那块侧栏已经搬走了）。

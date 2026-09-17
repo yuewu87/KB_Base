@@ -207,19 +207,10 @@ def _commit_sweep(vault_root: Path, touched: list[Path], plan: sweep.SweepPlan) 
     return proc.returncode == 0
 
 
-def run_sweep(
-    vault_root: Path,
-    data_dir: Path,
-    llm: LLM,
-    requirement: str | None = None,
-) -> dict:
+def run_sweep(vault_root: Path, data_dir: Path, llm: LLM) -> dict:
     """跑一次巡检：规划 → 校验 → 落盘 → commit → 存报告。
 
     **它走的是和整理草稿同一条链**，只是输入换成了整个库的标签与目录。
-
-    `requirement` 非空时是「还需调整」带上来的用户意见（Q96）——巡检**带着
-    它重跑一次**，不是撤销上次的改动。重跑会产生**新的一个 commit**，
-    上一个留着（与 Q46「一次整理 = 一个 commit」一致）。
     """
     # **一开始就开自己的 run**，别等到真的有事要做才开。
     # ContextVar 是 per-thread 的，而 uvicorn 的线程池会复用线程——
@@ -227,7 +218,7 @@ def run_sweep(
     # （空计划那条提前返回的路径原先就没有 set_run，实测撞上过）。
     flow.set_run(flow.new_run_id())
 
-    plan = sweep.make_plan(vault_root, llm, requirement)
+    plan = sweep.make_plan(vault_root, llm)
     sweep.validate(plan, vault_root)
 
     if plan.is_empty:

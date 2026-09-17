@@ -226,70 +226,15 @@ def test_validate_rejects_missing_source(tmp_path):
         validate(SweepPlan(dir_merges=[("计算机/没这个", "计算机/版本控制")]), _vault(tmp_path))
 
 
-# ---------- 带用户要求重跑（Q96）----------
+def test_prompt_shape_is_stable(tmp_path):
+    """提示词的骨架不许悄悄变——JSON 块与「硬规矩」之间不该夹进任何东西。
 
-class _CaptureLLM:
-    """把收到的提示词留下来，好断言要求进没进。"""
-
-    def __init__(self, reply: str = '{"tag_merges": [], "dir_merges": [], "summary": "无"}'):
-        self.reply = reply
-        self.seen: list[tuple[str, str]] = []
-
-    def complete(self, system: str, user: str) -> str:
-        self.seen.append((system, user))
-        return self.reply
-
-
-def test_prompt_without_requirement_has_no_extra_section(tmp_path):
-    """不带要求时，提示词里不该出现「用户对上次结果的意见」那一段。
-
-    （原来那条 `build_prompt(v) == build_prompt(v, None)` 是同一个 falsy
-    分支跑两遍，证明不了任何事——模板正文改坏了它也不红。）
+    （这条原来叫 `test_prompt_without_requirement_has_no_extra_section`，
+    当时是用来守「不带用户要求时不许插段落」的。那个功能 2026-09-17 删了，
+    但它作为提示词形状的锚仍然有用，所以留下、改名。）
     """
     from kb.core.sweep import build_prompt
 
-    v = _vault(tmp_path)
-    for prompt in (build_prompt(v), build_prompt(v, None), build_prompt(v, "")):
-        assert "用户对上次结果的意见" not in prompt
-        # 锚：JSON 块与「硬规矩」之间不许夹进任何东西
-        assert '"summary": "一句话说这次收拾了什么"\n}\n\n## 硬规矩' in prompt
-
-
-def test_prompt_with_requirement_inserts_between_json_and_rules(tmp_path):
-    from kb.core.sweep import build_prompt
-
-    prompt = build_prompt(_vault(tmp_path), "别并到 X，并到 Y")
-    fence = prompt.index('"summary": "一句话说这次收拾了什么"')
-    opinion = prompt.index("## 用户对上次结果的意见")
-    rules = prompt.index("## 硬规矩")
-    assert fence < opinion < rules
-    assert "别并到 X，并到 Y" in prompt
-
-
-def test_prompt_carries_the_requirement(tmp_path):
-    from kb.core.sweep import build_prompt
-
-    prompt = build_prompt(_vault(tmp_path), "那两个分类不该合并，拆开")
-    assert "那两个分类不该合并，拆开" in prompt
-    assert "用户对上次结果的意见" in prompt
-
-
-def test_requirement_goes_to_the_model(tmp_path):
-    """真的送到了模型手里——不只是拼进了字符串。"""
-    from kb.core.sweep import make_plan
-
-    llm = _CaptureLLM()
-    make_plan(_vault(tmp_path), llm, requirement="把 art 拆回来")
-
-    system, user = llm.seen[0]
-    assert "把 art 拆回来" in system
-    assert "把 art 拆回来" in user
-
-
-def test_no_requirement_leaves_user_message_alone(tmp_path):
-    """不带要求时，user 那句不许变——它是回归的锚点。"""
-    from kb.core.sweep import make_plan
-
-    llm = _CaptureLLM()
-    make_plan(_vault(tmp_path), llm)
-    assert llm.seen[0][1] == "请给出合并方案。"
+    prompt = build_prompt(_vault(tmp_path))
+    assert "用户对上次结果的意见" not in prompt
+    assert '"summary": "一句话说这次收拾了什么"\n}\n\n## 硬规矩' in prompt
