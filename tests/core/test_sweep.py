@@ -240,12 +240,30 @@ class _CaptureLLM:
         return self.reply
 
 
-def test_prompt_is_byte_identical_without_requirement(tmp_path):
-    """不带要求时，提示词必须与加这个参数**之前逐字相同**——不许回归。"""
+def test_prompt_without_requirement_has_no_extra_section(tmp_path):
+    """不带要求时，提示词里不该出现「用户对上次结果的意见」那一段。
+
+    （原来那条 `build_prompt(v) == build_prompt(v, None)` 是同一个 falsy
+    分支跑两遍，证明不了任何事——模板正文改坏了它也不红。）
+    """
     from kb.core.sweep import build_prompt
 
     v = _vault(tmp_path)
-    assert build_prompt(v) == build_prompt(v, None)
+    for prompt in (build_prompt(v), build_prompt(v, None), build_prompt(v, "")):
+        assert "用户对上次结果的意见" not in prompt
+        # 锚：JSON 块与「硬规矩」之间不许夹进任何东西
+        assert '"summary": "一句话说这次收拾了什么"\n}\n\n## 硬规矩' in prompt
+
+
+def test_prompt_with_requirement_inserts_between_json_and_rules(tmp_path):
+    from kb.core.sweep import build_prompt
+
+    prompt = build_prompt(_vault(tmp_path), "别并到 X，并到 Y")
+    fence = prompt.index('"summary": "一句话说这次收拾了什么"')
+    opinion = prompt.index("## 用户对上次结果的意见")
+    rules = prompt.index("## 硬规矩")
+    assert fence < opinion < rules
+    assert "别并到 X，并到 Y" in prompt
 
 
 def test_prompt_carries_the_requirement(tmp_path):
