@@ -46,6 +46,11 @@ class Config:
 
 
 def _int_or(values: Mapping, key: str, default: int) -> int:
+    """读一个正整数配置。**读不出来就静默回默认值。**
+
+    静默是有意的：配置坏了不该让服务起不来，用默认值跑着，
+    界面上那个字段会显示默认值，人一看就知道不对。
+    """
     raw = str(values.get(key) or "").strip()
     try:
         number = int(raw)
@@ -108,9 +113,17 @@ def reload_config(env_file: Path | None = None) -> Config:
 
     文件不存在、或必填项被手滑删掉时，用默认值造一份，**不抛**——
     别把正在跑的服务带崩。
+
+    另注：`load_dotenv`（override=False）是**环境变量赢**，而这里是**文件赢**。
+    热重载要的就是文件赢（用户在网页上刚改的），但同一份 `.env` 经两条路
+    读出来可能不同——排查配置问题时先想起这件事。
     """
     env_file = env_file or PROJECT_ROOT / ".env"
-    values: Mapping = dotenv_values(env_file) if env_file.is_file() else {}
+    try:
+        values: Mapping = dotenv_values(env_file) if env_file.is_file() else {}
+    except (OSError, UnicodeDecodeError):
+        # 文件坏了（编码不对、读不了）——当读不到处理，别把正在跑的服务带崩
+        values = {}
     try:
         return _build(values)
     except ConfigError:

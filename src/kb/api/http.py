@@ -473,7 +473,7 @@ def main() -> None:
     # 测试和嵌入用法都直接调 `create_app`，要是那里也算启动，后台巡检会去用
     # 夹具注入的假模型（把 `FakeLLM` 的应答队列吃掉，实测让对话那条用例变红），
     # 还会拿默认的 `data/` 当落点写状态（跑一次 pytest 就写进一份假报告，
-    # 顺带把 `last_sweep` 顶掉——真服务 6 天内都不会再自动跑）。
+    # 顺带把 `last_sweep` 顶掉——真服务在配置的间隔内都不会再自动跑）。
     # 服务进程只有这一条入口（`runtime.spawn_service` 也是 `-m kb.api.http`）。
     if sweep_state.due(DATA_DIR, interval_days=cfg.sweep_interval_days):
         threading.Thread(
