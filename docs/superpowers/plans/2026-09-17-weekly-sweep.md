@@ -863,6 +863,29 @@ def test_reply_adjust_queues_a_draft(client, vault):
     drafts = list_drafts(vault)
     assert len(drafts) == 1
     assert "别把 shell 并进命令行" in read_draft(drafts[0]).body
+
+
+def test_sweep_run_button_exists_on_every_page(client):
+    """侧栏上有个「巡检一次」按钮——两个动作按钮之一。"""
+    assert "巡检一次" in client.get("/").text
+    assert "巡检一次" in client.get("/flow").text
+
+
+def test_sweep_run_updates_last_sweep(client, vault):
+    """手动跑一次，上次巡检时间要跟着更新（用户明说的要求）。"""
+    from kb.core.sweep_state import load_state
+
+    client.post("/sweep/run", follow_redirects=False)
+    assert load_state(vault).get("last_sweep")
+
+
+def test_sweep_run_ignores_the_six_day_gate(client, vault):
+    """刚跑过也能再手动跑——不受 6 天限制（那是自动触发才看的）。"""
+    from kb.core.sweep_state import save_report
+
+    save_report(vault, {"summary": "刚跑过"})
+    resp = client.post("/sweep/run", follow_redirects=False)
+    assert resp.status_code == 303
 ```
 
 - [ ] **Step 2: 跑测试确认失败**
@@ -924,12 +947,55 @@ def test_reply_adjust_queues_a_draft(client, vault):
 
 - [ ] **Step 5: 加样式** —— `.sweep-reply` 两个按钮并排；`.bubble.assistant` 复用现成的。
 
-- [ ] **Step 6: 跑测试 + 全量 + 提交**
+- [ ] **Step 6: 加「一键巡检」按钮**
+
+**用户要的：不光能等它自动跑，也能手动点一下就跑；跑完更新「上次巡检时间」。**
+
+按钮放**侧栏顶部**，和「＋ 记一条」并列——两个都是动作，不是页面：
+
+```html
+<form method="post" action="/sweep/run">
+  <button class="side-action" type="submit">
+    <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+         stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+      <path d="M20 11a8 8 0 1 0-2.3 5.7"/>
+      <path d="M20 5v6h-6"/>
+    </svg>
+    <span class="side-label">巡检一次</span>
+  </button>
+</form>
+```
+
+路由（`web/router.py`）：
+
+```python
+    @router.post("/sweep/run")
+    def sweep_run():
+        """手动跑一次巡检。
+
+        **不受 6 天限制**——是你主动要跑的。跑完 `run_sweep` 会写
+        `last_sweep`，所以自动那条也跟着顺延。
+        """
+        run_sweep(cfg.vault_path, data_dir, get_llm())
+        return RedirectResponse("/flow", status_code=303)
+```
+
+> **同步跑**，和 `/new`（Q88 之后投递也走完整理）一个路子：点完等它跑完，
+> 页面转到工作日志看报告。**巡检比单条投递慢**（要全库过一遍 + 一次 LLM），
+> 但它是低频动作，等一会儿可以接受。
+>
+> **如果实测下来太慢**（比如库大了要等几十秒），再改成后台跑 + 页面轮询——
+> 那时 `_sweep_in_background` 已经在了，复用即可。
+
+**「跑完更新整理时间」不用额外写**：`run_sweep` 最后调 `sweep_state.save_report`，
+它本来就写 `last_sweep`（Task 1）。
+
+- [ ] **Step 7: 跑测试 + 全量 + 提交**
 
 ```bash
 "D:/Conda_base/envs/kn_base/python.exe" -m pytest -p no:cacheprovider -q
 "D:/Conda_base/envs/kn_base/python.exe" -m ruff check src tests scripts
-git add -A && git commit -m "feat: 巡检报告进侧栏——聊天式 + 两个回复按钮"
+git add -A && git commit -m "feat: 巡检报告进侧栏 + 一键巡检按钮"
 ```
 
 ---
@@ -1201,6 +1267,7 @@ for p, i, line in hits:
 | 要建文件的走审核 | **不适用**——「只合并不新建」把这条路堵死了（见下） |
 | 弹窗 + 侧栏聊天式 + 两个回复按钮 | Task 5 |
 | 「还需调整」→ 输入 → 交给整理 LLM | Task 5 |
+| **手动一键巡检**（不受 6 天限制，跑完更新上次时间） | Task 5 Step 6 |
 | **流程链区分「跳过」与「未走到」** | Task 6 |
 | **侧栏统一手机聊天式，每条一个气泡，两页共用** | Task 6 |
 | **界面里不得出现 emoji，标记一律内联 SVG** | Task 6 |
