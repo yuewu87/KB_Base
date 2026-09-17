@@ -29,20 +29,27 @@
 
             {# 只读字段**不给 name**：不进 FormData，也就不会提交。
                后端还会再挡一道（`settings.validate`），两层。 #}
+            {# 可改字段都带 `data-init`（渲染时的初值）：`saveSettings` 拿它
+               过滤掉没动过的字段。**没有它数字会偏大**——`KB_LOG_LEVEL`
+               这些键可能根本不在 `.env` 里，走的是默认值；把默认值当
+               「新写入的键」提交上去，用户只改一处也会报「已保存 4 项」。 #}
             {% if f.kind == 'readonly' %}
               <input id="f-{{ f.key }}" value="{{ f.value }}" readonly>
-            {# 密钥的掩码放 placeholder、`value=""`——**原文一个字都不进 HTML** #}
+            {# 密钥的掩码放 placeholder、`value=""`——**原文一个字都不进 HTML**。
+               `data-init=""`：没动过的密钥不该被当成一次修改。 #}
             {% elif f.kind == 'secret' %}
               <input id="f-{{ f.key }}" name="{{ f.key }}" type="password"
-                     value="" placeholder="{{ f.value or '未设置' }}" autocomplete="off">
+                     value="" data-init="" placeholder="{{ f.value or '未设置' }}"
+                     autocomplete="off">
             {% elif f.kind == 'choice' %}
-              <select id="f-{{ f.key }}" name="{{ f.key }}">
+              <select id="f-{{ f.key }}" name="{{ f.key }}" data-init="{{ f.value }}">
                 {% for c in f.choices %}
                   <option value="{{ c }}" {{ 'selected' if c == f.value }}>{{ c }}</option>
                 {% endfor %}
               </select>
             {% else %}
-              <input id="f-{{ f.key }}" name="{{ f.key }}" value="{{ f.value }}">
+              <input id="f-{{ f.key }}" name="{{ f.key }}" value="{{ f.value }}"
+                     data-init="{{ f.value }}">
             {% endif %}
 
             {% if f.help %}<p class="hint">{{ f.help }}</p>{% endif %}

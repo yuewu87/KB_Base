@@ -195,7 +195,19 @@
       const btn = form.querySelector('button[type="submit"]');
       btn.disabled = true;
 
-      const values = Object.fromEntries(new FormData(form));
+      // **只提交与初值不同的字段。**
+      //
+      // 看着像没必要（后端本来就会丢掉没变的），但**它会漏**：
+      // `KB_LOG_LEVEL` / `KB_SWEEP_INTERVAL` / `KB_LOG_KEEP_DAYS` 这些键
+      // 可能根本不在 `.env` 里，走的是默认值。把默认值照原样提交上去，
+      // 后端看到的是「一批要写的键」，于是一个都没改也报「已保存 4 项」。
+      //
+      // 初值记在每个字段的 `data-init` 上（见 `_settings.html`）。
+      const values = {};
+      form.querySelectorAll('[name]').forEach(function (el) {
+        if (el.dataset.init !== undefined && el.value === el.dataset.init) return;
+        values[el.name] = el.value;
+      });
       try {
         const r = await fetch('/settings', {
           method: 'POST',
@@ -204,6 +216,24 @@
         });
         const data = await r.json().catch(function () { return {}; });
         if (r.ok) {
+          // **存过之后要把初值跟上。** 不然「改回去」会被当成没改：
+          // 打开时初值是 INFO → 存成 DEBUG（`data-init` 还是 INFO）→
+          // 再改回 INFO，`value === data-init`，这个字段被过滤掉，
+          // `.env` 里留着的还是 DEBUG，而界面上看是 INFO——两边对不上，
+          // 提示还说着「没有要改的」。
+          Object.keys(data.saved || {}).forEach(function (key) {
+            const el = form.querySelector('[name="' + CSS.escape(key) + '"]');
+            if (!el) return;
+            if (el.type === 'password') {
+              // 密钥：**不把原文留在输入框里**。清空即可——空串 = 不改，
+              // 下次提交它自然被后端丢掉。
+              el.value = '';
+              el.dataset.init = '';
+              return;
+            }
+            el.value = data.saved[key];
+            el.dataset.init = data.saved[key];
+          });
           const n = Object.keys(data.saved || {}).length;
           _msg(n ? '已保存 ' + n + ' 项，立刻生效' : '没有要改的', true);
         } else {
