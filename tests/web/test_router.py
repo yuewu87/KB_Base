@@ -8,7 +8,7 @@ from fastapi.testclient import TestClient
 from kb.api.http import create_app
 from kb.config import Config
 from kb.core.vault import write_note
-from kb.llm.base import FakeLLM
+from kb.llm.base import FakeLLM, LLMError
 
 # 对话输出固定成「不做动作」的一句——Web 测试不该真连模型
 CHAT_REPLY = '{"say": "好的", "action": null, "params": {}}'
@@ -673,3 +673,43 @@ def test_quit_calls_the_injected_function(tmp_path):
 
     assert resp.status_code == 200
     assert quit_calls == [1]
+
+
+def test_test_connection_uses_form_values_not_saved_ones(tmp_path):
+    """**验的是表单里的值，不是已保存的。**
+
+    所以「先测试再保存」这条顺序走得通——不用为了测一次就把坏配置先写进 .env。
+    """
+    cfg = Config("k", "u", "saved-model", tmp_path, None)
+    seen: list[str] = []
+
+    def _build(c):
+        seen.append(c.llm_model)
+        return FakeLLM("ok")
+
+    app = create_app(cfg, data_dir=tmp_path, build_llm_fn=_build)
+    resp = TestClient(app).post(
+        "/settings/test", json={"values": {"KB_LLM_MODEL": "typed-model"}}
+    )
+
+    assert resp.status_code == 200
+    assert resp.json()["ok"] is True
+    assert seen == ["typed-model"]
+
+
+def test_test_connection_reports_failure(tmp_path):
+    """连不上要报原因，别只说「失败」。"""
+    class _Boom:
+        def complete(self, system, user):
+            raise LLMError("连不上")
+
+    app = create_app(
+        Config("k", "u", "m", tmp_path, None),
+        data_dir=tmp_path,
+        build_llm_fn=lambda _c: _Boom(),
+    )
+    resp = TestClient(app).post("/settings/test", json={"values": {}})
+
+    assert resp.status_code == 200        # 通了 HTTP，只是模型连不上
+    assert resp.json()["ok"] is False
+    assert "连不上" in resp.json()["detail"]
