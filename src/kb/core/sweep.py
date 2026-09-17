@@ -71,13 +71,30 @@ def list_dir_tree(vault_root: Path) -> list[str]:
     return out
 
 
-def build_prompt(vault_root: Path) -> str:
-    """给模型的输入——**只有标签和目录，没有正文**。"""
+def build_prompt(vault_root: Path, requirement: str | None = None) -> str:
+    """给模型的输入——**只有标签和目录，没有正文**。
+
+    `requirement` 非空时是用户对**上次结果**的意见（Q96）：点「还需调整」
+    写下的话。它说的往往是「上次那步做错了」，所以放在任务正下方、
+    硬规矩之前——先按它调整，其余照旧。
+    """
     tags = collect_tags(vault_root)
     dirs = list_dir_tree(vault_root)
 
     tag_lines = "\n".join(f"- {t}（{n} 篇）" for t, n in tags.items()) or "（无）"
     dir_lines = "\n".join(f"- {d}" for d in dirs) or "（无）"
+
+    # **自带前导与尾随换行**：为空串时下面那段模板与加这个参数之前逐字相同
+    extra = ""
+    if requirement:
+        extra = f"""
+## 用户对上次结果的意见
+
+{requirement}
+
+**先按这条意见调整。** 它说的是上次收拾里做得不对的地方（比如「那两个分类
+不该合并」）；除此之外，下面的硬规矩一条都不放宽。
+"""
 
     return f"""你在定期收拾一个个人知识库的**标签和目录**。
 
@@ -102,7 +119,7 @@ def build_prompt(vault_root: Path) -> str:
   "dir_merges": [{{"from": "计算机/被并掉的", "to": "计算机/保留的"}}],
   "summary": "一句话说这次收拾了什么"
 }}
-
+{extra}
 ## 硬规矩
 
 1. **只合并明显重复的。** 拿不准就不动——宁可少合并，不要合并错。
@@ -141,10 +158,17 @@ def parse_plan(raw: str) -> SweepPlan:
     )
 
 
-def make_plan(vault_root: Path, llm: LLM) -> SweepPlan:
-    """跑一次巡检的规划。只读——不碰文件。"""
+def make_plan(vault_root: Path, llm: LLM, requirement: str | None = None) -> SweepPlan:
+    """跑一次巡检的规划。只读——不碰文件。
+
+    `requirement` 是用户对上次结果的意见（Q96）。**同时进 system 与 user**
+    ——只说一遍模型容易漏，这不是「重复」是「强调」。
+    """
+    user = "请给出合并方案。"
+    if requirement:
+        user = f"请给出合并方案。用户对上次结果的意见：{requirement}"
     try:
-        raw = llm.complete(build_prompt(vault_root), "请给出合并方案。")
+        raw = llm.complete(build_prompt(vault_root, requirement), user)
     except LLMError as exc:
         raise SweepError(f"巡检失败：{exc}") from exc
     return parse_plan(raw)

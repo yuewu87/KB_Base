@@ -224,3 +224,54 @@ def test_validate_rejects_missing_source(tmp_path):
 
     with pytest.raises(SweepError, match="不存在的目录"):
         validate(SweepPlan(dir_merges=[("计算机/没这个", "计算机/版本控制")]), _vault(tmp_path))
+
+
+# ---------- 带用户要求重跑（Q96）----------
+
+class _CaptureLLM:
+    """把收到的提示词留下来，好断言要求进没进。"""
+
+    def __init__(self, reply: str = '{"tag_merges": [], "dir_merges": [], "summary": "无"}'):
+        self.reply = reply
+        self.seen: list[tuple[str, str]] = []
+
+    def complete(self, system: str, user: str) -> str:
+        self.seen.append((system, user))
+        return self.reply
+
+
+def test_prompt_is_byte_identical_without_requirement(tmp_path):
+    """不带要求时，提示词必须与加这个参数**之前逐字相同**——不许回归。"""
+    from kb.core.sweep import build_prompt
+
+    v = _vault(tmp_path)
+    assert build_prompt(v) == build_prompt(v, None)
+
+
+def test_prompt_carries_the_requirement(tmp_path):
+    from kb.core.sweep import build_prompt
+
+    prompt = build_prompt(_vault(tmp_path), "那两个分类不该合并，拆开")
+    assert "那两个分类不该合并，拆开" in prompt
+    assert "用户对上次结果的意见" in prompt
+
+
+def test_requirement_goes_to_the_model(tmp_path):
+    """真的送到了模型手里——不只是拼进了字符串。"""
+    from kb.core.sweep import make_plan
+
+    llm = _CaptureLLM()
+    make_plan(_vault(tmp_path), llm, requirement="把 art 拆回来")
+
+    system, user = llm.seen[0]
+    assert "把 art 拆回来" in system
+    assert "把 art 拆回来" in user
+
+
+def test_no_requirement_leaves_user_message_alone(tmp_path):
+    """不带要求时，user 那句不许变——它是回归的锚点。"""
+    from kb.core.sweep import make_plan
+
+    llm = _CaptureLLM()
+    make_plan(_vault(tmp_path), llm)
+    assert llm.seen[0][1] == "请给出合并方案。"
