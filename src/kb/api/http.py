@@ -212,17 +212,26 @@ def run_sweep(vault_root: Path, data_dir: Path, llm: LLM) -> dict:
 
     **它走的是和整理草稿同一条链**，只是输入换成了整个库的标签与目录。
     """
+    # **一开始就开自己的 run**，别等到真的有事要做才开。
+    # ContextVar 是 per-thread 的，而 uvicorn 的线程池会复用线程——
+    # 不在入口处重置，这次的流程记录会落进上一个请求的 run 里
+    # （空计划那条提前返回的路径原先就没有 set_run，实测撞上过）。
+    flow.set_run(flow.new_run_id())
+
     plan = sweep.make_plan(vault_root, llm)
     sweep.validate(plan, vault_root)
 
     if plan.is_empty:
+        flow.emit("规划", f"巡检发现：{plan.summary or '没什么要收拾的'}")
         report = {"summary": plan.summary or "没什么要收拾的", "tag_merges": [], "dir_merges": []}
         sweep_state.save_report(data_dir, report)
         return report
 
-    flow.set_run(flow.new_run_id())
     flow.emit("规划", f"巡检发现：{plan.summary or '有可以合并的'}")
+    flow.emit("校验", "校验通过")
     touched = sweep.apply_plan(plan, vault_root)
+    if touched:
+        flow.emit("落盘", f"动了 {len(touched)} 个文件")
     _commit_sweep(vault_root, touched, plan)
 
     report = {
@@ -311,6 +320,8 @@ def create_app(
         if not body:
             raise HTTPException(status_code=400, detail="正文不能为空")
 
+        # 同上：入口处重置 run，否则会继承这个线程上一次请求的
+        flow.set_run(flow.new_run_id())
         _, draft_id = push_draft(
             cfg,
             body,
