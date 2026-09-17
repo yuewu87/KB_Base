@@ -1,7 +1,8 @@
 """审核（Q58/Q78）：链上一步，在静态校验之后、落盘之前。
 
 **只审一条：新建的分类跟同层已有的是否近义。** 其余都是机械项，归
-`planning.validate_plan` 用代码管——机械约束不能交给模型判断（见 Q64）。
+`planning.validate_plan` 用代码管——机械约束不能交给模型判断
+（见 `docs/04_踩坑与经验.md` 第 10 条）。
 
 位置：`organize.make_plan` 在 `validate_plan` 通过后调用本模块。
 """
