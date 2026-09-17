@@ -3,7 +3,11 @@
 **用自然语言写，一条就是一个动作。** 不是结构化字段：
 读它的人想知道「模型决定放进 计算机/git」，不想看 `target_path=...`。
 
-**存服务侧（`data/logs/flow.jsonl`），绝不进 vault**——它是过程记录不是知识
+**按天分文件**（`data/logs/flow/YYYY-MM-DD.jsonl`）——这是「箱子」的落盘形态。
+日期取**写入时刻**，不是记录里的字段：写入与落点必须是同一个判断，
+否则跨午夜那一秒会写串。也**没有大小轮转**了——按天切本身就是长度上限。
+
+**存服务侧（`data/logs/`），绝不进 vault**——它是过程记录不是知识
 （Q80 的分界）。进去会被检索、被当知识。
 
 ## 为什么不用 logging
@@ -25,14 +29,17 @@ import contextvars
 import json
 import random
 import threading
-from datetime import datetime
+from datetime import datetime, timedelta
 from pathlib import Path
 
 # 链上的顺序就是流水线的顺序——工作日志页的流程图照它画
 STEPS = ["投递", "规划", "校验", "审核", "落盘", "提交"]
 
-MAX_BYTES = 1_000_000
-_FILE = "flow.jsonl"
+# 按天文件保留多久（天）。服务启动时清理更早的。
+KEEP_DAYS = 90
+
+_SUBDIR = "flow"
+_DAY_FMT = "%Y-%m-%d"
 
 # 落点是启动时定一次、之后不变——模块全局没问题。
 _data_dir: Path | None = None
@@ -80,38 +87,43 @@ def current_run() -> str:
     return _run.get()
 
 
-def flow_path(data_dir: Path) -> Path:
-    return data_dir / "logs" / _FILE
+def day_dir(data_dir: Path) -> Path:
+    return data_dir / "logs" / _SUBDIR
 
 
-def emit(step: str, text: str) -> None:
+def day_path(data_dir: Path, day: str) -> Path:
+    return day_dir(data_dir) / f"{day}.jsonl"
+
+
+def emit(step: str, text: str, now: datetime | None = None) -> None:
     """记一条流程。`step` 取 `STEPS` 里的一个。
+
+    `now` 只为测试留口子（仓库里 `new_run_id` / `save_report` 都是这个写法）：
+    现取时间就没法测跨天。
 
     **没配落点、或写失败，都直接返回**——日志是附属品，不该拖垮正事。
     """
     if _data_dir is None:
         return
+    now = now or datetime.now()
     row = {
-        "at": f"{datetime.now():%Y-%m-%d %H:%M:%S}",
+        "at": f"{now:%Y-%m-%d %H:%M:%S}",
         "run": _run.get(),
         "step": step,
         "text": text,
     }
-    path = flow_path(_data_dir)
+    path = day_path(_data_dir, f"{now:{_DAY_FMT}}")
     try:
         with _write_lock:
             path.parent.mkdir(parents=True, exist_ok=True)
-            if path.is_file() and path.stat().st_size > MAX_BYTES:
-                path.replace(path.with_name(_FILE + ".1"))
             with path.open("a", encoding="utf-8") as handle:
                 handle.write(json.dumps(row, ensure_ascii=False) + "\n")
     except OSError:
         pass          # 满了、没权限、路径没了——都不该让整理失败
 
 
-def read_flow(data_dir: Path, limit: int = 500) -> list[dict]:
-    """读最近的流程记录，**按写入顺序**。文件不存在返回空列表。"""
-    path = flow_path(data_dir)
+def _parse(path: Path) -> list[dict]:
+    """读一个 jsonl 文件。文件不存在返回空列表；坏行跳过。"""
     if not path.is_file():
         return []
     rows: list[dict] = []
@@ -123,4 +135,60 @@ def read_flow(data_dir: Path, limit: int = 500) -> list[dict]:
             rows.append(json.loads(line))
         except json.JSONDecodeError:
             continue          # 半行（进程被杀）——跳过，别让整页挂掉
-    return rows[-limit:]
+    return rows
+
+
+def list_days(data_dir: Path) -> list[str]:
+    """有流程记录的日期，**倒序**（新的在前）。目录不存在返回空列表。"""
+    directory = day_dir(data_dir)
+    if not directory.is_dir():
+        return []
+    return sorted((p.stem for p in directory.glob("*.jsonl")), reverse=True)
+
+
+def read_day(data_dir: Path, day: str) -> list[dict]:
+    """读某一天的记录，**按写入顺序**。没有这一天返回空列表（不抛）。"""
+    return _parse(day_path(data_dir, day))
+
+
+def latest_run_rows(data_dir: Path) -> list[dict]:
+    """**最近一次 run** 的记录——「报告 / 流程图」页签要的，与箱子无关。
+
+    run 可能跨午夜（23:59 投、00:01 规划），所以**倒着扫**：从最新的那天
+    往回找，直到收齐那个 run 的全部记录。
+    """
+    days = list_days(data_dir)
+    if not days:
+        return []
+
+    rows = read_day(data_dir, days[0])
+    if not rows:
+        return []
+    run = rows[-1].get("run")
+
+    out = [r for r in rows if r.get("run") == run]
+    # 往前一天找有没有同 run 的（跨午夜那条）
+    for day in days[1:]:
+        earlier = [r for r in read_day(data_dir, day) if r.get("run") == run]
+        if not earlier:
+            break
+        out = earlier + out
+    return out
+
+
+def prune(data_dir: Path, keep_days: int = KEEP_DAYS, now: datetime | None = None) -> int:
+    """删掉超过 `keep_days` 的按天文件，返回删了几个。
+
+    **只碰服务侧**——vault 里的整理日志是知识，永不自动删。
+    """
+    now = now or datetime.now()
+    cutoff = (now - timedelta(days=keep_days)).strftime(_DAY_FMT)
+    removed = 0
+    for p in day_dir(data_dir).glob("*.jsonl"):
+        if p.stem < cutoff:
+            try:
+                p.unlink()
+                removed += 1
+            except OSError:
+                pass
+    return removed
