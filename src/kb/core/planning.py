@@ -272,6 +272,24 @@ def known_link_targets(vault_root: Path) -> set[str]:
     return names
 
 
+# 兜底分类名——**目录**里不许出现（文件名不查，笔记标题里可以有「其他」）。
+#
+# Q14 的原话：「原方案叫『其他分类』，注定变成垃圾桶——凡没明确归属的都往里塞」。
+#
+# **这条归代码不归模型**：名字里带这些词就是兜底，跟内容是什么无关，
+# 是一眼可判的机械约束。模型看到一条装不下的内容时，最省事的做法就是
+# 往「其他」里一塞——所以闸门要卡在它迈不过去的地方。
+_FALLBACK_NAMES = {
+    "其他", "其它", "杂项", "杂类", "杂物",
+    "临时", "暂时", "未分类", "待分类", "待定", "未整理", "未归类",
+    "misc", "miscellaneous", "other", "others", "temp", "tmp", "todo", "unknown",
+}
+
+
+def _is_fallback_name(name: str) -> bool:
+    return name.strip().lower() in _FALLBACK_NAMES
+
+
 def validate_plan(plan: OrganizePlan, vault_root: Path) -> None:
     """第二段：纯静态检查。不过就抛 PlanError，vault 一个字节没动。"""
     if plan.outcome is Outcome.PENDING:
@@ -285,6 +303,14 @@ def validate_plan(plan: OrganizePlan, vault_root: Path) -> None:
     rel = Path(plan.target_path)
     if rel.is_absolute() or ".." in rel.parts:
         raise PlanError(f"target_path 不能是绝对路径或包含 ..：{plan.target_path}")
+
+    fallback = [d for d in rel.parts[:-1] if _is_fallback_name(d)]
+    if fallback:
+        raise PlanError(
+            f"不许建兜底分类（Q14：「其他分类注定变垃圾桶」）：{'、'.join(fallback)}。"
+            "装不下的内容就用 pending，别硬塞进一个什么都装的目录。"
+            f"目标路径：{plan.target_path}"
+        )
 
     target = vault_root / rel
     if not any(target.is_relative_to(p) for p in allowed_prefixes(vault_root)):

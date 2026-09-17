@@ -433,3 +433,31 @@ def test_validate_allows_revise_creating_new_note(vault):
     )
     plan.revise_target = "队列串行化"
     validate_plan(plan, vault)
+
+
+# ---------- 兜底分类名（Q14）----------
+
+@pytest.mark.parametrize(
+    "bad",
+    ["计算机/其他/x.md", "计算机/其它/x.md", "计算机/杂项/x.md",
+     "计算机/临时/x.md", "计算机/未分类/x.md", "计算机/misc/x.md",
+     "计算机/Other/x.md", "计算机/tmp/深层/x.md"],
+)
+def test_validate_rejects_fallback_dir(vault, bad):
+    """Q14：兜底分类注定变垃圾桶——**目录**里不许出现。
+
+    模型看到一条装不下的内容时，最省事的做法就是往「其他」里一塞。
+    闸门要卡在它迈不过去的地方，不能只写在提示词里。
+    """
+    plan = parse_plan(DRAFT.id, _plan_json(target_path=bad))
+    with pytest.raises(PlanError, match="兜底分类"):
+        validate_plan(plan, vault)
+
+
+def test_validate_allows_fallback_word_in_the_title(vault):
+    """**文件名不查**——笔记标题里可以有「其他」。
+
+    「其他语言怎么处理」是一篇正经笔记，不是兜底分类。
+    """
+    plan = parse_plan(DRAFT.id, _plan_json(target_path="计算机/其他语言怎么处理.md"))
+    validate_plan(plan, vault)
