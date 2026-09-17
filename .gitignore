@@ -64,3 +64,6 @@ Thumbs.db
 
 # ---- Notebook ----
 .ipynb_checkpoints/
+
+# 可视化脑暴会话（superpowers）
+.superpowers/
