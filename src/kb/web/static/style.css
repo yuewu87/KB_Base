@@ -201,16 +201,6 @@ body.collapsed .side-action {
 }
 .side-btn:hover .icon { color: var(--blue); }
 
-.side-foot {
-  margin-top: auto;
-  padding: 10px;
-  border-top: 1px solid var(--line-soft);
-  color: var(--faint);
-  font-size: 11px;
-  line-height: 1.5;
-  word-break: break-all;
-}
-
 /* ---- 主区 ---- */
 
 .main {
@@ -837,6 +827,10 @@ button.secondary:disabled { opacity: .6; cursor: default; }
      看起来就是「分隔线没了」，且不留任何痕迹。 */
   flex-shrink: 0;
 }
+
+/* 把「退出」那组顶到侧栏底部。（原先靠 `.side-foot` 的 `margin-top: auto`，
+   那行连同它的规则一起拿掉了。） */
+.side-sep.push { margin-top: auto; }
 
 /* 「退出」是**红底白字**——全站唯一一个红底，故意的。
    它跟别的入口不是一类东西：其余是「用功能」，这个是「关机」。
