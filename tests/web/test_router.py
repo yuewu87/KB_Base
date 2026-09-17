@@ -313,6 +313,31 @@ def test_box_links_use_the_d_parameter(client):
     assert "?d=2026-09-16" in r.text
 
 
+def test_valid_d_actually_switches_the_day(client, vault):
+    """`?d=` 指向**存在的更早一天**时，主区真的换成那天。
+
+    这是「箱子」的核心用户故事——原来只测了非法 `d` 会落回最新一天，
+    正向换天一次都没测过。
+
+    （侧栏的箱子列表里**两天都在**，所以「某个箱子名出现」证明不了什么：
+    得看主区那个 `<h2 class="day">` 和各天的条目。）
+    """
+    journal = vault / "_索引" / "整理日志"
+    (journal / "2026-09-17.md").write_text(
+        "## 09:00 整理 1 条草稿\n\n- 新建：[[今天那篇]]（计算机/今天那篇.md）\n",
+        encoding="utf-8",
+    )
+
+    older = client.get("/journal?d=2026-09-16").text
+    newer = client.get("/journal?d=2026-09-17").text
+
+    assert older != newer
+    assert '<h2 class="day">26_9_16箱子</h2>' in older       # 主区标题换了天
+    assert '<h2 class="day">26_9_17箱子</h2>' in newer
+    assert "今天那篇" in newer and "今天那篇" not in older    # 内容也跟着换
+    assert "23:20 整理 1 条草稿" in older
+
+
 def test_sweep_page_renders(client):
     r = client.get("/sweep")
     assert r.status_code == 200
@@ -342,30 +367,41 @@ def test_flow_page_has_the_chain_tab(client, vault):
 
 
 def test_runtime_page_has_no_tabs(client):
-    """运行日志页没有页签，只有箱子。"""
+    """运行日志页没有页签，只有箱子。
+
+    **断结构，别断内容。** 原先那条断的是 `"历史" not in r.text`——运行日志
+    页显示的正是**本机真实的** `data/logs/kb/`（`LOG_DIR` 是模块常量，测试
+    没隔离它），日志里一旦出现「历史」两个字就无故变红。
+    """
     r = client.get("/runtime")
-    assert 'class="tabs"' not in r.text
-    assert "历史" not in r.text
+    assert 'class="tabs"' not in r.text          # 没有页签容器
+    assert "data-pane=" not in r.text            # 也没有面板
 
 
 # ---------- 测试隔离 ----------
 
-def test_tests_do_not_write_into_the_real_data_dir(client):
+def test_write_paths_do_not_touch_the_real_data_dir(client):
     """跑测试不该往真库写东西。
 
-    `create_app` 的 `data_dir` 默认是真实 `DATA_DIR`——有一条路径忘了传
-    `data_dir`，测试就会往 `data/logs/flow/` 里写记录（实测真库从 640 条
-    被涨到 766 条）。这条钉住它。
+    **必须真的触发一条写路径。** 只 GET 什么都不会写——那种钉子是假的：
+    实测故意用不带 `data_dir` 的 `create_app` 跑 GET，真库毫发无损。
+
+    这里走 `POST /new`（投递 + 立即整理），它正是会 emit 流程记录的那条。
     """
     from kb.config import DATA_DIR
 
     real = DATA_DIR / "logs" / "flow"
-    before = sorted(p.name for p in real.glob("*.jsonl")) if real.is_dir() else []
-    sizes = {p.name: p.stat().st_size for p in real.glob("*.jsonl")} if real.is_dir() else {}
 
-    client.get("/journal")
-    client.get("/flow")
+    def sizes() -> dict[str, int]:
+        if not real.is_dir():
+            return {}
+        return {p.name: p.stat().st_size for p in real.glob("*.jsonl")}
 
-    after = {p.name: p.stat().st_size for p in real.glob("*.jsonl")} if real.is_dir() else {}
-    assert sorted(after) == before
-    assert after == sizes
+    before = sizes()
+
+    resp = client.post(
+        "/new", data={"content": "这条不该写进真库"}, follow_redirects=False
+    )
+    assert resp.status_code in (303, 200)
+
+    assert sizes() == before, "测试往真实 data/ 写了流程记录——某条 create_app 调用忘了传 data_dir"
