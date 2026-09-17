@@ -23,19 +23,24 @@ from kb.config import Config
 from kb.core import sweep, sweep_state
 from kb.core.chat import handle
 from kb.core.chat_store import list_chats, load_chat
-from kb.core.flow import STEPS, read_flow
-from kb.core.vault import list_domains
+from kb.core.flow import STEPS
+from kb.core.flow import list_days as flow_days
+from kb.core.flow import read_day as read_flow_day
 from kb.llm.base import LLM
-from kb.logging_setup import LOG_FILE
-from kb.web.data import group_flow, load_push_templates, read_journals, tail_log
+from kb.logging_setup import LOG_DIR
+from kb.web.data import (
+    group_flow,
+    journal_days,
+    load_push_templates,
+    read_journal,
+    read_runtime,
+    runtime_days,
+)
 
 TEMPLATES_DIR = Path(__file__).parent / "templates"
 STATIC_DIR = Path(__file__).parent / "static"
 
 templates = Jinja2Templates(directory=str(TEMPLATES_DIR))
-
-# 运行日志页一次显示多少行
-LOG_TAIL_LINES = 300
 
 
 def build_router(
@@ -103,58 +108,45 @@ def build_router(
         return RedirectResponse("/journal", status_code=303)
 
     @router.get("/journal", response_class=HTMLResponse)
-    def journal(request: Request):
+    def journal(request: Request, d: str = ""):
+        days = journal_days(cfg.vault_path)
+        day = d if d in days else (days[0] if days else "")
         return templates.TemplateResponse(
-            request, "journal.html", _ctx("journal", days=read_journals(cfg.vault_path))
+            request,
+            "journal.html",
+            _ctx(
+                "journal",
+                days=days,
+                day=day,
+                sections=read_journal(cfg.vault_path, day) if day else [],
+            ),
         )
 
     @router.get("/flow", response_class=HTMLResponse)
-    def flow(request: Request):
-        groups = group_flow(read_flow(data_dir), steps=STEPS)
-        # 报告读过了就不再拿出来——侧栏那块只在没读时显示
-        state = sweep_state.load_state(data_dir)
+    def flow(request: Request, d: str = ""):
+        days = flow_days(data_dir)
+        day = d if d in days else (days[0] if days else "")
         return templates.TemplateResponse(
             request,
             "flow.html",
             _ctx(
                 "flow",
-                groups=groups,
+                days=days,
+                day=day,
+                groups=group_flow(read_flow_day(data_dir, day), steps=STEPS),
                 steps=STEPS,
-                report=state.get("report"),
             ),
         )
 
-    @router.post("/sweep/reply")
-    def sweep_reply(reply: str = Form(...), note: str = Form("")):
-        """报告下面那两个按钮（「我知道了」/「还需调整」）。
+    def _run_sweep_or_report(requirement: str | None) -> RedirectResponse:
+        """跑一次巡检，失败就落一份没读的报告——**人在这儿等着，不能甩 500**。
 
-        **只有 Form 版**：JSON 版那条曾经写在 `api/http.py` 里，是死代码——
-        同一个路径注册两次，`include_router` 先于 app 级路由，先注册的赢。
-        """
-        if reply == "知道了":
-            sweep_state.mark_read(data_dir)
-        elif note.strip():
-            # 你的意见当一条草稿投出去——走整理那条链（和 `/new` 同一条）
-            push_and_organize(cfg, note, get_llm(), source="Web")
-            sweep_state.mark_read(data_dir)
-        return RedirectResponse("/flow", status_code=303)
-
-    @router.post("/sweep/run")
-    def sweep_run():
-        """手动跑一次巡检，**不受 6 天限制**——是你主动要跑的。
-
-        跑完 `run_sweep` 自己会写 `last_sweep`（Task 1 的 `save_report`），
-        所以自动那条也跟着顺延，这里不用额外记。
-
-        **同步跑**，和 `/new` 一个路子：点完等它跑完，页面转到工作日志看报告。
-        巡检比单条投递慢（全库过一遍 + 一次 LLM），但它是低频动作。
+        写成报告的语义和后台那条失败路径一致（`_sweep_in_background` 也这么落），
+        巡检页上看得见原因。
         """
         try:
-            run_sweep(cfg.vault_path, data_dir, get_llm())
+            run_sweep(cfg.vault_path, data_dir, get_llm(), requirement=requirement)
         except sweep.SweepError as exc:
-            # 模型输出坏了、计划不合规——**人就在这儿等着，不能甩一张 500 页**。
-            # 写成一份没读的报告，语义和后台那条失败路径一致
-            # （`_sweep_in_background` 也是这么落的），侧栏里看得见原因。
             sweep_state.save_report(
                 data_dir,
                 {
@@ -163,18 +155,50 @@ def build_router(
                     "dir_merges": [],
                 },
             )
-        return RedirectResponse("/flow", status_code=303)
+        return RedirectResponse("/sweep", status_code=303)
+
+    @router.post("/sweep/reply")
+    def sweep_reply(reply: str = Form(...), note: str = Form("")):
+        """报告下面那两个按钮（「我知道了」/「还需调整」）。
+
+        **只有 Form 版**：JSON 版那条曾经写在 `api/http.py` 里，是死代码——
+        同一个路径注册两次，`include_router` 先于 app 级路由，先注册的赢。
+
+        「还需调整」是**带着你写的话把巡检重跑一遍**（Q96）——不是投一条草稿，
+        也不是撤销上次的改动（`apply_plan` 单向，没留反演信息）。
+        """
+        if reply == "知道了":
+            sweep_state.mark_read(data_dir)
+        elif note.strip():
+            # 意见交给 `make_plan` 当 `requirement`——重跑一次，出一个新方案
+            return _run_sweep_or_report(note.strip())
+        return RedirectResponse("/sweep", status_code=303)
+
+    @router.post("/sweep/run")
+    def sweep_run():
+        """手动跑一次巡检，**不受 6 天限制**——是你主动要跑的。
+
+        跑完 `run_sweep` 自己会写 `last_sweep`（Task 1 的 `save_report`），
+        所以自动那条也跟着顺延，这里不用额外记。
+
+        **同步跑**，和 `/new` 一个路子：点完等它跑完，页面转到巡检页看报告。
+        巡检比单条投递慢（全库过一遍 + 一次 LLM），但它是低频动作。
+        """
+        return _run_sweep_or_report(None)
 
     @router.get("/runtime", response_class=HTMLResponse)
-    def runtime_page(request: Request):
+    def runtime_page(request: Request, d: str = ""):
+        days = runtime_days(LOG_DIR)
+        day = d if d in days else (days[0] if days else "")
         return templates.TemplateResponse(
             request,
             "runtime.html",
             _ctx(
                 "runtime",
-                log_path=str(LOG_FILE),
-                log_text=tail_log(LOG_FILE, LOG_TAIL_LINES),
-                domains=list_domains(cfg.vault_path),
+                log_dir=str(LOG_DIR),
+                days=days,
+                day=day,
+                log_text=read_runtime(LOG_DIR, day) if day else "",
             ),
         )
 

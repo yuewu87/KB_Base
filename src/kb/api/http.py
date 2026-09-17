@@ -20,6 +20,7 @@ import uvicorn
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
 
+from kb import logging_setup
 from kb.api import runtime
 from kb.config import DATA_DIR, Config, load_config
 from kb.core import flow, organize, sweep, sweep_state
@@ -38,7 +39,7 @@ from kb.core.vault import (
 )
 from kb.llm.base import LLM
 from kb.llm.providers.openai_compat import OpenAICompatLLM
-from kb.logging_setup import setup_logging
+from kb.logging_setup import LOG_DIR, setup_logging
 
 # 草稿 id 只有 4 位随机十六进制（65536 种），撞号时重试而不是覆盖
 PUSH_ATTEMPTS = 10
@@ -468,6 +469,13 @@ def main() -> None:
     )
 
     runtime.write_service_info(port)
+
+    # 清理过期的按天日志（流程 90 天、运行 90 天）。
+    # **放启动时**：它是一次目录扫描，不该压在请求路径上。
+    # vault 里的整理日志是知识，**永不自动删**——这里只碰 data/logs/。
+    removed = flow.prune(DATA_DIR) + logging_setup.prune(LOG_DIR)
+    if removed:
+        logging.getLogger(__name__).info("清理了 %d 个过期日志文件", removed)
 
     # 先把 app 建出来（`create_app` 里会把流程日志的落点配好），再放后台巡检——
     # 否则巡检抢在前面记流程，「规划」「提交」那几行会因为没有落点而丢掉。
