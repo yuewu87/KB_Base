@@ -118,6 +118,9 @@ def push_draft(
             project or "无",
             f" 修改目标={revise_target}" if revise_target else "",
         )
+        # 措辞要中性：这条路同时被 `/push`（CLI 与各会话 agent 走的）和
+        # Web 表单调——写死「你在网页上投递」会让 `kb push` 也记成网页
+        flow.emit("投递", f"收到一条草稿（来源：{source or '未说明'}），编号 {draft.id}")
         return f"已记下，编号 {draft.id}。", draft.id
 
     return f"连续 {PUSH_ATTEMPTS} 次撞上已存在的草稿 id，没记成。", ""
@@ -137,6 +140,11 @@ def push_and_organize(
     会话层那条（`kb push` + 事后 `kb organize`）仍保留缓冲：
     agent 干活时投的东西要攒着，由会话 AI 判断时机（Q62）。
     """
+    # 先开一个 run——这样这次「投递」和紧接着的整理是同一个 run，
+    # 工作日志页上它们才会画进同一条流程链。
+    run = f"{datetime.now():%Y%m%d-%H%M%S}"
+    flow.set_run(run)
+
     text, draft_id = push_draft(
         cfg, content, source=source, revise_target=revise_target
     )
@@ -147,6 +155,7 @@ def push_and_organize(
         cfg.vault_path,
         [p for p in [find_draft(cfg.vault_path, draft_id)] if p],
         llm,
+        run_id=run,
     )
     if not results:
         return text
@@ -275,6 +284,8 @@ def create_app(
         else:
             paths = list_drafts(cfg.vault_path)
 
+        # run 与「开始整理」那句都由 `organize_selected` 自己记
+        # （入口有三个，在端点里记会漏掉另两条）
         log = logging.getLogger("kb.organize")
         log.info("开始整理 %d 条草稿", len(paths))
         results = organize.organize_selected(cfg.vault_path, paths, get_llm())

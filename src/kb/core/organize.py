@@ -14,12 +14,13 @@ import time
 from datetime import datetime
 from pathlib import Path
 
-from kb.core import planning, review
+from kb.core import flow, planning, review
 from kb.core.classify import find_candidates
 from kb.core.journal import append_results
 from kb.core.models import (
     K_CREATED,
     K_TOPIC,
+    K_TYPE,
     K_UPDATED,
     Draft,
     OrganizePlan,
@@ -130,10 +131,14 @@ def apply_plan(
     """按计划落盘。不调 LLM——所以慢不了，也几乎不会失败。"""
     if plan.outcome is Outcome.PENDING:
         move_to_pending(vault_root, draft_path)
+        reason = plan.pending_reason or "无法归类"
+        # 这里是提前 return，流程链上也走到了终点——不记的话「落盘」
+        # 永远显示未走到，看的人会以为卡住了
+        flow.emit("落盘", f"归不了类，搁进待归类：{reason}")
         return OrganizeResult(
             draft_id=plan.draft_id,
             kind=ResultKind.PENDING,
-            detail=plan.pending_reason or "无法归类",
+            detail=reason,
         )
 
     assert plan.target_path is not None      # 已在 validate_plan 保证
@@ -175,6 +180,9 @@ def apply_plan(
 
     txn.touch_delete(draft_path)
     draft_path.unlink(missing_ok=True)
+
+    verb = "新建" if plan.outcome is Outcome.CREATE else "并入"
+    flow.emit("落盘", f"{verb} {plan.target_path}")
 
     return OrganizeResult(
         draft_id=plan.draft_id,
@@ -221,7 +229,16 @@ def make_plan(
             plan = planning.parse_plan(draft.id, raw)
             plan.revise_target = draft.revise_target
             planning.validate_plan(plan, vault_root)
+            note_type = plan.frontmatter.get(K_TYPE) or "未定"
+            flow.emit(
+                "规划",
+                f"模型决定放进「{plan.target_path}」，类型是{note_type}",
+            )
+            flow.emit("校验", "校验通过")
+            planned_path = plan.target_path
             plan = review.review_plan(plan, vault_root, llm)
+            if plan.target_path != planned_path:
+                flow.emit("审核", f"审核觉得和已有分类重了，改用「{plan.target_path}」")
             planning.validate_plan(plan, vault_root)      # 审核的输出也要过静态校验
             return plan
         except LLMError as exc:
@@ -288,6 +305,7 @@ def organize_selected(
     when: datetime | None = None,
     sleep=time.sleep,
     commit: bool = True,
+    run_id: str | None = None,
 ) -> list[OrganizeResult]:
     """整理指定的若干条草稿，按条隔离（Q45）。
 
@@ -295,6 +313,17 @@ def organize_selected(
     否则两条路径会各自实现「写日志 + 提交」，迟早对不上。
     """
     when = when or datetime.now()
+
+    # **一批一个新 run**，在这儿设而不是在端点里——入口有三个
+    # （`/organize`、Web 投递的 `push_and_organize`、对话的 organize 动作），
+    # 在端点里设的话另外两条路的流程会全挤进「未分组」互相串。
+    #
+    # `run_id` 由调用方给：Web 投递要把它那次「投递」和随后的整理串成同一个
+    # run，所以先设好再传进来。
+    flow.set_run(run_id or f"{when:%Y%m%d-%H%M%S}")
+    if paths:
+        flow.emit("投递", f"开始整理，共 {len(paths)} 条草稿")
+
     results: list[OrganizeResult] = []
     touched: list[Path] = []
 
@@ -405,11 +434,14 @@ def commit_changes(
     if not rels:
         return False
 
+    message = build_commit_message(results, when)
     _git(vault_root, "add", "--", *rels)
     proc = _git(
         vault_root,
         "-c", f"user.name={SERVICE_AUTHOR_NAME}",
         "-c", f"user.email={SERVICE_AUTHOR_EMAIL}",
-        "commit", "-m", build_commit_message(results, when),
+        "commit", "-m", message,
     )
+    if proc.returncode == 0:
+        flow.emit("提交", f"提交了一个 commit：「{message.splitlines()[0]}」")
     return proc.returncode == 0

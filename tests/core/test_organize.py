@@ -449,3 +449,18 @@ def test_full_run_writes_journal_and_commits(vault):
     # 整轮只产生一个 commit
     count = _git(vault, "rev-list", "--count", "HEAD").stdout.strip()
     assert count == "2"                  # 骨架 1 + 本次整理 1
+
+
+# ---------- 流程日志（Q89）----------
+
+def test_organize_emits_flow_steps(vault, monkeypatch):
+    """整理会把每一步说进流程日志（Q89）。"""
+    rows = []
+    monkeypatch.setattr("kb.core.flow.emit", lambda step, text: rows.append((step, text)))
+
+    _run(vault, FakeLLM([_plan_json()]))
+
+    steps = [s for s, _ in rows]
+    assert "规划" in steps
+    assert "校验" in steps
+    assert "落盘" in steps
