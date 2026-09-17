@@ -108,6 +108,16 @@ def test_new_fields_are_read(tmp_path):
     assert cfg.keep_days == 30
 
 
+def test_bad_log_level_in_env_falls_back_to_info(tmp_path):
+    """手改 .env 写成别的级别，不该让 setLevel 抛。"""
+    env = tmp_path / ".env"
+    env.write_text(
+        "KB_LLM_API_KEY=k\nKB_LLM_BASE_URL=u\nKB_LLM_MODEL=m\nKB_LOG_LEVEL=TRACE\n",
+        encoding="utf-8",
+    )
+    assert load_config(env).log_level == "INFO"
+
+
 def test_reload_config_sees_the_new_value(tmp_path):
     """**这条是热重载的地基。**
 

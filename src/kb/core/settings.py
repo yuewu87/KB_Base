@@ -16,8 +16,9 @@
 （下一次调用模型全是失败），而 `choice` / `int` 本来就会报错——
 只剩 `text` 没管就成了唯一的缺口。
 
-**非字符串一律不强转。** POST 走 JSON，`null` / `true` / 数字都收得到；
-`str(None)` 是字面量「None」，写进 `.env` 就是把配置写坏。
+**非字符串一律不强转。** 表单和 JSON 都把值送成字符串，但 `validate` 是个
+公开函数，别的调用方（手写脚本、将来的别的入口）可能直接递进来 `null` /
+`true` / 数字；`str(None)` 是字面量「None」，写进 `.env` 就是把配置写坏。
 """
 
 from __future__ import annotations
@@ -119,6 +120,10 @@ def write_env(path: Path, updates: dict[str, str]) -> None:
     **换行一律写 LF。** `Path.write_text` 在 Windows 上默认做换行翻译，
     不显式指定的话用户保存一次，他那份 LF 的 `.env` 就整份变成 CRLF——
     这跟「原样保留」是矛盾的。
+
+    ⚠️ 反过来说：**CRLF 的 `.env` 存一次会被整份归一成 LF。**「原样保留」
+    保的是注释、空行、顺序，**不包括行尾**。（真库那份本来就是 LF，本机无影响；
+    但别把这句话读成「行尾也一字不动」。）
     """
     lines = path.read_text(encoding="utf-8").splitlines() if path.is_file() else []
 
@@ -149,8 +154,10 @@ def validate(raw: dict[str, str]) -> dict[str, str]:
     只读字段、不认识的键、留空的密钥——都在这里丢掉。
     有问题就抛 `SettingsError`，**一次报全**，别让人改一个跑一次。
 
-    **POST 走 JSON，客户端送什么类型都收得到**，所以这里只准抛
-    `SettingsError`（路由 catch 的就是它）——抛出别的就是 500。
+    HTTP 那条路送进来的**只会是字符串**（`SettingsBody.values` 是
+    `dict[str, str]`，非字符串在 pydantic 就被 422 挡了）——但这里仍然只准抛
+    `SettingsError`（路由 catch 的就是它，抛出别的就是 500），因为这是个公开
+    函数，别的调用方可以拿任何类型来调。
     `int` 类允许数字，转成字符串交给 `int()`；其余各类**只认字符串，
     不强转**，不是 `str` 就当空串，走各自「留空」的那条检查。
     """
@@ -163,7 +170,9 @@ def validate(raw: dict[str, str]) -> dict[str, str]:
             continue                    # 后端不信前端：只读与服务端不认识的，丢掉
 
         if spec.kind == "int":
-            # 表单送的是字符串，手写请求送的是数字——两条路都收。
+            # 表单送的是字符串。HTTP 层是 `dict[str, str]`，非字符串在
+            # pydantic 就被 422 挡了、到不了这里；这一手是 `validate`
+            # 作为公开函数的自保。
             try:
                 number = int(str(value or "").strip())
             except ValueError:

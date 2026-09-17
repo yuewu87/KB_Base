@@ -300,6 +300,8 @@ def create_app(
 
         顺序不能反：**先写文件再换内存**。写失败就抛出去——文件没写成，
         内存里跟着变就成了两套真相。
+        **会抛的那一步（`setLevel`）一律排在换内存前面**，同理：
+        它抛在 swap 之后，就成了「文件已写、cfg 已换、客户端却拿 500」。
 
         **重载后要回头看一遍必填项还在不在。** `reload_config` 永不抛
         （它读不回来就给你一份空壳），所以「重载成功」与「重载退化成空壳」
@@ -319,9 +321,14 @@ def create_app(
                 "KB_LLM_API_KEY / KB_LLM_BASE_URL / KB_LLM_MODEL 这三行还在不在"
             )
 
+        # 日志级别当场生效。**排在换内存之前**——它是这儿唯一会抛的一步
+        # （`setLevel` 遇到不认识的级别名抛 `ValueError`，`config._log_level`
+        # 的白名单只是第二道保险）。排在后面就会留下一个最难堪的状态：
+        # 文件已写、`cfg` 已换、客户端拿 500——**响应说失败了，改动其实生效了**。
+        logging.getLogger().setLevel(new_cfg.log_level)
+
         state["cfg"] = new_cfg
         cache["llm"] = None                                  # 模型三件套可能变了
-        logging.getLogger().setLevel(new_cfg.log_level)      # 日志级别当场生效
         return clean
 
     def _chat_organize_fn(kind: str, content: str, target: str | None) -> str:
@@ -496,7 +503,6 @@ def _default_quit() -> None:
     反过来页面拿不到响应，只会显示一个连接失败。所以起一个短延迟的定时器
     去执行真正的退出，端点立刻返回。
     """
-    from kb.api import runtime
 
     def _die() -> None:
         runtime.clear_service_info()

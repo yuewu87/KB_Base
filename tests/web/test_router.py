@@ -476,14 +476,32 @@ def test_reload_to_an_empty_shell_does_not_swap_in(tmp_path):
     `reload_config` 永不抛（读不回来就给一份空壳），所以调用方从返回值上
     分不清成功与降级。分不清就换，等于用手滑删掉一行 `.env` 的动作
     把正在跑的服务带崩。
+
+    **「没换进去」得验实。** 只看 400 +「必填」是不够的：把 swap 挪到
+    raise 之前，那两条断言照样绿。所以这里再用一个黑盒手段**读一次内存里
+    那份配置**——`/settings/test` 不传模型名时兜底取 `get_cfg()`，
+    记下它把哪个模型名递给了 build 函数。
     """
     env = tmp_path / ".env"
     env.write_text(
         "KB_LLM_API_KEY=k\nKB_LLM_BASE_URL=u\nKB_LLM_MODEL=old\n", encoding="utf-8"
     )
     cfg = Config("k", "u", "old", tmp_path, None)
-    app = create_app(cfg, data_dir=tmp_path, env_file=env, build_llm_fn=lambda c: FakeLLM("{}"))
+    built: list[str] = []
+
+    def _build(c):
+        built.append(c.llm_model)
+        return FakeLLM("{}")
+
+    app = create_app(cfg, data_dir=tmp_path, env_file=env, build_llm_fn=_build)
     client = TestClient(app)
+
+    def current_model() -> str:
+        """黑盒读「内存里那份配置」的模型名。"""
+        client.post("/settings/test", json={"values": {}})
+        return built[-1]
+
+    assert current_model() == "old"          # 保存前
 
     # 手工把 .env 弄坏（模拟手滑删行），再走一次保存
     env.write_text("KB_LLM_MODEL=x\n", encoding="utf-8")
@@ -491,6 +509,71 @@ def test_reload_to_an_empty_shell_does_not_swap_in(tmp_path):
 
     assert resp.status_code == 400
     assert "必填" in resp.json()["detail"]
+    # swap 真挪到 raise 之前时，这一行会看见「x」（或空壳的空串）——变红
+    assert current_model() == "old"
+
+
+def test_saving_after_a_hand_broken_log_level_does_not_500(tmp_path):
+    """手改出 TRACE 之后，发一个不带该键的 POST 不该炸。
+
+    原来的顺序是「换 cfg → setLevel」，setLevel 抛 ValueError 就成了
+    「文件已写、cfg 已换、客户端拿 500」——改动其实生效了。
+    """
+    env = tmp_path / ".env"
+    env.write_text(
+        "KB_LLM_API_KEY=k\nKB_LLM_BASE_URL=u\nKB_LLM_MODEL=m\nKB_LOG_LEVEL=TRACE\n",
+        encoding="utf-8",
+    )
+    app = create_app(
+        Config("k", "u", "m", tmp_path, None),
+        data_dir=tmp_path, env_file=env, build_llm_fn=lambda c: FakeLLM("{}"),
+    )
+    resp = TestClient(app).post("/settings", json={"values": {"KB_LLM_MODEL": "x"}})
+
+    assert resp.status_code == 200
+
+
+def test_saving_the_model_invalidates_the_llm_cache(tmp_path):
+    """保存模型名之后，下一次拿 LLM 得是**新建的**。
+
+    设计第十节点名要测的一条。缓存不失效的话，改完模型还得重启才生效——
+    而「保存即生效」正是这次要做的。
+    """
+    env = tmp_path / ".env"
+    env.write_text(
+        "KB_LLM_API_KEY=k\nKB_LLM_BASE_URL=u\nKB_LLM_MODEL=old\n", encoding="utf-8"
+    )
+    built: list[str] = []
+
+    def _build(c):
+        built.append(c.llm_model)
+        return FakeLLM("{}")
+
+    app = create_app(
+        Config("k", "u", "old", tmp_path, None),
+        data_dir=tmp_path, env_file=env, build_llm_fn=_build,
+    )
+    client = TestClient(app)
+
+    # 先让它建一次（缓存有东西了）
+    client.post("/settings/test", json={"values": {}})
+    assert built == ["old"]
+
+    client.post("/settings", json={"values": {"KB_LLM_MODEL": "new"}})
+
+    # 再要一次——缓存该失效了
+    client.post("/settings/test", json={"values": {}})
+    assert built[-1] == "new"
+
+
+def test_test_connection_requires_a_body(client):
+    """body 必填——设计要的是「拿表单里当前填的值」。
+
+    不带 body 的调用只能测已保存的配置，而用户刚改的正是表单里的值——
+    让它响一声（422）比悄悄退化成「测旧配置」好。前端的 JS 必须传
+    `{values: ...}`。
+    """
+    assert client.post("/settings/test").status_code == 422
 
 
 def test_save_settings_rejects_bad_value(client):
@@ -521,6 +604,40 @@ def test_settings_has_the_about_group(client):
     body = client.get("/settings").text
     assert "关于" in body
     assert "服务状态" in body
+
+
+def test_readonly_fields_show_the_effective_values(tmp_path):
+    """只读两栏显示**生效值**，不是 `.env` 里的字面值。
+
+    这份 `.env` 里没写 `KB_VAULT_PATH` / `KB_PORT`——按字面值两栏都是**空白**，
+    尽管跑起来用的是配置里的 vault 路径、端口是自动找的空闲端口。
+    空白看起来像坏了，而这一页的任务正是让人看清现在在用的是什么。
+    """
+    env = tmp_path / ".env"
+    env.write_text(
+        "KB_LLM_API_KEY=k\nKB_LLM_BASE_URL=u\nKB_LLM_MODEL=m\n", encoding="utf-8"
+    )
+    cfg = Config("k", "u", "m", tmp_path / "我的库", None)
+
+    body = TestClient(
+        create_app(cfg, data_dir=tmp_path, env_file=env)
+    ).get("/settings").text
+
+    assert "我的库" in body          # vault 路径：生效值
+    assert "自动" in body            # 端口没配 → 说清是自动找的，不是空白
+
+
+def test_service_status_shows_the_start_time(client, monkeypatch):
+    """设计第四节那栏的样例是 `已连接 · 启动于 18:31`——启动时间要在。"""
+    from kb.api import runtime
+
+    monkeypatch.setattr(runtime, "running_port", lambda: 51723)
+    monkeypatch.setattr(
+        runtime, "read_service_info", lambda: {"started": "2026-09-17 18:31:22"}
+    )
+    monkeypatch.setattr(runtime, "is_stale", lambda: False)
+
+    assert "启动于 18:31" in client.get("/settings").text
 
 
 def test_settings_never_echoes_the_api_key(client, tmp_path):

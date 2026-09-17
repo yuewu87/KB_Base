@@ -20,6 +20,7 @@ from fastapi.responses import HTMLResponse, RedirectResponse
 from fastapi.templating import Jinja2Templates
 from pydantic import BaseModel
 
+from kb.api import runtime
 from kb.api.http import push_and_organize, run_sweep
 from kb.config import Config
 from kb.core import settings, sweep, sweep_state
@@ -53,7 +54,7 @@ class SettingsBody(BaseModel):
     values: dict[str, str] = {}
 
 
-def settings_context(env_path: Path) -> dict:
+def settings_context(env_path: Path, cfg: Config) -> dict:
     """给模板的：四组字段 + 它们当前的值（密钥掩码）。
 
     **「关于」那一组不在 `.env` 里**——它显示的是运行时的东西（服务状态、
@@ -63,8 +64,29 @@ def settings_context(env_path: Path) -> dict:
     这一页该显示的是**这个 app 实际在用的那份配置**，不是「工程根目录下恰好
     存在的那个文件」。生产里两者一样，测试里不该一样——写死真 `.env` 的话，
     新克隆的仓库没有那个文件，掩码那条用例必红。
+
+    **`cfg` 是当前那份生效配置**（`create_app` 里那个盒子里的），只读字段
+    显示它、其余字段显示 `.env` 里的字面值。理由见 `_value`。
     """
     values = settings.read_env(env_path)
+
+    def _value(f) -> str:
+        """只读字段显示**生效值**，可改字段显示 `.env` 里的字面值。
+
+        只读两栏不能按字面值显示：`.env` 里没写 `KB_VAULT_PATH` / `KB_PORT`
+        的人（默认值就是给这种 `.env` 准备的），那两栏会是**空白**——
+        尽管跑起来用的是 `DEFAULT_VAULT_PATH`、端口是自动找的空闲端口。
+        一栏空白看起来像坏了，而这一页的任务正是让人看清楚现在在用的是什么。
+
+        可改字段反过来，**必须**是 `.env` 的字面值：留空 = 不改是它们的语义
+        （密钥尤其），显示生效值就等于让人一保存把 key 覆盖成掩码。
+        """
+        if f.kind == "readonly":
+            if f.key == "KB_VAULT_PATH":
+                return str(cfg.vault_path)
+            if f.key == "KB_PORT":
+                return str(cfg.port) if cfg.port else "自动"
+        return _display(f, values.get(f.key, f.default))
 
     groups = [
         {
@@ -76,7 +98,7 @@ def settings_context(env_path: Path) -> dict:
                     "kind": f.kind,
                     "help": f.help,
                     "choices": f.choices,
-                    "value": _display(f, values.get(f.key, f.default)),
+                    "value": _value(f),
                 }
                 for f in group.fields
             ],
@@ -104,15 +126,25 @@ def settings_context(env_path: Path) -> dict:
 
 
 def _service_status() -> str:
-    """一行说清服务在不在、跑的是不是旧代码。"""
-    from kb.api import runtime
+    """一行说清服务在不在、跑了多久、跑的是不是旧代码。
 
+    「启动于」是**给人对表用的**（设计第四节那栏的样例就是它）：改了代码重启
+    没有、日志里那一串要不要重新看，看一眼这个时间就够。
+    """
     port = runtime.running_port()
     if port is None:
         return "未在运行"
+
+    text = f"已连接（:{port}）"
+    info = runtime.read_service_info() or {}
+    started = info.get("started")
+    if isinstance(started, str) and " " in started:
+        # `2026-09-17 18:31:22` → `18:31`。文件里的形状由 runtime 决定，
+        # 对不上就当没有这一项——一栏状态不该为此变成异常页。
+        text += f" · 启动于 {started.split(' ', 1)[1][:5]}"
     if runtime.is_stale():
-        return f"已连接（:{port}）· 代码比进程新，建议重启"
-    return f"已连接（:{port}）"
+        text += " · 代码比进程新，建议重启"
+    return text
 
 
 def _display(field, value: str) -> str:
@@ -309,7 +341,9 @@ def build_router(
         return templates.TemplateResponse(
             request,
             "_settings.html",
-            _ctx("settings", **settings_context(env_path)),
+            # `get_cfg()` 而不是某个存下来的值：这一页要显示的是**此刻**在用的
+            # 那份配置（保存过一次之后就是新的那份）。
+            _ctx("settings", **settings_context(env_path, get_cfg())),
         )
 
     @router.post("/settings")
@@ -337,6 +371,28 @@ def build_router(
 
         **它要花钱**（一次极小的调用）。这是刻意的：换模型/换 key 时，
         这是唯一能立刻知道对不对的办法。
+
+        ## body 必填——这不是疏忽，是定下来的约定
+
+        设计要的是「拿**表单里当前填的值**」去测。不带 body 的调用没有意义：
+        它只能测**已保存的配置**，而用户刚改的正是表单里的值——测了个寂寞，
+        界面还会显示「通了」。所以这里收的是必填的 `SettingsBody`，**不带 body
+        的调用拿 422**。让它响一声，比悄悄退化成「测的是旧配置」好。
+
+        **下一个批次写 JS 时别漏 body**：
+
+        ```javascript
+        const r = await fetch('/settings/test', {
+          method: 'POST',
+          headers: {'Content-Type': 'application/json'},
+          body: JSON.stringify({values: Object.fromEntries(new FormData(form))}),
+        });
+        ```
+
+        （计划 Task 5 那段 JS 只写了 `{method: 'POST'}`，照抄下去「测试连接」
+        会**永远**显示不通。另外前端显示失败原因时要**带上 HTTP 状态**——
+        不然 422 会被显示成「不通：未知原因」，谁也查不出来。
+        用例见 `tests/web/test_router.py::test_test_connection_requires_a_body`。）
         """
         cfg = get_cfg()
         # 表单里的值优先；没填的（比如密钥留空）沿用当前的

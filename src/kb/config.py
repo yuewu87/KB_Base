@@ -45,6 +45,19 @@ class Config:
     keep_days: int = 90
 
 
+# 日志级别只认这两个。写别的（手改 `.env`）会在 `logging.setLevel` 上抛
+# `ValueError`——那就成了一个「文件改了、内存没换、客户端拿 500」的怪状态。
+_VALID_LOG_LEVELS = ("INFO", "DEBUG")
+
+
+def _log_level(values: Mapping) -> str:
+    """日志级别只认 INFO / DEBUG——写别的（手改 .env）会让 `setLevel` 抛，
+    那就成了一个「文件改了、内存没换、客户端拿 500」的怪状态。
+    """
+    raw = str(values.get("KB_LOG_LEVEL") or "").strip().upper()
+    return raw if raw in _VALID_LOG_LEVELS else "INFO"
+
+
 def _int_or(values: Mapping, key: str, default: int) -> int:
     """读一个正整数配置。**读不出来就静默回默认值。**
 
@@ -83,7 +96,7 @@ def _build(get: Mapping, *, strict: bool = True) -> Config:
         llm_model=required("KB_LLM_MODEL"),
         vault_path=Path(vault_raw) if vault_raw else DEFAULT_VAULT_PATH,
         port=int(port_raw) if port_raw.isdigit() else None,
-        log_level=(str(get.get("KB_LOG_LEVEL") or "").strip() or "INFO").upper(),
+        log_level=_log_level(get),
         sweep_interval_days=_int_or(get, "KB_SWEEP_INTERVAL", 6),
         keep_days=_int_or(get, "KB_LOG_KEEP_DAYS", 90),
     )
