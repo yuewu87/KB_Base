@@ -856,18 +856,29 @@ body.collapsed .side-btn.quit { background: #8c3b3b; color: #fff; }
   z-index: 50;
 }
 
+/* **尺寸写死，不跟内容走。** 四组字段数不一样（模型配置 3、服务 4、
+   关于 2），让它自己撑的话切一次页签窗口就跳一下。固定之后内容多的那组
+   在 .settings-panes 里滚，窗口本体不动。 */
 .modal {
   background: var(--surface);
   border-radius: var(--r-lg);
   box-shadow: var(--shadow-lift);
   width: min(680px, 92vw);
-  max-height: 84vh;
+  height: min(560px, 84vh);
   display: flex;
   flex-direction: column;
   overflow: hidden;
 }
 
-.modal.notice { width: min(400px, 92vw); padding: 22px 24px; gap: 8px; }
+/* 「服务已停」那个提示窗**不跟着写死**——它就是两句话，撑出 560 高
+   会留一大片空白。它是另一种东西：一个提醒，不是一个面板。 */
+.modal.notice {
+  width: min(400px, 92vw);
+  height: auto;
+  max-height: 84vh;
+  padding: 22px 24px;
+  gap: 8px;
+}
 .modal.notice h2 { margin: 0 0 4px; font-size: 17px; }
 
 .settings-head {
@@ -917,7 +928,16 @@ body.collapsed .side-btn.quit { background: #8c3b3b; color: #fff; }
   font-weight: 600;
 }
 
-.settings-panes { flex: 1; padding: 16px 20px; overflow-y: auto; }
+/* flex 纵列 + 底部按钮 margin-top:auto —— 把「测试连接 / 保存」**钉在窗口底部**。
+   不钉的话它跟着字段走：模型配置只有 3 个字段，按钮就浮在半空，
+   下面留一大片空白（截图里看得很清楚）。固定高度的窗口里尤其难看。 */
+.settings-panes {
+  flex: 1;
+  padding: 16px 20px;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+}
 
 .settings-panes .field { margin-bottom: 13px; }
 .settings-panes label { display: block; margin-bottom: 4px; color: var(--muted); }
@@ -946,7 +966,7 @@ body.collapsed .side-btn.quit { background: #8c3b3b; color: #fff; }
   display: flex;
   justify-content: flex-end;
   gap: 8px;
-  margin-top: 16px;
+  margin-top: auto;          /* 钉到底部，见 .settings-panes 的注释 */
   padding-top: 14px;
   border-top: 1px solid var(--line);
 }
