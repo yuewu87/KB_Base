@@ -43,6 +43,11 @@ requirements.lock.txt
 #
 # 代价：换机器时 data/ 不跟着 git 走，要手动拷（日志和会话本身也未必需要）。
 data/
+#
+# 确认：会话历史落在 data/chats/，已被上面这条整棵排除覆盖，不另加 chats/ 条目
+# （裸写 chats/ 会连代码里任何叫 chats 的目录一起排除，范围超出本意）。
+# 这里是点名，不是新增规则——改这两行的人请先确认 data/ 还在。
+
 *.db
 *.sqlite
 *.sqlite3

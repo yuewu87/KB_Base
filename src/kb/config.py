@@ -14,6 +14,15 @@ from dotenv import load_dotenv
 # 本文件位于 <root>/src/kb/config.py，向上三层即工程根目录
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 
+# 运行数据的根：运行日志、service.json、会话历史、工具缓存全在它下面。
+#
+# **整棵被 .gitignore 排除。** 代码仓库是 public 的，而会话历史里有个人对话内容
+# ——落错地方就等于公开发布。所以凡是「服务运行时产生的东西」，路径一律
+# **从这里往下拼**，不要直接拿 PROJECT_ROOT 拼。
+#
+# 有测试守着这条（tests/test_architecture.py）。
+DATA_DIR = PROJECT_ROOT / "data"
+
 DEFAULT_VAULT_PATH = Path(r"E:\KB_Library")
 
 

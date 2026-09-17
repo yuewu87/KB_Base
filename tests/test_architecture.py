@@ -114,3 +114,34 @@ def test_no_dependency_on_interface_layer(package):
         if _is_forbidden(name)
     ]
     assert not violations, "领域层不得依赖接口层（Q33）：\n" + "\n".join(violations)
+
+
+def test_data_dir_is_gitignored():
+    """运行数据必须落在被 gitignore 覆盖的地方。
+
+    代码仓库是 public 的——会话历史里有个人对话内容，落错地方就是**公开发布**。
+    这条把「data/ 不入库」从约定变成机制，和上面「core 不依赖 api」同一个道理。
+
+    背景：`chat_store` 早期的参数叫 `project_root`，调用方顺手传 `PROJECT_ROOT`
+    就会把会话写到仓库根的 `chats/`——**那条路径没被任何规则忽略**。
+    """
+    import subprocess
+
+    from kb.config import DATA_DIR, PROJECT_ROOT
+    from kb.core.chat_store import chat_path
+
+    assert DATA_DIR.is_relative_to(PROJECT_ROOT), "DATA_DIR 应当在工程根下"
+    assert DATA_DIR.name == "data"
+
+    sample = chat_path(DATA_DIR, "20260917-a3f2")
+    proc = subprocess.run(
+        ["git", "check-ignore", "-q", str(sample)],
+        cwd=PROJECT_ROOT,
+        capture_output=True,
+        encoding="utf-8",
+        errors="replace",
+    )
+    assert proc.returncode == 0, (
+        f"{sample} 没被 gitignore 覆盖——它会进 public 仓库。"
+        "检查 .gitignore 里 data/ 那条还在不在。"
+    )
