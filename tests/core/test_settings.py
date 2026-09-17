@@ -184,24 +184,28 @@ def test_validate_keeps_empty_api_key_out():
     assert validate({"KB_LLM_API_KEY": "   "}) == {}
 
 
-@pytest.mark.parametrize("bad", [5, 6.5, ["a"], {"b": 1}, None, True])
-def test_validate_tolerates_non_string_values(bad):
+@pytest.mark.parametrize("bad", [5, 6.5, ["a"], {"b": 1}, True])
+def test_validate_rejects_non_string_for_text_fields(bad):
     """POST 走 JSON——客户端送什么类型都收得到。
 
-    **不能让它炸成 500**：路由只 catch `SettingsError`，`AttributeError`
-    会一路窜出去。实测 `{'KB_LOG_LEVEL': 5}` 就是这么炸的。
+    **非字符串不强转**：`str(None)` 是字面量「None」，写进 `.env` 就是把
+    配置写坏。文本字段拿到非字符串，一律当空处理 → 撞上「不能留空」。
     """
-    out = validate({"KB_LLM_MODEL": bad})       # 不抛
-    assert out == {"KB_LLM_MODEL": str(bad)}
+    with pytest.raises(SettingsError, match="模型名不能留空"):
+        validate({"KB_LLM_MODEL": bad})
 
 
-def test_validate_treats_json_null_api_key_as_untouched():
-    """JSON 的 null 不是「把 key 改成 None 这个字符串」——等于没填这一项。
-
-    不特判的话 `str(None)` 是 `"None"`，非空，就被当成新 key 写进 `.env`，
-    下一次调模型直接 401。
-    """
+def test_validate_treats_json_null_as_empty():
+    """JSON 的 `null` 不是字符串。文本字段当空处理（→ 报错），
+    密钥当「没填」（→ 不改），**都不会把 `None` 写进 `.env`**。"""
+    with pytest.raises(SettingsError, match="不能留空"):
+        validate({"KB_LLM_MODEL": None})
     assert validate({"KB_LLM_API_KEY": None}) == {}
+
+
+def test_validate_accepts_a_json_number_for_an_int_field():
+    """int 类允许数字——表单送字符串，但手写请求送数字也该收。"""
+    assert validate({"KB_SWEEP_INTERVAL": 6}) == {"KB_SWEEP_INTERVAL": "6"}
 
 
 def test_validate_rejects_empty_text_fields():

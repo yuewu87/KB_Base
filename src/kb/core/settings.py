@@ -15,6 +15,9 @@
 **`text` 字段留空 = 报错。** 模型名、API 地址这些留空会把服务写坏
 （下一次调用模型全是失败），而 `choice` / `int` 本来就会报错——
 只剩 `text` 没管就成了唯一的缺口。
+
+**非字符串一律不强转。** POST 走 JSON，`null` / `true` / 数字都收得到；
+`str(None)` 是字面量「None」，写进 `.env` 就是把配置写坏。
 """
 
 from __future__ import annotations
@@ -142,8 +145,10 @@ def validate(raw: dict[str, str]) -> dict[str, str]:
     只读字段、不认识的键、留空的密钥——都在这里丢掉。
     有问题就抛 `SettingsError`，**一次报全**，别让人改一个跑一次。
 
-    **POST 走 JSON，客户端送什么类型都收得到。** 进判断之前一律转成字符串，
-    这里只准抛 `SettingsError`（路由 catch 的就是它）——抛出别的就是 500。
+    **POST 走 JSON，客户端送什么类型都收得到**，所以这里只准抛
+    `SettingsError`（路由 catch 的就是它）——抛出别的就是 500。
+    `int` 类允许数字，转成字符串交给 `int()`；其余各类**只认字符串，
+    不强转**，不是 `str` 就当空串，走各自「留空」的那条检查。
     """
     clean: dict[str, str] = {}
     problems: list[str] = []
@@ -153,29 +158,10 @@ def validate(raw: dict[str, str]) -> dict[str, str]:
         if spec is None or spec.kind == "readonly":
             continue                    # 后端不信前端：只读与服务端不认识的，丢掉
 
-        # JSON 的 null 不是「改成 None 这个字符串」——密钥按「留空 = 不改」跳过，
-        # 转成字符串再判断就晚了一步（`str(None)` 是 `"None"`，非空）。
-        if value is None and spec.kind == "secret":
-            continue
-
-        # POST 走 JSON，客户端送什么类型都收得到——先统统转成字符串再动手。
-        # 不转的话 `.strip()` 抛的 `AttributeError` 路由不认（只 catch
-        # `SettingsError`），当场就是 500。实测 `{'KB_LOG_LEVEL': 5}` 这么炸的。
-        value = str(value).strip()
-
-        if spec.kind == "secret" and not value:
-            continue                    # 留空 = 不改
-        if spec.kind == "text" and not value:
-            problems.append(f"{spec.label}不能留空")
-            continue
-        if spec.kind == "choice" and value not in spec.choices:
-            problems.append(
-                f"{spec.label}只能取 {'、'.join(spec.choices)}，收到的是「{value}」"
-            )
-            continue
         if spec.kind == "int":
+            # 表单送的是字符串，手写请求送的是数字——两条路都收。
             try:
-                number = int(value)
+                number = int(str(value or "").strip())
             except ValueError:
                 problems.append(f"{spec.label}要填整数，收到的是「{value}」")
                 continue
@@ -185,7 +171,24 @@ def validate(raw: dict[str, str]) -> dict[str, str]:
             clean[key] = str(number)
             continue
 
-        clean[key] = value
+        # 其余各类**只认字符串，不强转**：`str(None)` 是字面量「None」，
+        # 写进 `.env` 就是把配置写坏。不是 `str` 就当空串——`text` 撞「不能留空」、
+        # `choice` 撞「只能取…」、`secret` 当「不改」。顺带也不会再抛
+        # `AttributeError`（路由只 catch `SettingsError`，别的当场就是 500）。
+        text = value.strip() if isinstance(value, str) else ""
+
+        if spec.kind == "secret" and not text:
+            continue                    # 留空 = 不改
+        if spec.kind == "text" and not text:
+            problems.append(f"{spec.label}不能留空")
+            continue
+        if spec.kind == "choice" and text not in spec.choices:
+            problems.append(
+                f"{spec.label}只能取 {'、'.join(spec.choices)}，收到的是「{text}」"
+            )
+            continue
+
+        clean[key] = text
 
     if problems:
         raise SettingsError("；".join(problems))
