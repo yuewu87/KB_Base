@@ -12,7 +12,9 @@ from __future__ import annotations
 
 import argparse
 import logging
+import os
 import threading
+from collections.abc import Callable
 from datetime import datetime
 from pathlib import Path
 
@@ -21,8 +23,8 @@ from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
 
 from kb.api import runtime
-from kb.config import DATA_DIR, Config, load_config
-from kb.core import flow, organize, sweep, sweep_state
+from kb.config import DATA_DIR, PROJECT_ROOT, Config, load_config, reload_config
+from kb.core import flow, organize, settings, sweep, sweep_state
 from kb.core.chat import handle
 from kb.core.chat_store import list_chats, load_chat
 from kb.core.models import Draft, OrganizeResult
@@ -266,6 +268,9 @@ def create_app(
     cfg: Config | None = None,
     llm: LLM | None = None,
     data_dir: Path | None = None,
+    quit_fn: Callable[[], None] | None = None,
+    env_file: Path | None = None,
+    build_llm_fn: Callable[[Config], LLM] | None = None,
 ) -> FastAPI:
     cfg = cfg or load_config()
     # 会话历史**不能进仓库**（public）——落点只有 data/ 是安全的，
@@ -273,12 +278,51 @@ def create_app(
     data_dir = data_dir or DATA_DIR
     # 流程日志的落点跟着它走——测试注入临时目录时也跟着隔离
     flow.configure(data_dir)
+
+    # **配置要能换。** 原来是直接捕获 `cfg` 进闭包，改不了；改成装在一个
+    # 可变的盒子里，各处通过 `get_cfg()` 拿——跟现成的 `get_llm` 一个路子。
+    state: dict[str, Config] = {"cfg": cfg}
     cache: dict[str, LLM | None] = {"llm": llm}
+
+    env_path = env_file or PROJECT_ROOT / ".env"
+    make_llm = build_llm_fn or build_llm
+
+    def get_cfg() -> Config:
+        return state["cfg"]
 
     def get_llm() -> LLM:
         if cache["llm"] is None:
-            cache["llm"] = build_llm(cfg)
+            cache["llm"] = make_llm(get_cfg())
         return cache["llm"]
+
+    def apply_settings(raw: dict[str, str]) -> dict[str, str]:
+        """保存 → 重载 → 让该失效的失效。返回值是**真正写下去的**那些。
+
+        顺序不能反：**先写文件再换内存**。写失败就抛出去——文件没写成，
+        内存里跟着变就成了两套真相。
+
+        **重载后要回头看一遍必填项还在不在。** `reload_config` 永不抛
+        （它读不回来就给你一份空壳），所以「重载成功」与「重载退化成空壳」
+        从返回值上分不出来。分不出来就会把一个空壳换进去——那等于用手滑
+        删掉一行 `.env` 的动作，把正在跑的服务带崩。
+        """
+        clean = settings.validate(raw)      # 不对就抛 SettingsError → 400
+        if not clean:
+            return {}
+
+        settings.write_env(env_path, clean)
+
+        new_cfg = reload_config(env_path)
+        if not (new_cfg.llm_model and new_cfg.llm_base_url and new_cfg.llm_api_key):
+            raise settings.SettingsError(
+                "改动写进 .env 了，但读回来必填项是空的——检查一下文件里 "
+                "KB_LLM_API_KEY / KB_LLM_BASE_URL / KB_LLM_MODEL 这三行还在不在"
+            )
+
+        state["cfg"] = new_cfg
+        cache["llm"] = None                                  # 模型三件套可能变了
+        logging.getLogger().setLevel(new_cfg.log_level)      # 日志级别当场生效
+        return clean
 
     def _chat_organize_fn(kind: str, content: str, target: str | None) -> str:
         """对话层能调的动作——**只有服务已有的能力**，不新增判断。
@@ -287,14 +331,14 @@ def create_app(
         两个入口的动作清单才是同一份。
         """
         if kind == "push":
-            return push_and_organize(cfg, content, get_llm(), source="Web")
+            return push_and_organize(get_cfg(), content, get_llm(), source="Web")
         if kind == "revise":
             return push_and_organize(
-                cfg, content, get_llm(), source="Web", revise_target=target
+                get_cfg(), content, get_llm(), source="Web", revise_target=target
             )
         if kind == "organize":
             results = organize.organize_selected(
-                cfg.vault_path, list_drafts(cfg.vault_path), get_llm()
+                get_cfg().vault_path, list_drafts(get_cfg().vault_path), get_llm()
             )
             ok = sum(1 for r in results if not r.error)
             return f"整理了 {len(results)} 条，成功 {ok} 条。"
@@ -306,7 +350,10 @@ def create_app(
 
     from kb.web.router import STATIC_DIR, build_router
 
-    app.include_router(build_router(cfg, data_dir, _chat_organize_fn, get_llm))
+    app.include_router(build_router(
+        get_cfg, data_dir, _chat_organize_fn, get_llm,
+        apply_settings, quit_fn or _default_quit, make_llm,
+    ))
     app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
 
     @app.get("/health")
@@ -323,7 +370,7 @@ def create_app(
         # 同上：入口处重置 run，否则会继承这个线程上一次请求的
         flow.set_run(flow.new_run_id())
         _, draft_id = push_draft(
-            cfg,
+            get_cfg(),
             body,
             project=req.project,
             source=req.source,
@@ -339,7 +386,7 @@ def create_app(
     @app.get("/inbox")
     def inbox() -> dict:
         items = []
-        for path in list_drafts(cfg.vault_path):
+        for path in list_drafts(get_cfg().vault_path):
             draft = read_draft(path)
             first_line = draft.body.strip().splitlines()
             items.append(
@@ -356,12 +403,12 @@ def create_app(
 
     @app.get("/search")
     def search(q: str = "") -> dict:
-        hits = search_notes(cfg.vault_path, q)
+        hits = search_notes(get_cfg().vault_path, q)
         items = []
         for path in hits:
             meta, _ = read_note(path)
             items.append({
-                "path": path.relative_to(cfg.vault_path).as_posix(),
+                "path": path.relative_to(get_cfg().vault_path).as_posix(),
                 "title": path.stem,
                 "tags": meta.get("主题") or [],
             })
@@ -371,20 +418,20 @@ def create_app(
     def run_organize(req: OrganizeRequest) -> dict:
         """整理草稿。不传 draft_id 就整理全部（Q38）。"""
         if req.draft_id:
-            path = find_draft(cfg.vault_path, req.draft_id)
+            path = find_draft(get_cfg().vault_path, req.draft_id)
             if path is None:
                 raise HTTPException(
                     status_code=404, detail=f"找不到草稿 {req.draft_id}"
                 )
             paths = [path]
         else:
-            paths = list_drafts(cfg.vault_path)
+            paths = list_drafts(get_cfg().vault_path)
 
         # run 与「开始整理」那句都由 `organize_selected` 自己记
         # （入口有三个，在端点里记会漏掉另两条）
         log = logging.getLogger("kb.organize")
         log.info("开始整理 %d 条草稿", len(paths))
-        results = organize.organize_selected(cfg.vault_path, paths, get_llm())
+        results = organize.organize_selected(get_cfg().vault_path, paths, get_llm())
         for r in results:
             if r.error:
                 log.warning("草稿 %s → %s：%s", r.draft_id, r.kind.value, r.error)
@@ -403,7 +450,7 @@ def create_app(
             raise HTTPException(status_code=404, detail=f"找不到会话 {req.chat_id}")
         chat_id, reply = handle(
             data_dir,
-            cfg.vault_path,
+            get_cfg().vault_path,
             req.chat_id,
             req.message,
             get_llm(),
@@ -428,7 +475,7 @@ def create_app(
         **同步跑**——巡检是低频动作，等一会儿可以接受；跑完直接拿报告。
         """
         try:
-            return run_sweep(cfg.vault_path, data_dir, get_llm())
+            return run_sweep(get_cfg().vault_path, data_dir, get_llm())
         except sweep.SweepError as exc:
             # 模型输出坏了、计划不合规——原因要说给人听，CLI 是拿它调试的
             raise HTTPException(status_code=500, detail=str(exc)) from exc
@@ -439,6 +486,21 @@ def create_app(
     # 将来别的入口（比如 qqbot）要调，那时会有明确的形状需求，再加不迟。
 
     return app
+
+
+def _default_quit() -> None:
+    """停掉服务。**先答应，再退出。**
+
+    反过来页面拿不到响应，只会显示一个连接失败。所以起一个短延迟的定时器
+    去执行真正的退出，端点立刻返回。
+    """
+    from kb.api import runtime
+
+    def _die() -> None:
+        runtime.clear_service_info()
+        os._exit(0)          # 硬退：uvicorn 的优雅关闭在这儿不值得等
+
+    threading.Timer(0.3, _die).start()
 
 
 def main() -> None:

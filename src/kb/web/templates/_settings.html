@@ -1,0 +1,40 @@
+{# 设置窗的内容。**只有窗口那一段**——整页骨架由 base.html 提供，
+   模态是从任意页面 fetch 进来的，跳页会把用户的位置弄丢。
+
+   这里是 Task 4 的**最小可用版**：够渲染出四组字段与「关于」，
+   所以接线能测。左侧分组导航、保存/退出那几段 JS、样式是 Task 5 的事。 #}
+<div class="settings-body">
+  <form class="settings-panes" id="settings-form">
+    {% for g in groups %}
+      <section class="pane" data-group="{{ loop.index0 }}">
+        <h3 class="settings-group">{{ g.name }}</h3>
+
+        {% for f in g.fields %}
+          <div class="field">
+            <label for="f-{{ f.key }}">{{ f.label }}</label>
+
+            {# 只读字段**不给 name**：不进 FormData，也就不会提交。
+               后端还会再挡一道（`settings.validate`），两层。 #}
+            {% if f.kind == 'readonly' %}
+              <input id="f-{{ f.key }}" value="{{ f.value }}" readonly>
+            {# 密钥的掩码放 placeholder、`value=""`——**原文一个字都不进 HTML** #}
+            {% elif f.kind == 'secret' %}
+              <input id="f-{{ f.key }}" name="{{ f.key }}" type="password"
+                     value="" placeholder="{{ f.value or '未设置' }}" autocomplete="off">
+            {% elif f.kind == 'choice' %}
+              <select id="f-{{ f.key }}" name="{{ f.key }}">
+                {% for c in f.choices %}
+                  <option value="{{ c }}" {{ 'selected' if c == f.value }}>{{ c }}</option>
+                {% endfor %}
+              </select>
+            {% else %}
+              <input id="f-{{ f.key }}" name="{{ f.key }}" value="{{ f.value }}">
+            {% endif %}
+
+            {% if f.help %}<p class="hint">{{ f.help }}</p>{% endif %}
+          </div>
+        {% endfor %}
+      </section>
+    {% endfor %}
+  </form>
+</div>

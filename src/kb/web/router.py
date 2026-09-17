@@ -11,22 +11,24 @@
 
 from __future__ import annotations
 
+import time
 from collections.abc import Callable
 from pathlib import Path
 
 from fastapi import APIRouter, Form, HTTPException, Request
 from fastapi.responses import HTMLResponse, RedirectResponse
 from fastapi.templating import Jinja2Templates
+from pydantic import BaseModel
 
 from kb.api.http import push_and_organize, run_sweep
-from kb.config import Config
-from kb.core import sweep, sweep_state
+from kb.config import PROJECT_ROOT, Config
+from kb.core import settings, sweep, sweep_state
 from kb.core.chat import handle
 from kb.core.chat_store import list_chats, load_chat
 from kb.core.flow import STEPS, latest_run_rows
 from kb.core.flow import list_days as flow_days
 from kb.core.flow import read_day as read_flow_day
-from kb.llm.base import LLM
+from kb.llm.base import LLM, LLMError
 from kb.logging_setup import LOG_DIR
 from kb.web.data import (
     box_label,
@@ -47,22 +49,96 @@ templates = Jinja2Templates(directory=str(TEMPLATES_DIR))
 templates.env.globals["box_label"] = box_label
 
 
+class SettingsBody(BaseModel):
+    values: dict[str, str] = {}
+
+
+def settings_context() -> dict:
+    """给模板的：四组字段 + 它们当前的值（密钥掩码）。
+
+    **「关于」那一组不在 `.env` 里**——它显示的是运行时的东西（服务状态、
+    版本），所以在这里拼出来。这样模板仍然只是一个循环，不用为一组开特例。
+    """
+    values = settings.read_env(PROJECT_ROOT / ".env")
+
+    groups = [
+        {
+            "name": group.name,
+            "fields": [
+                {
+                    "key": f.key,
+                    "label": f.label,
+                    "kind": f.kind,
+                    "help": f.help,
+                    "choices": f.choices,
+                    "value": _display(f, values.get(f.key, f.default)),
+                }
+                for f in group.fields
+            ],
+        }
+        for group in settings.GROUPS
+    ]
+
+    groups.append({
+        "name": "关于",
+        "fields": [
+            {
+                "key": "_service", "label": "服务状态", "kind": "readonly",
+                "choices": (), "value": _service_status(),
+                "help": "「改了 src/ 下的代码要 kb stop」那条坑摆在这儿——"
+                        "双击 web.bat 进来的人不会去查 kb status",
+            },
+            {
+                "key": "_repo", "label": "版本 / 仓库", "kind": "readonly",
+                "choices": (), "help": "",
+                "value": "KN_Base · github.com/yuewu87/KB_Base",
+            },
+        ],
+    })
+    return {"groups": groups}
+
+
+def _service_status() -> str:
+    """一行说清服务在不在、跑的是不是旧代码。"""
+    from kb.api import runtime
+
+    port = runtime.running_port()
+    if port is None:
+        return "未在运行"
+    if runtime.is_stale():
+        return f"已连接（:{port}）· 代码比进程新，建议重启"
+    return f"已连接（:{port}）"
+
+
+def _display(field, value: str) -> str:
+    """密钥只给掩码——**原文一个字都不进 HTML**。"""
+    if field.kind != "secret" or not value:
+        return value
+    return "•" * 12 + value[-4:] if len(value) > 4 else "•" * 8
+
+
 def build_router(
-    cfg: Config,
+    get_cfg: Callable[[], Config],
     data_dir: Path,
     organize_fn: Callable[[str, str, str | None], str],
     get_llm: Callable[[], LLM],
+    apply_settings: Callable[[dict[str, str]], dict[str, str]],
+    quit_fn: Callable[[], None],
+    build_llm_fn: Callable[[Config], LLM],
 ) -> APIRouter:
     """`data_dir`、`organize_fn`、`get_llm` 都由 `create_app` 传进来。
 
     三者都是**服务侧的东西**：会话历史落哪、对话能调哪些动作、模型是谁。
     Web 层自己知道这三件事，就意味着多出第二份实现——
     尤其是 `get_llm`：自己 `build_llm(cfg)` 会绕过注入的模型（测试里就是假模型）。
+
+    `get_cfg` 同理，而且是**回调不是值**：配置在网页上能改，改完 `create_app`
+    里那个盒子会换一份新的——把 `cfg` 当值收下来的话，这里拿到的永远是旧的。
     """
     router = APIRouter()
 
     def _ctx(name: str, **extra) -> dict:
-        return {"active": name, "vault": str(cfg.vault_path), **extra}
+        return {"active": name, "vault": str(get_cfg().vault_path), **extra}
 
     def _pick_day(d: str, days: list[str]) -> str:
         """选哪一天：`d` 在列表里就用它，否则落到**最新一天**。
@@ -92,7 +168,7 @@ def build_router(
     def chat_post(message: str = Form(...), cid: str = Form("")):
         chat_id, _ = handle(
             data_dir,
-            cfg.vault_path,
+            get_cfg().vault_path,
             cid or None,
             message,
             get_llm(),
@@ -116,12 +192,12 @@ def build_router(
         """只填正文（Q87）——`source` 记成 Web，项目留空，其余归整理。"""
         if not content.strip():
             raise HTTPException(status_code=400, detail="正文不能为空")
-        push_and_organize(cfg, content, get_llm(), source="Web")
+        push_and_organize(get_cfg(), content, get_llm(), source="Web")
         return RedirectResponse("/journal", status_code=303)
 
     @router.get("/journal", response_class=HTMLResponse)
     def journal(request: Request, d: str = ""):
-        days = journal_days(cfg.vault_path)
+        days = journal_days(get_cfg().vault_path)
         day = _pick_day(d, days)
         return templates.TemplateResponse(
             request,
@@ -130,7 +206,7 @@ def build_router(
                 "journal",
                 days=days,
                 day=day,
-                sections=read_journal(cfg.vault_path, day) if day else [],
+                sections=read_journal(get_cfg().vault_path, day) if day else [],
                 latest=latest_run_rows(data_dir),
             ),
         )
@@ -159,7 +235,7 @@ def build_router(
         巡检页上看得见原因。
         """
         try:
-            run_sweep(cfg.vault_path, data_dir, get_llm())
+            run_sweep(get_cfg().vault_path, data_dir, get_llm())
         except sweep.SweepError as exc:
             sweep_state.save_report(
                 data_dir,
@@ -214,6 +290,70 @@ def build_router(
                 last_sweep=state.get("last_sweep"),
             ),
         )
+
+    @router.get("/settings", response_class=HTMLResponse)
+    def settings_fragment(request: Request):
+        """模态窗的内容。**只有窗口那一段**，不带整页骨架。
+
+        模态是从任意页面 fetch 进来的，跳页会把用户的位置弄丢。
+        """
+        return templates.TemplateResponse(
+            request, "_settings.html", _ctx("settings", **settings_context())
+        )
+
+    @router.post("/settings")
+    def settings_save(body: SettingsBody):
+        """保存 + 重载。**当场生效**，不用重启。
+
+        写失败（磁盘满、没权限）会把异常抛出去 → 500，**不重载**——
+        文件没写成，内存里跟着变就成了两套真相。
+        """
+        try:
+            saved = apply_settings(body.values)
+        except settings.SettingsError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        return {"saved": saved}
+
+    @router.post("/settings/test")
+    def settings_test(body: SettingsBody):
+        """拿**表单里当前填的值**新建一个客户端发一次最小请求。
+
+        **不落盘、不动现有的客户端**——所以「先测试再保存」走得通，
+        不用为了测一次就把坏配置先写进 `.env`。
+
+        （Task 6 会补它的失败路径用例；这里先给个能用的最小版——
+        保存后的重载要靠它验：兜底值走的是 `get_cfg()`。）
+
+        **它要花钱**（一次极小的调用）。这是刻意的：换模型/换 key 时，
+        这是唯一能立刻知道对不对的办法。
+        """
+        cfg = get_cfg()
+        # 表单里的值优先；没填的（比如密钥留空）沿用当前的
+        merged = {
+            "KB_LLM_MODEL": body.values.get("KB_LLM_MODEL") or cfg.llm_model,
+            "KB_LLM_BASE_URL": body.values.get("KB_LLM_BASE_URL") or cfg.llm_base_url,
+            "KB_LLM_API_KEY": body.values.get("KB_LLM_API_KEY") or cfg.llm_api_key,
+        }
+        probe = build_llm_fn(Config(
+            llm_api_key=merged["KB_LLM_API_KEY"],
+            llm_base_url=merged["KB_LLM_BASE_URL"],
+            llm_model=merged["KB_LLM_MODEL"],
+            vault_path=cfg.vault_path,
+            port=cfg.port,
+        ))
+
+        started = time.monotonic()
+        try:
+            probe.complete("你是连通性测试。", "回复 ok 两个字就行。")
+        except LLMError as exc:
+            return {"ok": False, "detail": str(exc)}
+        return {"ok": True, "seconds": round(time.monotonic() - started, 1)}
+
+    @router.post("/quit")
+    def quit_service():
+        """停掉服务。实现见 `api/http.py` 的 `_default_quit`——**先答应，再退出**。"""
+        quit_fn()
+        return {"ok": True}
 
     @router.get("/runtime", response_class=HTMLResponse)
     def runtime_page(request: Request, d: str = ""):

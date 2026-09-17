@@ -8,6 +8,7 @@ from fastapi.testclient import TestClient
 from kb.api.http import create_app
 from kb.config import Config
 from kb.core.vault import write_note
+from kb.llm.base import FakeLLM
 
 # 对话输出固定成「不做动作」的一句——Web 测试不该真连模型
 CHAT_REPLY = '{"say": "好的", "action": null, "params": {}}'
@@ -50,7 +51,7 @@ def vault(tmp_path):
 
 
 @pytest.fixture
-def client(vault):
+def client(vault, tmp_path):
     cfg = Config(
         llm_api_key="k",
         llm_base_url="http://x",
@@ -58,8 +59,17 @@ def client(vault):
         vault_path=vault,
         port=None,
     )
+    # **env_file 必须传**：`create_app` 的默认值是工程根目录那个真 `.env`，
+    # 不传的话 `/settings` 一保存就把用户的配置改了。
+    env = tmp_path / ".env"
+    env.write_text(
+        "KB_LLM_API_KEY=k\nKB_LLM_BASE_URL=http://x\nKB_LLM_MODEL=m\n",
+        encoding="utf-8",
+    )
     # data_dir 指到 vault（生产里是 data/）——会话落盘的预期位置要对得上
-    return TestClient(create_app(cfg, llm=_TwoChainLLM(), data_dir=vault))
+    return TestClient(
+        create_app(cfg, llm=_TwoChainLLM(), data_dir=vault, env_file=env)
+    )
 
 
 @pytest.mark.parametrize("path", ["/", "/journal", "/flow", "/runtime"])
@@ -279,7 +289,6 @@ def test_sweep_run_reports_model_failure_instead_of_500(tmp_path):
     假模型给的不是 JSON，`run_sweep` 会抛 `SweepError`。
     """
     from kb.core.sweep_state import load_state
-    from kb.llm.base import FakeLLM
 
     cfg = Config(
         llm_api_key="k", llm_base_url="http://x", llm_model="m",
@@ -407,3 +416,131 @@ def test_write_paths_do_not_touch_the_real_data_dir(client):
     assert resp.status_code in (303, 200)
 
     assert sizes() == before, "测试往真实 data/ 写了流程记录——某条 create_app 调用忘了传 data_dir"
+
+
+def test_settings_save_does_not_touch_the_real_env(client):
+    """跑测试不该改工程根目录那个真 `.env`。
+
+    **必须真的走一次保存**——只 GET `/settings` 什么都不写，那种钉子是假的
+    （项目里栽过一条）。验证办法：临时把夹具的 `env_file=...` 去掉，
+    这条必须变红。看完改回来。
+    """
+    from kb.config import PROJECT_ROOT
+
+    real = PROJECT_ROOT / ".env"
+    before = real.read_bytes() if real.is_file() else None
+
+    client.post("/settings", json={"values": {"KB_LLM_MODEL": "测试不许改真文件"}})
+
+    after = real.read_bytes() if real.is_file() else None
+    assert after == before, "测试改了工程根目录的 .env——夹具忘了传 env_file"
+
+
+# ---------- 配置热重载 ----------
+
+def test_save_settings_writes_env_and_reloads(tmp_path):
+    """保存 = 写 `.env` + 重载 + 让该失效的失效。
+
+    **重载有没有生效，不靠看内部变量验**——保存完调一次 `/settings/test`，
+    它的兜底值取自 `get_cfg()`，那边看到的就是重载后的配置。
+    """
+    env = tmp_path / ".env"
+    env.write_text(
+        "KB_LLM_API_KEY=k\nKB_LLM_BASE_URL=u\nKB_LLM_MODEL=old\n", encoding="utf-8"
+    )
+    seen: list[str] = []
+
+    def _build(c):
+        seen.append(c.llm_model)
+        return FakeLLM("{}")
+
+    app = create_app(
+        Config("k", "u", "old", tmp_path, None),
+        data_dir=tmp_path, build_llm_fn=_build, env_file=env,
+    )
+    client = TestClient(app)
+
+    resp = client.post("/settings", json={"values": {"KB_LLM_MODEL": "new"}})
+
+    assert resp.status_code == 200
+    assert "KB_LLM_MODEL=new" in env.read_text(encoding="utf-8")
+
+    # 表单里没填模型名 → 兜底取当前配置 → 应当是 new
+    client.post("/settings/test", json={"values": {}})
+    assert seen[-1] == "new"
+
+
+def test_reload_to_an_empty_shell_does_not_swap_in(tmp_path):
+    """重载退化成空壳时**不许换进去**。
+
+    `reload_config` 永不抛（读不回来就给一份空壳），所以调用方从返回值上
+    分不清成功与降级。分不清就换，等于用手滑删掉一行 `.env` 的动作
+    把正在跑的服务带崩。
+    """
+    env = tmp_path / ".env"
+    env.write_text(
+        "KB_LLM_API_KEY=k\nKB_LLM_BASE_URL=u\nKB_LLM_MODEL=old\n", encoding="utf-8"
+    )
+    cfg = Config("k", "u", "old", tmp_path, None)
+    app = create_app(cfg, data_dir=tmp_path, env_file=env, build_llm_fn=lambda c: FakeLLM("{}"))
+    client = TestClient(app)
+
+    # 手工把 .env 弄坏（模拟手滑删行），再走一次保存
+    env.write_text("KB_LLM_MODEL=x\n", encoding="utf-8")
+    resp = client.post("/settings", json={"values": {"KB_LOG_LEVEL": "DEBUG"}})
+
+    assert resp.status_code == 400
+    assert "必填" in resp.json()["detail"]
+
+
+def test_save_settings_rejects_bad_value(client):
+    resp = client.post("/settings", json={"values": {"KB_LOG_LEVEL": "TRACE"}})
+    assert resp.status_code == 400
+    assert "日志级别" in resp.json()["detail"]
+
+
+def test_save_settings_ignores_readonly(client):
+    """后端不信前端——只读字段提交了也不改。"""
+    resp = client.post(
+        "/settings",
+        json={"values": {"KB_VAULT_PATH": "E:\\别处", "KB_LLM_MODEL": "m"}},
+    )
+    assert resp.status_code == 200
+    assert resp.json()["saved"] == {"KB_LLM_MODEL": "m"}
+
+
+def test_settings_fragment_has_no_full_page(client):
+    """模态是从任意页面 fetch 进来的——只要窗口那一段，不要整页骨架。"""
+    body = client.get("/settings").text
+    assert "<!doctype" not in body.lower()
+    assert "模型配置" in body
+
+
+def test_settings_has_the_about_group(client):
+    """「关于」不在 `.env` 里，是拼出来的——但界面上得有这一组。"""
+    body = client.get("/settings").text
+    assert "关于" in body
+    assert "服务状态" in body
+
+
+def test_settings_never_echoes_the_api_key(client, monkeypatch):
+    """**API Key 不回显原文。** 只给掩码。"""
+    monkeypatch.setenv("KB_LLM_API_KEY", "sk-super-secret-value")
+    body = client.get("/settings").text
+    assert "sk-super-secret-value" not in body
+    assert "••" in body
+
+
+def test_quit_calls_the_injected_function(tmp_path):
+    """**退出要能注入**——不然跑一次测试就把 pytest 自己杀了。"""
+    quit_calls = []
+    app = create_app(
+        Config("k", "u", "m", tmp_path, None),
+        llm=FakeLLM("{}"),
+        data_dir=tmp_path,
+        quit_fn=lambda: quit_calls.append(1),
+    )
+    resp = TestClient(app).post("/quit")
+
+    assert resp.status_code == 200
+    assert quit_calls == [1]
