@@ -8,15 +8,13 @@
       <p>按天聚合，一次整理一张卡片。这一份是知识，进 vault，可被检索。</p>
     </div>
 
-    {% if not days %}
+    {% if not day %}
       <div class="empty">
         还没有整理记录。<br>
         投一条草稿（<code>kb push</code>），再 <code>kb organize</code>。
       </div>
-    {% endif %}
-
-    {% for date, sections in days %}
-      <h2 class="day">{{ date }}</h2>
+    {% else %}
+      <h2 class="day">{{ box_label(day) }}</h2>
       {% for title, items in sections %}
         <article class="card journal">
           <h3>{{ title }}</h3>
@@ -29,18 +27,29 @@
           {% endif %}
         </article>
       {% endfor %}
-    {% endfor %}
+    {% endif %}
   </section>
 
-  <aside class="chat-history">
-    <h2>整理</h2>
-    {% if not days %}<p class="muted">还没有整理。</p>{% endif %}
-    <div class="thread">
-      {% for date, sections in days %}
-        {% for title, items in sections %}
-          <div class="bubble assistant">{{ title }}</div>
+  <aside class="chat-history tabbed">
+    {% set tabs = [("report", "报告"), ("history", "历史")] %}
+    {% include "_tabs.html" %}
+
+    <div class="pane" data-pane="report">
+      <h2>最近一次整理</h2>
+      {% if latest %}
+        {% for r in latest %}
+          <div class="bubble assistant">
+            <span class="bubble-at">{{ r.at[-8:] }}</span>{{ r.text }}
+          </div>
         {% endfor %}
-      {% endfor %}
+      {% else %}
+        <p class="muted">还没有整理过。</p>
+      {% endif %}
+    </div>
+
+    <div class="pane" data-pane="history" hidden>
+      <h2>箱子</h2>
+      {% include "_boxes.html" %}
     </div>
   </aside>
 </div>
