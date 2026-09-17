@@ -1,0 +1,42 @@
+{% extends "base.html" %}
+{% block title %}巡检 · KN_Base{% endblock %}
+{% block content %}
+<div class="page-head">
+  <h1>巡检</h1>
+  <p>定期收拾<strong>标签和目录</strong>——合并近义、更新索引。不看正文。每 6 天自动跑一次，也可以随时手动跑。</p>
+</div>
+
+{% if report %}
+  <article class="card sweep {{ 'read' if report.read }}">
+    <h3>最近一次巡检</h3>
+    {% if report.tag_merges or report.dir_merges %}
+      <ul>
+        {% for m in report.tag_merges or [] %}<li>标签：{{ m.from }} → {{ m.to }}</li>{% endfor %}
+        {% for m in report.dir_merges or [] %}<li>目录：{{ m.from }} → {{ m.to }}</li>{% endfor %}
+      </ul>
+    {% endif %}
+    <p>{{ report.summary }}</p>
+    <p class="muted mono">{{ report.at }}</p>
+  </article>
+
+  <form class="sweep-reply" method="post" action="/sweep/reply">
+    <button name="reply" value="知道了">我知道了</button>
+    <button name="reply" value="调整" formnovalidate
+            onclick="document.getElementById('sweep-note').hidden = false">
+      还需调整
+    </button>
+    <input id="sweep-note" name="note" required hidden
+           placeholder="要改哪里？比如「别并到 X，并到 Y」">
+  </form>
+{% else %}
+  <div class="empty">还没巡检过。点下面的按钮跑一次，或等服务自己触发（超过 6 天会跑）。</div>
+{% endif %}
+
+<form method="post" action="/sweep/run">
+  <button class="primary" type="submit">巡检一次</button>
+</form>
+
+<p class="muted">
+  {% if last_sweep %}上次巡检：{{ last_sweep }}{% else %}还没跑过。{% endif %}
+</p>
+{% endblock %}
