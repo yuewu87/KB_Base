@@ -934,6 +934,260 @@ git add -A && git commit -m "feat: 巡检报告进侧栏——聊天式 + 两个
 
 ---
 
+## Task 6: 侧栏统一（手机聊天式）+ 流程链三态
+
+**两件事一起做，因为它们落在同一处：**
+
+1. **流程链要区分三态**（原来只有两态）——`审核` 常常显示成「没走到」，但它其实是**没触发**（没新建分类，所以不跑）。看到 ○ 会以为卡住了
+2. **侧栏统一成一套手机聊天样式**——整理日志、工作日志、巡检报告都用同一个组件；**每一条内容一个气泡**
+
+**以及一条硬规矩：界面里不得出现 emoji 或类 emoji 符号，需要的标记一律内联 SVG。**
+
+> 现状：`flow.html:31` 用了 `✓`（U+2713）和 `○`（U+25CB）——**这两处要换掉**（它们是唯一的）。
+
+**Files:**
+- Modify: `src/kb/web/data.py`（`group_flow` 算出三态）
+- Modify: `src/kb/web/templates/flow.html`、`journal.html`
+- Modify: `src/kb/web/static/style.css`
+- Modify: `tests/web/test_data.py`、`tests/web/test_router.py`
+
+- [ ] **Step 1: 写失败测试**
+
+`tests/web/test_data.py` 追加：
+
+```python
+def test_group_flow_splits_three_states():
+    """走过 / 跳过 / 没走到，是三回事。
+
+    中间没出现的步骤，要看**它后面有没有记录**：
+    后面有 → 流程越过了它，是「跳过」（比如审核没触发）
+    后面没有 → 流程停在那里了，是「没走到」
+    """
+    rows = [
+        {"run": "a", "step": "投递", "text": "t", "at": "t"},
+        {"run": "a", "step": "规划", "text": "t", "at": "t"},
+        {"run": "a", "step": "落盘", "text": "t", "at": "t"},
+    ]
+    g = group_flow(rows, steps=["投递", "规划", "校验", "审核", "落盘", "提交"])[0]
+    assert g["reached"] == {"投递", "规划", "落盘"}
+    assert g["skipped"] == {"校验", "审核"}      # 越过了
+    assert g["todo"] == {"提交"}                 # 停在落盘之后
+
+
+def test_group_flow_last_record_failure_leaves_rest_todo():
+    """流程停在「规划」——后面全是没走到，不是跳过。"""
+    rows = [
+        {"run": "a", "step": "投递", "text": "t", "at": "t"},
+        {"run": "a", "step": "规划", "text": "t", "at": "t"},
+    ]
+    g = group_flow(rows, steps=["投递", "规划", "校验", "审核", "落盘", "提交"])[0]
+    assert g["skipped"] == set()
+    assert g["todo"] == {"校验", "审核", "落盘", "提交"}
+
+
+def test_group_flow_without_steps_keeps_old_shape():
+    """不传 steps 时不算三态——向后兼容，老的调用点不炸。"""
+    rows = [{"run": "a", "step": "投递", "text": "t", "at": "t"}]
+    g = group_flow(rows)[0]
+    assert g["reached"] == {"投递"}
+```
+
+`tests/web/test_router.py` 追加：
+
+```python
+def test_flow_chain_uses_svg_marks_not_text_symbols(client, vault):
+    """界面里不许出现 emoji / 类 emoji 符号——标记一律内联 SVG。"""
+    from kb.core.flow import emit, set_run
+
+    set_run("20260917-1400")
+    emit("投递", "投了")
+    emit("落盘", "落了")
+
+    body = client.get("/flow").text
+    assert "✓" not in body
+    assert "○" not in body
+    assert body.count("<svg") >= 6          # 六个步骤各一个标记
+
+
+def test_journal_sidebar_uses_bubbles(client):
+    """整理日志的侧栏也是气泡流。"""
+    import re
+
+    body = client.get("/journal").text
+    aside = re.search(r'<aside class="chat-history">(.*?)</aside>', body, re.S).group(1)
+    assert 'class="bubble assistant"' in aside
+```
+
+- [ ] **Step 2: 跑测试确认失败**
+
+```bash
+"D:/Conda_base/envs/kn_base/python.exe" -m pytest -p no:cacheprovider tests/web/ -q
+```
+
+**Expected:** 三态那条 `KeyError: 'skipped'`
+
+- [ ] **Step 3: `group_flow` 算出三态**
+
+`src/kb/web/data.py`：
+
+```python
+def group_flow(rows: list[dict], steps: list[str] | None = None) -> list[dict]:
+    """按 run 分组，**新的在前**。
+
+    传了 `steps` 就把六个步骤分成三类：
+
+    - `reached` —— 有记录的
+    - `skipped` —— 没记录，但**它后面有记录**（流程越过了它）
+    - `todo`    —— 没记录，且后面也没有（流程停在前头了）
+
+    **`skipped` 和 `todo` 要分开。** 比如「审核」常常没记录——那是没触发
+    （没新建分类所以不跑），不是卡住了。画成一样会让人以为出了问题。
+    """
+    groups: dict[str, dict] = {}
+    for row in rows:
+        run = row.get("run") or "（未分组）"
+        g = groups.setdefault(
+            run, {"run": run, "rows": [], "reached": set(), "at": ""}
+        )
+        g["rows"].append(row)
+        g["reached"].add(row.get("step", ""))
+        g["at"] = g["at"] or row.get("at", "")
+
+    out = list(groups.values())
+    if steps:
+        for g in out:
+            seen = [i for i, s in enumerate(steps) if s in g["reached"]]
+            last = max(seen) if seen else -1
+            g["skipped"] = {s for i, s in enumerate(steps) if i < last and s not in g["reached"]}
+            g["todo"] = {s for i, s in enumerate(steps) if i > last}
+    return list(reversed(out))
+```
+
+- [ ] **Step 4: 三个 SVG 标记 + 统一气泡**
+
+`flow.html` 的链，把 `{{ '✓' if ... }}` 换成三个内联 SVG：
+
+```html
+{% for step in steps %}
+  {% set state = 'done' if step in g.reached
+                 else ('skipped' if step in g.skipped else 'todo') %}
+  <div class="chain-step {{ state }}">
+    {% if state == 'done' %}
+      <svg class="mark" viewBox="0 0 16 16" aria-hidden="true">
+        <circle cx="8" cy="8" r="7" fill="currentColor"/>
+        <path d="M4.8 8.3l2.1 2.1 4.3-4.5" fill="none" stroke="#fff"
+              stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/>
+      </svg>
+    {% elif state == 'skipped' %}
+      <svg class="mark" viewBox="0 0 16 16" aria-hidden="true">
+        <title>这一步没触发</title>
+        <circle cx="8" cy="8" r="6.3" fill="none" stroke="currentColor" stroke-width="1.4"/>
+        <path d="M5 8h6" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/>
+      </svg>
+    {% else %}
+      <svg class="mark" viewBox="0 0 16 16" aria-hidden="true">
+        <title>还没走到</title>
+        <circle cx="8" cy="8" r="6.3" fill="none" stroke="currentColor" stroke-width="1.4"/>
+      </svg>
+    {% endif %}
+    <span>{{ step }}</span>
+  </div>
+  {% if not loop.last %}<div class="chain-line"></div>{% endif %}
+{% endfor %}
+```
+
+**工作日志的侧栏：每条流程一个气泡**（现在是一行 `<li>`）：
+
+```html
+<aside class="chat-history">
+  <h2>流程</h2>
+  {% for g in groups %}
+    <div class="thread">
+      {% for r in g.rows %}
+        <div class="bubble assistant">
+          <span class="bubble-at">{{ r.at[-8:] }}</span>{{ r.text }}
+        </div>
+      {% endfor %}
+    </div>
+    <div class="chain">…（上面的三态链）…</div>
+  {% endfor %}
+</aside>
+```
+
+**整理日志的侧栏** 也是同一套（每条 = 一个气泡），跟现在一样，只是套上统一的 `.thread > .bubble`。
+
+- [ ] **Step 5: 加样式**
+
+`style.css` 加一段「侧栏气泡」，整理日志 / 工作日志 / 巡检报告共用：
+
+```css
+/* ---- 侧栏气泡：手机聊天式 ---- */
+.thread { display: flex; flex-direction: column; gap: 8px; margin-bottom: 16px; }
+
+.bubble {
+  position: relative;
+  padding: 9px 12px;
+  border-radius: 12px;
+  font-size: 12.5px;
+  line-height: 1.6;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  color: #37445a;
+  word-break: break-word;
+}
+.bubble.assistant {
+  border-top-left-radius: 4px;          /* 左边一个小尾巴的圆角 */
+  background: #f6f8fb;
+}
+.bubble.user { background: var(--blue-soft); border-color: #dbe7f4; }
+
+.bubble-at {
+  display: block;
+  font-family: var(--mono);
+  font-size: 10.5px;
+  color: var(--faint);
+  margin-bottom: 2px;
+}
+
+/* ---- 流程链的三个标记 ---- */
+.mark { width: 14px; height: 14px; flex-shrink: 0; }
+.chain-step.done    .mark { color: var(--blue); }
+.chain-step.skipped .mark { color: var(--faint); }
+.chain-step.todo    .mark { color: var(--line); }
+.chain-step.skipped { color: var(--faint); }
+.chain-step.todo    { color: #b9c3d0; }
+```
+
+`.chain-line` 的 `margin-left` 要与 `.mark` 居中——**标记从 14px 变成 14px 不变，不用改**。
+
+- [ ] **Step 6: 跑测试 + 全量 + 提交**
+
+```bash
+"D:/Conda_base/envs/kn_base/python.exe" -m pytest -p no:cacheprovider -q
+"D:/Conda_base/envs/kn_base/python.exe" -m ruff check src tests scripts
+git add -A && git commit -m "design: 侧栏统一为手机聊天式；流程链区分走过/跳过/未走到"
+```
+
+- [ ] **Step 7: 全仓扫一遍 emoji**
+
+```bash
+PYTHONIOENCODING=utf-8 "D:/Conda_base/envs/kn_base/python.exe" -c "
+import re, pathlib
+pat = re.compile('[\U0001F300-\U0001FAFF\U00002600-\U000027BF\u2713\u2714\u2717\u2718\u25CB\u25CF\u2261]')
+hits = [(p, i, line.strip()[:50])
+        for p in pathlib.Path('src/kb/web').rglob('*') if p.is_file()
+        for i, line in enumerate(p.read_text(encoding='utf-8', errors='replace').splitlines(), 1)
+        if pat.search(line)]
+print(f'命中 {len(hits)} 处')
+for p, i, line in hits:
+    print(f'  {p}:{i}  {line}')
+"
+```
+
+**Expected:** `命中 0 处`
+
+---
+
 ## Self-Review
 
 **1. 范围覆盖：**
@@ -947,6 +1201,9 @@ git add -A && git commit -m "feat: 巡检报告进侧栏——聊天式 + 两个
 | 要建文件的走审核 | **不适用**——「只合并不新建」把这条路堵死了（见下） |
 | 弹窗 + 侧栏聊天式 + 两个回复按钮 | Task 5 |
 | 「还需调整」→ 输入 → 交给整理 LLM | Task 5 |
+| **流程链区分「跳过」与「未走到」** | Task 6 |
+| **侧栏统一手机聊天式，每条一个气泡，两页共用** | Task 6 |
+| **界面里不得出现 emoji，标记一律内联 SVG** | Task 6 |
 
 **2. 「审核」这条为什么不在这份计划里：**
 
