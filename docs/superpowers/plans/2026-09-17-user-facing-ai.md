@@ -27,7 +27,143 @@
 | `templates/投递模板/*.md` | 脚手架模板 | **新建** |
 | `.gitignore` | `chats/` 不入库 | 加一行 |
 
-**关键约束：`chats/` 绝不能入库。** 代码仓库是 **public** 的，会话历史进去就等于公开发布。
+**关键约束：`data/` 绝不能入库。** 代码仓库是 **public** 的，运行数据进去就等于公开发布。
+
+---
+
+## Task 0: 目录整理（前置）
+
+**为什么要先做：** 运行数据散在顶层各处，而**「进不进 git」这条线是看不见的**——仓库是 public，切错就是公开发布。而且后面三个任务都要往这些地方放东西（会话历史、投递模板），**先把架子搭好，免得放一处改一处**。
+
+### 判据
+
+> **第一刀按「进不进 git」切**（最硬：public 仓库，切错就是发布）。
+> **第二刀按「谁读」切**（机器读的骨架 vs 人读的脚手架）。
+
+**不按「文件类型」切**——`log` 和 `模板` 看着都是文本，但一个绝不能进 git、一个必须进。放一起就把红线糊了。
+
+### 目标
+
+```
+KN_Base/
+├─ 代码与工程 ────────────── 进 git
+│  ├── src/  tests/  scripts/
+│  ├── templates/
+│  │   ├── 笔记/            笔记骨架 —— 机器读
+│  │   └── 投递/            随手记脚手架 —— 人读
+│  ├── docs/
+│  └── pyproject.toml · requirements.txt · CLAUDE.md · README.md
+│      .env.example · .gitignore · .gitattributes · kb.bat
+│
+└─ data/ ──────────────────── 不进 git
+    ├── logs/               运行日志
+    ├── runtime/            service.json
+    ├── chats/              会话历史（Task 1 建）
+    └── cache/              pytest 与 ruff 的缓存
+```
+
+`.env` 留根上——它是**配置**不是运行数据，且是启动时的约定位置。
+
+**Files:**
+- Modify: `src/kb/logging_setup.py`、`src/kb/api/runtime.py`、`src/kb/core/planning.py`
+- Modify: `.gitignore`、`pyproject.toml`
+- Move: `logs/` `runtime/` → `data/`；`templates/*.md` → `templates/笔记/`
+- Delete: `templates/日志.md`
+
+- [ ] **Step 1: 停服务、挪运行数据**
+
+```bash
+cd "E:/Study_Projects/KN_Base" && ./kb.bat stop
+mkdir -p data/cache
+mv logs data/logs
+mv runtime data/runtime
+```
+
+> **先停服务**——它正持有 `runtime/service.json`，不停就挪不动。
+
+- [ ] **Step 2: 改三处路径常量**
+
+| 文件 | 现在 | 改成 |
+|---|---|---|
+| `logging_setup.py:21` | `PROJECT_ROOT / "logs"` | `PROJECT_ROOT / "data" / "logs"` |
+| `runtime.py:23` | `PROJECT_ROOT / "runtime"` | `PROJECT_ROOT / "data" / "runtime"` |
+| `planning.py:34` | `PROJECT_ROOT / "templates"` | `PROJECT_ROOT / "templates" / "笔记"` |
+
+- [ ] **Step 3: 改 `runtime.py:94` 的 mtime 扫描**
+
+```python
+    for folder in (
+        PROJECT_ROOT / "src" / "kb",
+        PROJECT_ROOT / "templates",
+    ):
+```
+
+保持不变即可——`templates/` 整棵树的 mtime 仍然有效（子目录变动会冒泡到父目录）。**但 `data/` 不该进扫描**（服务自己写的日志会触发「代码变旧」的误报）——**确认它不在扫描范围内**。
+
+- [ ] **Step 4: 重组 `templates/`**
+
+```bash
+mkdir -p templates/笔记 templates/投递
+git mv templates/概念.md templates/踩坑.md templates/决策.md \
+       templates/经验.md templates/清单.md templates/笔记/
+git rm templates/日志.md          # 死文件：被排除列表跳过，从不使用
+```
+
+- [ ] **Step 5: 把缓存指到 `data/cache/`**
+
+`pyproject.toml`：
+
+```toml
+[tool.pytest.ini_options]
+cache_dir = "data/cache/pytest"
+
+[tool.ruff]
+cache-dir = "data/cache/ruff"
+```
+
+- [ ] **Step 6: 简化 `.gitignore`**
+
+删掉 `logs/`、`runtime/` 两行（以及既有的 `data/` 那一段），换成一行：
+
+```
+# ---- 运行数据（日志 / 会话 / 缓存）—— 含个人内容，仓库是 public，绝不能入库 ----
+data/
+```
+
+**保留** `.env`、`requirements.lock.txt`、`__pycache__/` 等条目。
+
+- [ ] **Step 7: 跑测试**
+
+```bash
+"D:/Conda_base/envs/kn_base/python.exe" -m pytest -p no:cacheprovider -q
+"D:/Conda_base/envs/kn_base/python.exe" -m ruff check src tests scripts
+```
+
+**Expected:** 295 passed（不变），ruff 干净。
+
+> **注意**：测试里的 `tmp_path` 是独立的，不受影响；但 `tests/test_init_vault.py` 里如有断言 `logs`/`runtime` 路径的要跟着改——**跑一遍就知道**。
+
+- [ ] **Step 8: 手工验证服务仍能起**
+
+```bash
+./kb.bat inbox          # 拉起服务
+./kb.bat status         # 看端口与 vault
+cat data/runtime/service.json
+ls data/logs/
+```
+
+**Expected:** 服务起得来，`service.json` 在 `data/runtime/`，日志在 `data/logs/`。
+
+- [ ] **Step 9: 同步文档**
+
+`CLAUDE.md` 的「常用命令」和 `docs/01_架构.md` 的「接口与工程」里的目录树，按新结构改。
+
+- [ ] **Step 10: 提交**
+
+```bash
+"D:/Conda_base/envs/kn_base/python.exe" -m pytest -p no:cacheprovider -q
+git add -A && git commit -m "chore: 目录整理——运行数据归 data/，模板分笔记与投递"
+```
 
 ---
 

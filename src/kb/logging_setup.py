@@ -18,7 +18,7 @@ from pathlib import Path
 
 from kb.config import PROJECT_ROOT
 
-LOG_DIR = PROJECT_ROOT / "logs"
+LOG_DIR = PROJECT_ROOT / "data" / "logs"
 LOG_FILE = LOG_DIR / "kb.log"
 
 MAX_BYTES = 1_000_000

@@ -14,7 +14,7 @@ venv/
 env/
 .conda/
 
-# ---- 测试与类型检查缓存 ----
+# ---- 测试与类型检查缓存（新位置见 pyproject.toml 的 data/cache/）----
 .pytest_cache/
 .mypy_cache/
 .ruff_cache/
@@ -23,6 +23,7 @@ htmlcov/
 coverage.xml
 
 # ---- 环境变量与密钥 ----
+# .env 是**配置**不是运行数据，留在根上；但绝不能入库
 .env
 .env.*
 !.env.example
@@ -32,13 +33,16 @@ coverage.xml
 # ---- 本机依赖锁定（含平台相关包，不跨平台）----
 requirements.lock.txt
 
-# ---- 运行时文件与日志（service.json 含端口与 pid；logs/ 为服务运行日志）----
-runtime/
-logs/
-
-# ---- 数据与产物（知识库项目：原始数据/向量库不入库）----
+# ---- 运行数据（**一整棵都不入库**）----
+#
+# data/ 里是服务运行时产生的东西：logs/ 运行日志、runtime/service.json、
+# chats/ 会话历史、cache/ 工具缓存。
+#
+# **为什么整棵排除**：本仓库是 public 的，而会话历史里有个人对话内容——
+# 进去就等于公开发布。这条线要一眼看得见，所以不逐个列，整棵排除。
+#
+# 代价：换机器时 data/ 不跟着 git 走，要手动拷（日志和会话本身也未必需要）。
 data/
-!data/.gitkeep
 *.db
 *.sqlite
 *.sqlite3

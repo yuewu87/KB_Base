@@ -20,7 +20,7 @@ from pathlib import Path
 
 from kb.config import PROJECT_ROOT, Config
 
-RUNTIME_DIR = PROJECT_ROOT / "runtime"
+RUNTIME_DIR = PROJECT_ROOT / "data" / "runtime"
 SERVICE_FILE = RUNTIME_DIR / "service.json"
 
 STARTUP_TIMEOUT = 15.0

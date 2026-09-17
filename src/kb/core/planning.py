@@ -31,7 +31,7 @@ from kb.core.vault import (
     list_notes,
 )
 
-TEMPLATES_DIR = PROJECT_ROOT / "templates"
+TEMPLATES_DIR = PROJECT_ROOT / "templates" / "笔记"
 
 _LINK_RE = re.compile(r"\[\[([^\]]+)\]\]")
 

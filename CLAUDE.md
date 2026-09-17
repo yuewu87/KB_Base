@@ -95,7 +95,7 @@ export https_proxy=http://127.0.0.1:5408
 
 - 本地仓库，默认分支 `main`。
 - 提交信息使用中文，格式：`<类型>: <简述>`，类型取 `feat` / `fix` / `docs` / `refactor` / `chore` / `test`。
-- **提交前先 `/code-review` 或自查 diff**；不要提交 `data/` 下的原始数据与向量库产物（已在 `.gitignore` 中排除）。
+- **提交前先 `/code-review` 或自查 diff**；不要提交 `data/` 下的任何东西——运行日志、会话历史、缓存全在里头。**仓库是 public 的，会话历史进去就是公开发布。**
 - 除非用户明确要求，不要执行 `git push` 或创建 PR。
 
 ## 工作方式约定
