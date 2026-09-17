@@ -6,10 +6,11 @@
 from __future__ import annotations
 
 import os
+from collections.abc import Mapping
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from dotenv import load_dotenv
+from dotenv import dotenv_values, load_dotenv
 
 # 本文件位于 <root>/src/kb/config.py，向上三层即工程根目录
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
@@ -38,32 +39,82 @@ class Config:
     llm_model: str
     vault_path: Path
     port: int | None
+    # 下面三个有默认值——老 `.env` 不改也能跑起来（它们以前是硬编码常量）
+    log_level: str = "INFO"
+    sweep_interval_days: int = 6
+    keep_days: int = 90
 
 
-def load_config(env_file: Path | None = None) -> Config:
-    """从 .env 读取配置。缺必填项时抛 ConfigError。
+def _int_or(values: Mapping, key: str, default: int) -> int:
+    raw = str(values.get(key) or "").strip()
+    try:
+        number = int(raw)
+    except ValueError:
+        return default
+    return number if number > 0 else default
 
-    注意：load_dotenv 会写入进程级 os.environ，所以**同一个进程内只应调用一次**。
-    重复传入不同的 env_file 不会覆盖已设置的变量（override=False）。
+
+def _build(get: Mapping, *, strict: bool = True) -> Config:
+    """从一份键值里造 Config。缺必填项时抛 ConfigError。
+
+    `strict=False` 时缺的必填项置空字符串（`reload_config` 的退路用）——
+    **只有热重载才这么造**，启动路径必须严格，否则 key 没填也能起来。
     """
-    env_file = env_file or PROJECT_ROOT / ".env"
-    load_dotenv(env_file, override=False)
 
     def required(key: str) -> str:
-        value = os.environ.get(key, "").strip()
-        if not value:
+        value = str(get.get(key) or "").strip()
+        if not value and strict:
             raise ConfigError(
                 f"缺少必填配置 {key}。请复制 .env.example 为 .env 并填写。"
             )
         return value
 
-    vault_raw = os.environ.get("KB_VAULT_PATH", "").strip()
-    port_raw = os.environ.get("KB_PORT", "").strip()
+    vault_raw = str(get.get("KB_VAULT_PATH") or "").strip()
+    port_raw = str(get.get("KB_PORT") or "").strip()
 
     return Config(
         llm_api_key=required("KB_LLM_API_KEY"),
         llm_base_url=required("KB_LLM_BASE_URL"),
         llm_model=required("KB_LLM_MODEL"),
         vault_path=Path(vault_raw) if vault_raw else DEFAULT_VAULT_PATH,
-        port=int(port_raw) if port_raw else None,
+        port=int(port_raw) if port_raw.isdigit() else None,
+        log_level=(str(get.get("KB_LOG_LEVEL") or "").strip() or "INFO").upper(),
+        sweep_interval_days=_int_or(get, "KB_SWEEP_INTERVAL", 6),
+        keep_days=_int_or(get, "KB_LOG_KEEP_DAYS", 90),
     )
+
+
+def load_config(env_file: Path | None = None) -> Config:
+    """从 .env 读取配置（服务启动时用）。缺必填项时抛 ConfigError。
+
+    注意：load_dotenv 会写入进程级 os.environ，所以**同一个进程内只应调用一次**。
+    重复传入不同的 env_file 不会覆盖已设置的变量（override=False）。
+
+    改了配置要重新读的话用 `reload_config`——**别拿这个函数重读**。
+    """
+    env_file = env_file or PROJECT_ROOT / ".env"
+    load_dotenv(env_file, override=False)
+    return _build(os.environ)
+
+
+def reload_config(env_file: Path | None = None) -> Config:
+    """重新读 .env 造一份新 Config（热重载用）。
+
+    **用 `dotenv_values` 直接解析文件，不走 `os.environ`。** 两个理由：
+
+    1. `load_dotenv` 是 override=False 的——已经设过的不覆盖，改了文件也读不到，
+       重载会变成空转。
+    2. 重载不该污染进程环境。它是「读文件造一份新的」，不是「改环境」。
+
+    文件不存在、或必填项被手滑删掉时，用默认值造一份，**不抛**——
+    别把正在跑的服务带崩。
+    """
+    env_file = env_file or PROJECT_ROOT / ".env"
+    values: Mapping = dotenv_values(env_file) if env_file.is_file() else {}
+    try:
+        return _build(values)
+    except ConfigError:
+        # 必填项缺了（文件不在，或被手滑删掉）：退回不严格模式，
+        # 缺的置空、能读的照读。**不抛**——重载是服务在跑的时候发生的，
+        # 这里抛出去就是把正在跑的服务带崩，代价远大于一份不完整的配置。
+        return _build(values, strict=False)

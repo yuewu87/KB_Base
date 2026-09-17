@@ -1,8 +1,9 @@
+import os
 from pathlib import Path
 
 import pytest
 
-from kb.config import ConfigError, load_config
+from kb.config import ConfigError, load_config, reload_config
 
 
 @pytest.fixture(autouse=True)
@@ -14,6 +15,9 @@ def _clean_env(monkeypatch):
         "KB_LLM_MODEL",
         "KB_VAULT_PATH",
         "KB_PORT",
+        "KB_LOG_LEVEL",
+        "KB_SWEEP_INTERVAL",
+        "KB_LOG_KEEP_DAYS",
     ):
         monkeypatch.delenv(key, raising=False)
 
@@ -75,3 +79,72 @@ def test_os_env_wins_over_env_file(monkeypatch, tmp_path):
     """override=False 的语义：已存在的环境变量优先于 .env 文件。"""
     monkeypatch.setenv("KB_LLM_API_KEY", "from-os")
     assert load_config(_write_env(tmp_path, VALID)).llm_api_key == "from-os"
+
+
+# ---------- 新字段与热重载 ----------
+
+def test_new_fields_have_defaults(tmp_path):
+    """三个新字段可有可无——老 `.env` 不改也能跑起来。"""
+    env = tmp_path / ".env"
+    env.write_text(
+        "KB_LLM_API_KEY=k\nKB_LLM_BASE_URL=u\nKB_LLM_MODEL=m\n", encoding="utf-8"
+    )
+    cfg = load_config(env)
+    assert cfg.log_level == "INFO"
+    assert cfg.sweep_interval_days == 6
+    assert cfg.keep_days == 90
+
+
+def test_new_fields_are_read(tmp_path):
+    env = tmp_path / ".env"
+    env.write_text(
+        "KB_LLM_API_KEY=k\nKB_LLM_BASE_URL=u\nKB_LLM_MODEL=m\n"
+        "KB_LOG_LEVEL=DEBUG\nKB_SWEEP_INTERVAL=3\nKB_LOG_KEEP_DAYS=30\n",
+        encoding="utf-8",
+    )
+    cfg = load_config(env)
+    assert cfg.log_level == "DEBUG"
+    assert cfg.sweep_interval_days == 3
+    assert cfg.keep_days == 30
+
+
+def test_reload_config_sees_the_new_value(tmp_path):
+    """**这条是热重载的地基。**
+
+    不能拿 `load_dotenv` 重读——它是 override=False 的，已经设过的环境变量
+    它不覆盖，改了文件也读不到，重载会变成空转。
+    """
+    env = tmp_path / ".env"
+    env.write_text(
+        "KB_LLM_API_KEY=k\nKB_LLM_BASE_URL=u\nKB_LLM_MODEL=old\n", encoding="utf-8"
+    )
+    assert load_config(env).llm_model == "old"
+
+    env.write_text(
+        "KB_LLM_API_KEY=k\nKB_LLM_BASE_URL=u\nKB_LLM_MODEL=new\n", encoding="utf-8"
+    )
+
+    assert reload_config(env).llm_model == "new"
+
+
+def test_reload_does_not_touch_os_environ(tmp_path, monkeypatch):
+    """重载**不污染进程环境**——它是「读文件造一份新的」，不是「改环境」。
+
+    用 `dotenv_values` 而不是 `load_dotenv`，正是为这个。
+    """
+    monkeypatch.delenv("KB_LLM_MODEL", raising=False)
+    env = tmp_path / ".env"
+    env.write_text(
+        "KB_LLM_API_KEY=k\nKB_LLM_BASE_URL=u\nKB_LLM_MODEL=x\n", encoding="utf-8"
+    )
+
+    reload_config(env)
+
+    assert "KB_LLM_MODEL" not in os.environ
+
+
+def test_reload_missing_file_gives_defaults(tmp_path):
+    """文件不在——用默认值造一份，别抛。"""
+    cfg = reload_config(tmp_path / "没有这个文件")
+    assert cfg.llm_model == ""
+    assert cfg.log_level == "INFO"
