@@ -1,15 +1,35 @@
 """Web UI 路由。"""
 
+import json
+
 import pytest
 from fastapi.testclient import TestClient
 
 from kb.api.http import create_app
 from kb.config import Config
 from kb.core.vault import write_note
-from kb.llm.base import FakeLLM
 
 # 对话输出固定成「不做动作」的一句——Web 测试不该真连模型
 CHAT_REPLY = '{"say": "好的", "action": null, "params": {}}'
+
+# `/new` 现在投完直接整理（Q88），同一个假模型也要能回答整理那条链——
+# 它按 outcome/target_path 解析，形状和对话完全不同。按系统提示分流。
+PLAN_REPLY = json.dumps(
+    {
+        "outcome": "create",
+        "target_path": "计算机/窗口缩放那个坑.md",
+        "frontmatter": {"类型": "概念", "主题": ["计算机"]},
+        "content": "# 窗口缩放那个坑\n\n见 [[计算机]]\n",
+    },
+    ensure_ascii=False,
+)
+
+
+class _TwoChainLLM:
+    """对话给固定的一句，整理给一份合法计划。"""
+
+    def complete(self, system: str, user: str) -> str:
+        return CHAT_REPLY if "你能做的动作" in system else PLAN_REPLY
 
 
 @pytest.fixture
@@ -39,7 +59,7 @@ def client(vault):
         port=None,
     )
     # data_dir 指到 vault（生产里是 data/）——会话落盘的预期位置要对得上
-    return TestClient(create_app(cfg, llm=FakeLLM(CHAT_REPLY), data_dir=vault))
+    return TestClient(create_app(cfg, llm=_TwoChainLLM(), data_dir=vault))
 
 
 @pytest.mark.parametrize("path", ["/", "/journal", "/flow", "/runtime"])
@@ -120,11 +140,12 @@ def test_new_page_prefills_chosen_template(client):
     assert "当时是怎么想的" in body
 
 
-def test_push_from_web_creates_draft(client, vault):
+def test_push_from_web_organizes_immediately(client, vault):
+    """模板投递也直接走完（Q88）。"""
     from kb.core.vault import list_drafts
 
     client.post("/new", data={"content": "窗口缩放那个坑"}, follow_redirects=False)
-    assert len(list_drafts(vault)) == 1
+    assert list_drafts(vault) == []        # 不留草稿
 
 
 def test_push_from_web_rejects_empty(client):

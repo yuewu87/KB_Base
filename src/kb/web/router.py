@@ -18,11 +18,12 @@ from fastapi import APIRouter, Form, HTTPException, Request
 from fastapi.responses import HTMLResponse, RedirectResponse
 from fastapi.templating import Jinja2Templates
 
-from kb.api.http import build_llm, push_draft
+from kb.api.http import push_and_organize
 from kb.config import Config
 from kb.core.chat import handle
 from kb.core.chat_store import list_chats, load_chat
 from kb.core.vault import list_domains
+from kb.llm.base import LLM
 from kb.logging_setup import LOG_FILE
 from kb.web.data import load_push_templates, read_journals, tail_log
 
@@ -39,11 +40,13 @@ def build_router(
     cfg: Config,
     data_dir: Path,
     organize_fn: Callable[[str, str, str | None], str],
+    get_llm: Callable[[], LLM],
 ) -> APIRouter:
-    """`data_dir` 与 `organize_fn` 都由 `create_app` 传进来。
+    """`data_dir`、`organize_fn`、`get_llm` 都由 `create_app` 传进来。
 
-    两者都是**服务侧的东西**：会话历史落哪、对话能调哪些动作。
-    Web 层自己知道这两件事，就意味着多出第二份实现。
+    三者都是**服务侧的东西**：会话历史落哪、对话能调哪些动作、模型是谁。
+    Web 层自己知道这三件事，就意味着多出第二份实现——
+    尤其是 `get_llm`：自己 `build_llm(cfg)` 会绕过注入的模型（测试里就是假模型）。
     """
     router = APIRouter()
 
@@ -73,7 +76,7 @@ def build_router(
             cfg.vault_path,
             cid or None,
             message,
-            build_llm(cfg),
+            get_llm(),
             organize_fn=organize_fn,
         )
         return RedirectResponse(f"/?cid={chat_id}", status_code=303)
@@ -94,7 +97,7 @@ def build_router(
         """只填正文（Q87）——`source` 记成 Web，项目留空，其余归整理。"""
         if not content.strip():
             raise HTTPException(status_code=400, detail="正文不能为空")
-        push_draft(cfg, content, source="Web")
+        push_and_organize(cfg, content, get_llm(), source="Web")
         return RedirectResponse("/journal", status_code=303)
 
     @router.get("/journal", response_class=HTMLResponse)

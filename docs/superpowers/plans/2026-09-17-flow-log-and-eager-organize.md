@@ -4,7 +4,7 @@
 
 **Goal:** ① Web 投递后直接走完整理；② 补上流程日志——自然语言、一条一个动作，落到工作日志页。
 
-**Architecture:** 流程日志复用现成的 logging 设施：单独一个 `kb.flow` logger + 独立 handler 写 `data/logs/flow.jsonl`。流水线各处只管把「发生了什么」用大白话说出来，**不看格式**——格式在 formatter 里。
+**Architecture:** 流程日志落点由 `flow.configure(data_dir)` 显式指定（**不挂 logging**——写路径在 handler 创建时绑死，测试没法注入）。流水线各处只管把「发生了什么」用大白话说出来，落盘与格式都在 `core/flow.py` 里。
 
 **Tech Stack:** Python 3.11、FastAPI、Jinja2、pytest（LLM 全 mock）、ruff。
 
@@ -16,7 +16,7 @@
 
 | 文件 | 职责 | 动作 |
 |---|---|---|
-| `src/kb/logging_setup.py` | 加 `kb.flow` 的 handler → `data/logs/flow.jsonl` | 改 |
+| `src/kb/logging_setup.py` | **不动**——流程日志和运行日志是两回事 | — |
 | `src/kb/core/flow.py` | 流程日志的写入口 + 读入口 | **新建** |
 | `src/kb/core/organize.py` | 三段式各处插桩 | 改 |
 | `src/kb/api/http.py` | 投递走完整理；插桩 | 改 |
@@ -163,10 +163,19 @@ git add -A && git commit -m "feat: Web 投递后直接走完整理（Q88）"
 
 **Q89：** 自然语言，一条一个动作。存 `data/logs/flow.jsonl`，**不进 vault**。
 
+> **⚠️ 2026-09-17 重写。** 原计划把流程日志**挂在 logging 上**（`kb.flow` logger + 独立 handler），执行时证明**行不通**：
+>
+> - `emit` 走 logger，**写路径在 handler 创建时就绑死了**——`monkeypatch` 改 `flow.FLOW_FILE` 对写入毫无影响，测试没法注入落点
+> - 而且 `setup_logging()` 只在 `main()` 里调，`create_app` 不调——pytest 进程里 `kb.flow` **连 handler 都没有**，`emit` 往哪儿都没写
+> - 原计划那条 `test_set_run_tags_subsequent_entries` 还写错了路径（写 `tmp_path/flow.jsonl`、读 `tmp_path/logs/flow.jsonl`），**中间差一层，任何实现都过不了**
+>
+> **改成显式 `configure(data_dir)`**：落点是一个可设的模块变量，写入时现读。**不碰 logging。**
+
 **Files:**
-- Modify: `src/kb/logging_setup.py`
 - Create: `src/kb/core/flow.py`
 - Create: `tests/core/test_flow.py`
+- Modify: `src/kb/api/http.py`（`create_app` 里调 `flow.configure`）
+- **不改** `src/kb/logging_setup.py`
 
 - [ ] **Step 1: 写失败测试**
 
@@ -175,38 +184,74 @@ git add -A && git commit -m "feat: Web 投递后直接走完整理（Q88）"
 ```python
 """流程日志：自然语言，一条一个动作（Q89）。存服务侧，不进 vault。"""
 
+import json
+
+import pytest
+
+from kb.core import flow
 from kb.core.flow import STEPS, emit, read_flow, set_run
 
 
-def test_emit_writes_jsonl(tmp_path, monkeypatch):
-    monkeypatch.setattr("kb.core.flow.FLOW_FILE", tmp_path / "flow.jsonl")
+@pytest.fixture(autouse=True)
+def _reset():
+    """每个测试前后都把模块状态清干净——它是模块级的，会串。"""
+    flow.configure(None)
+    set_run("")
+    yield
+    flow.configure(None)
+    set_run("")
+
+
+def test_emit_writes_jsonl(tmp_path):
+    flow.configure(tmp_path)
     emit("投递", "你在网页上投递了一条草稿")
-    lines = (tmp_path / "flow.jsonl").read_text(encoding="utf-8").strip().splitlines()
-    assert len(lines) == 1
-    import json
 
-    row = json.loads(lines[0])
-    assert row["step"] == "投递"
-    assert row["text"] == "你在网页上投递了一条草稿"
-    assert row["at"]
+    rows = read_flow(tmp_path)
+    assert len(rows) == 1
+    assert rows[0]["step"] == "投递"
+    assert rows[0]["text"] == "你在网页上投递了一条草稿"
+    assert rows[0]["at"]
 
 
-def test_emit_never_raises(tmp_path, monkeypatch):
+def test_emit_is_noop_when_not_configured(tmp_path):
+    """没配落点就不记——不抛、不写别处。"""
+    emit("投递", "x")
+    assert read_flow(tmp_path) == []
+
+
+def test_emit_never_raises_on_write_failure(tmp_path, monkeypatch):
     """写日志失败不该让正事挂掉——日志是附属品。"""
-    monkeypatch.setattr("kb.core.flow.FLOW_FILE", tmp_path / "不存在" / "x" / "f.jsonl")
+    flow.configure(tmp_path)
+    monkeypatch.setattr(flow.Path, "open", _boom)
+
     emit("投递", "x")          # 不抛
 
 
-def test_set_run_tags_subsequent_entries(tmp_path, monkeypatch):
-    monkeypatch.setattr("kb.core.flow.FLOW_FILE", tmp_path / "flow.jsonl")
+def _boom(*args, **kwargs):
+    raise OSError("磁盘满了")
+
+
+def test_set_run_tags_subsequent_entries(tmp_path):
+    flow.configure(tmp_path)
     set_run("20260917-1400")
     emit("投递", "a")
-    rows = read_flow(tmp_path)
-    assert rows[0]["run"] == "20260917-1400"
+    assert read_flow(tmp_path)[0]["run"] == "20260917-1400"
 
 
 def test_read_flow_missing_file(tmp_path):
     assert read_flow(tmp_path) == []
+
+
+def test_read_flow_skips_broken_lines(tmp_path):
+    """半行（进程被杀）跳过，别让整页挂掉。"""
+    flow.configure(tmp_path)
+    emit("投递", "好的")
+    path = tmp_path / "logs" / "flow.jsonl"
+    with path.open("a", encoding="utf-8") as f:
+        f.write('{"step": "规划", "tex')      # 截断的半行
+
+    rows = read_flow(tmp_path)
+    assert [r["text"] for r in rows] == ["好的"]
 
 
 def test_steps_are_the_pipeline_order():
@@ -224,29 +269,6 @@ def test_steps_are_the_pipeline_order():
 
 - [ ] **Step 3: 实现**
 
-`src/kb/logging_setup.py` 加 handler：
-
-```python
-FLOW_FILE = LOG_DIR / "flow.jsonl"
-
-_FLOW_FORMAT = "%(message)s"          # 消息本身就是一行 JSON，见 core/flow.py
-```
-
-`setup_logging()` 里，在给根 logger 加 handler 之后加：
-
-```python
-    flow = logging.getLogger("kb.flow")
-    flow.propagate = False            # 不再往根 logger 冒泡——否则流程会同时进运行日志
-    if not any(isinstance(h, logging.handlers.RotatingFileHandler)
-               and Path(h.baseFilename) == FLOW_FILE for h in flow.handlers):
-        fh = logging.handlers.RotatingFileHandler(
-            FLOW_FILE, maxBytes=MAX_BYTES, backupCount=BACKUP_COUNT, encoding="utf-8"
-        )
-        fh.setFormatter(logging.Formatter(_FLOW_FORMAT))
-        flow.addHandler(fh)
-        flow.setLevel(logging.INFO)
-```
-
 `src/kb/core/flow.py`：
 
 ```python
@@ -258,24 +280,38 @@ _FLOW_FORMAT = "%(message)s"          # 消息本身就是一行 JSON，见 core
 **存服务侧（`data/logs/flow.jsonl`），绝不进 vault**——它是过程记录不是知识
 （Q80 的分界）。进去会被检索、被当知识。
 
-写失败一律吞掉：**日志是附属品，不该让正事挂掉。**
+## 为什么不用 logging
+
+一开始它挂在 `kb.flow` logger 上（独立 handler）。问题有两个：**写路径在
+handler 创建时就绑死了**，测试没法注入落点；而且 `setup_logging()` 只在
+`main()` 里调，`pytest` 进程里根本没有 handler。
+
+改成显式 `configure(data_dir)`：落点是个可设的模块变量，**写入时现读**。
+不调 `configure` 就不记——服务在生产里配，测试里配临时目录。
 """
 
 from __future__ import annotations
 
 import json
-import logging
 from datetime import datetime
 from pathlib import Path
-
-from kb.logging_setup import FLOW_FILE
-
-_log = logging.getLogger("kb.flow")
 
 # 链上的顺序就是流水线的顺序——工作日志页的流程图照它画
 STEPS = ["投递", "规划", "校验", "审核", "落盘", "提交"]
 
-_run: str | None = None
+MAX_BYTES = 1_000_000
+_FILE = "flow.jsonl"
+
+# 模块级状态：单进程、整理是同步的，够用。
+# **并发整理时会串**（一批的 run 被另一批改掉）——知道有这个边界。
+_data_dir: Path | None = None
+_run: str = ""
+
+
+def configure(data_dir: Path | None) -> None:
+    """指定落点。服务启动时调一次；测试传临时目录；传 `None` 关掉。"""
+    global _data_dir
+    _data_dir = data_dir
 
 
 def set_run(run_id: str) -> None:
@@ -284,23 +320,37 @@ def set_run(run_id: str) -> None:
     _run = run_id
 
 
+def flow_path(data_dir: Path) -> Path:
+    return data_dir / "logs" / _FILE
+
+
 def emit(step: str, text: str) -> None:
-    """记一条流程。`step` 取 `STEPS` 里的一个。"""
+    """记一条流程。`step` 取 `STEPS` 里的一个。
+
+    **没配落点、或写失败，都直接返回**——日志是附属品，不该拖垮正事。
+    """
+    if _data_dir is None:
+        return
     row = {
         "at": f"{datetime.now():%Y-%m-%d %H:%M:%S}",
-        "run": _run or "",
+        "run": _run,
         "step": step,
         "text": text,
     }
+    path = flow_path(_data_dir)
     try:
-        _log.info(json.dumps(row, ensure_ascii=False))
-    except Exception:      # noqa: BLE001 —— 日志失败不能拖垮正事
-        pass
+        path.parent.mkdir(parents=True, exist_ok=True)
+        if path.is_file() and path.stat().st_size > MAX_BYTES:
+            path.replace(path.with_name(_FILE + ".1"))
+        with path.open("a", encoding="utf-8") as f:
+            f.write(json.dumps(row, ensure_ascii=False) + "\n")
+    except OSError:
+        pass          # 满了、没权限、路径没了——都不该让整理失败
 
 
 def read_flow(data_dir: Path, limit: int = 500) -> list[dict]:
-    """读最近的流程记录，**按时间正序**。文件不存在返回空列表。"""
-    path = data_dir / "logs" / FLOW_FILE.name
+    """读最近的流程记录，**按写入顺序**。文件不存在返回空列表。"""
+    path = flow_path(data_dir)
     if not path.is_file():
         return []
     rows: list[dict] = []
@@ -311,20 +361,30 @@ def read_flow(data_dir: Path, limit: int = 500) -> list[dict]:
         try:
             rows.append(json.loads(line))
         except json.JSONDecodeError:
-            continue           # 半行（进程被杀）——跳过，别让整页挂掉
+            continue          # 半行（进程被杀）——跳过，别让整页挂掉
     return rows[-limit:]
 ```
 
-> **`read_flow` 收 `data_dir` 而不是直接读模块常量**——和 `chat_store` 同一个理由：测试要能注入临时目录。
+- [ ] **Step 4: 在 `create_app` 里配上落点**
 
-- [ ] **Step 4: 跑测试确认通过 + 提交**
+`src/kb/api/http.py` 的 `create_app`，在 `data_dir = data_dir or DATA_DIR` 之后加：
+
+```python
+    # 流程日志的落点跟着 data_dir 走——测试注入临时目录时它也跟着隔离
+    flow.configure(data_dir)
+```
+
+import 补 `from kb.core import flow`。
+
+- [ ] **Step 5: 跑测试确认通过 + 提交**
 
 ```bash
 "D:/Conda_base/envs/kn_base/python.exe" -m pytest -p no:cacheprovider tests/core/test_flow.py -q
+"D:/Conda_base/envs/kn_base/python.exe" -m ruff check src tests scripts
 git add -A && git commit -m "feat: 流程日志的存储——自然语言、一条一个动作（Q89）"
 ```
 
----
+> **`logging_setup.py` 不动**——流程日志和运行日志是两回事：一个是要读给人看的过程记录，一个是技术排查用的。放一个文件里反而两边都不好读。
 
 ## Task 3: 流水线插桩
 
@@ -448,6 +508,11 @@ def test_flow_page_renders_chain(client, vault):
     assert "模型决定放进" in body
     assert "提交" in body            # 链上没走到的那几步也要画出来
 ```
+
+> **这条能过，全靠 `create_app` 里那句 `flow.configure(data_dir)`**——
+> 客户端夹具传的是 `data_dir=vault`，所以 `emit` 写的和页面读的是**同一个文件**。
+> 原计划把它挂在 logging 上，这条必然失败（写入路径绑死在 handler 上，
+> 而且测试进程里根本没有 handler）。
 
 - [ ] **Step 2: 跑测试确认失败**
 

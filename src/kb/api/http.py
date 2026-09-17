@@ -21,7 +21,7 @@ from pydantic import BaseModel
 
 from kb.api import runtime
 from kb.config import DATA_DIR, Config, load_config
-from kb.core import organize
+from kb.core import flow, organize
 from kb.core.chat import handle
 from kb.core.chat_store import list_chats, load_chat
 from kb.core.models import Draft, OrganizeResult
@@ -123,6 +123,42 @@ def push_draft(
     return f"连续 {PUSH_ATTEMPTS} 次撞上已存在的草稿 id，没记成。", ""
 
 
+def push_and_organize(
+    cfg: Config,
+    content: str,
+    llm: LLM,
+    *,
+    source: str | None = None,
+    revise_target: str | None = None,
+) -> str:
+    """投一条草稿，**立刻整理**，返回给人看的结果。
+
+    Web 这条路不等（Q88）——人写完就想看到结果，留着等没有意义。
+    会话层那条（`kb push` + 事后 `kb organize`）仍保留缓冲：
+    agent 干活时投的东西要攒着，由会话 AI 判断时机（Q62）。
+    """
+    text, draft_id = push_draft(
+        cfg, content, source=source, revise_target=revise_target
+    )
+    if not draft_id:
+        return text
+
+    results = organize.organize_selected(
+        cfg.vault_path,
+        [p for p in [find_draft(cfg.vault_path, draft_id)] if p],
+        llm,
+    )
+    if not results:
+        return text
+
+    r = results[0]
+    if r.kind.value == "failed":
+        return f"{text}\n整理没成：{r.error}"
+    if r.kind.value == "pending":
+        return f"{text}\n归不了类，先搁在待归类：{r.detail}"
+    return f"{text}\n已归到 {r.detail}"
+
+
 def create_app(
     cfg: Config | None = None,
     llm: LLM | None = None,
@@ -132,6 +168,8 @@ def create_app(
     # 会话历史**不能进仓库**（public）——落点只有 data/ 是安全的，
     # 夹具可以传临时目录来隔离。
     data_dir = data_dir or DATA_DIR
+    # 流程日志的落点跟着它走——测试注入临时目录时也跟着隔离
+    flow.configure(data_dir)
     cache: dict[str, LLM | None] = {"llm": llm}
 
     def get_llm() -> LLM:
@@ -146,11 +184,11 @@ def create_app(
         两个入口的动作清单才是同一份。
         """
         if kind == "push":
-            text, _ = push_draft(cfg, content, source="Web")
-            return text
+            return push_and_organize(cfg, content, get_llm(), source="Web")
         if kind == "revise":
-            text, _ = push_draft(cfg, content, source="Web", revise_target=target)
-            return text
+            return push_and_organize(
+                cfg, content, get_llm(), source="Web", revise_target=target
+            )
         if kind == "organize":
             results = organize.organize_selected(
                 cfg.vault_path, list_drafts(cfg.vault_path), get_llm()
@@ -165,7 +203,7 @@ def create_app(
 
     from kb.web.router import STATIC_DIR, build_router
 
-    app.include_router(build_router(cfg, data_dir, _chat_organize_fn))
+    app.include_router(build_router(cfg, data_dir, _chat_organize_fn, get_llm))
     app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
 
     @app.get("/health")

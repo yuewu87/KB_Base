@@ -47,14 +47,23 @@ class _ChatAwareLLM:
     **一个夹具要同时供两条链用**，而它们的输出形状不同：对话要
     `{say, action, params}`，整理要 `{outcome, target_path, ...}`——传一个
     固定字符串满足不了两边。对话的系统提示里有动作清单，据此分流。
+
+    对话回复可以给一串：对话是**有界循环**（`chat.MAX_ROUNDS` 轮），
+    固定回同一句「我这就 push」会被连做 4 次（Q88 之后就是连投 4 条草稿）。
+    要给「说一次、然后收尾」的剧本得按顺序吐；队列见底后回最后一句。
     """
 
-    def __init__(self, chat_reply: str | None = None) -> None:
-        self.chat_reply = chat_reply or _chat_json()
+    def __init__(self, chat_reply: str | list[str] | None = None) -> None:
+        if isinstance(chat_reply, list):
+            self._queue = list(chat_reply)
+            self.chat_reply = chat_reply[-1] if chat_reply else _chat_json()
+        else:
+            self._queue = []
+            self.chat_reply = chat_reply or _chat_json()
 
     def complete(self, system: str, user: str) -> str:
         if "你能做的动作" in system:
-            return self.chat_reply
+            return self._queue.pop(0) if self._queue else self.chat_reply
         return _plan_json()
 
 
@@ -253,19 +262,38 @@ def test_chat_persists_only_user_and_final_reply(vault):
       （这条是端到端跑真实 LLM 时看出来的，计划里没有。）
     """
     from kb.core.chat_store import load_chat
+    from kb.core.vault import list_notes
 
     cfg = Config("k", "u", "m", vault, None)
     llm = FakeLLM([
         _chat_json("我记一下", action="push", params={"content": "记一下 X"}),
+        _plan_json(),                        # 投完立刻整理（Q88）要用的计划
         _chat_json("记好了"),
     ])
     chat_client = TestClient(create_app(cfg, llm=llm, data_dir=vault))
     data = chat_client.post("/chat", json={"message": "记一下 X"}).json()
 
     chat = load_chat(vault, data["chat_id"])
-    # 先确认动作真的跑过（否则下面那条断言会因为「没产生工具结果」而恒真）
-    assert len(list_drafts(vault)) == 1
+    # 先确认动作真的跑过（否则下面那条断言会因为「没产生工具结果」而恒真）。
+    # Q88 之后投递当场整理——草稿被消费掉了，所以要验的是笔记建出来了。
+    assert [p.stem for p in list_notes(vault)] == ["并发写锁"]
     assert [m["role"] for m in chat["messages"]] == ["user", "assistant"]
     assert chat["messages"][-1]["content"] == "记好了"
     assert all("工具结果" not in m["content"] for m in chat["messages"])
     assert all("我记一下" not in m["content"] for m in chat["messages"])
+
+
+def test_chat_push_runs_organize_immediately(vault):
+    """Web 投的不用等——投完直接整理（Q88）。"""
+    from kb.core.vault import list_drafts, list_notes
+
+    cfg = Config("k", "u", "m", vault, None)
+    llm = _ChatAwareLLM([
+        _chat_json("我记一下", action="push", params={"content": "记一下 X"}),
+        _chat_json("记好了"),
+    ])
+    client = TestClient(create_app(cfg, llm=llm, data_dir=vault))
+    client.post("/chat", json={"message": "记一下 X"})
+
+    assert list_drafts(vault) == []              # 草稿被消费掉了
+    assert [p.stem for p in list_notes(vault)]   # 笔记建出来了
