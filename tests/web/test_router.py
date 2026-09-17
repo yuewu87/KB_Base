@@ -240,7 +240,9 @@ def test_reply_known_marks_read(client, vault):
     from kb.core.sweep_state import load_state, save_report
 
     save_report(vault, {"summary": "合并了 2 组近义标签", "tag_merges": [], "dir_merges": []})
-    client.post("/sweep/reply", data={"reply": "知道了"}, follow_redirects=False)
+    # 真实表单是个不带 name 的普通提交按钮——这里也别塞死参数，
+    # 否则测的不是真实的请求形状
+    client.post("/sweep/reply", follow_redirects=False)
     assert load_state(vault)["report"]["read"] is True          # 记下了
 
     body = client.get("/sweep").text
