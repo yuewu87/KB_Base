@@ -21,7 +21,6 @@ PUSH_TEMPLATES_DIR = PROJECT_ROOT / "templates" / "投递"
 # 每个整理日志小节：`## <标题>` 后面跟若干 `- <条目>`
 Entry = str
 Section = tuple[str, list[Entry]]
-Journal = tuple[str, list[Section]]
 
 
 def parse_journal(text: str) -> list[Section]:
@@ -49,19 +48,59 @@ def parse_journal(text: str) -> list[Section]:
     return sections
 
 
-def read_journals(vault_root: Path) -> list[Journal]:
-    """按日期倒序返回全部整理日志：[(日期, 各小节)]。"""
+def read_journal(vault_root: Path, day: str) -> list[Section]:
+    """读某一天的整理日志。没有这一天返回空列表（不抛）。"""
+    path = vault_root / INDEX / JOURNAL_DIR / f"{day}.md"
+    if not path.is_file():
+        return []
+    return parse_journal(path.read_text(encoding="utf-8"))
+
+
+def journal_days(vault_root: Path) -> list[str]:
+    """有内容的整理日志日期，**倒序**。
+
+    **空的不算一天**——只写了 frontmatter、一个小节都没有的文件不该在
+    箱子列表里占一格（那会是个点进去什么都没有的空箱子）。
+    """
     directory = vault_root / INDEX / JOURNAL_DIR
     if not directory.is_dir():
         return []
 
-    out: list[Journal] = []
+    out: list[str] = []
     for path in sorted(directory.glob("*.md"), reverse=True):
-        text = path.read_text(encoding="utf-8")
-        sections = parse_journal(text)
-        if sections:
-            out.append((path.stem, sections))
+        if parse_journal(path.read_text(encoding="utf-8")):
+            out.append(path.stem)
     return out
+
+
+def runtime_days(directory: Path) -> list[str]:
+    """有运行日志的日期，**倒序**。目录不存在返回空列表。"""
+    if not directory.is_dir():
+        return []
+    return sorted((p.stem for p in directory.glob("*.log")), reverse=True)
+
+
+def read_runtime(directory: Path, day: str) -> str:
+    """读某一天的运行日志。没有这一天返回空串（不抛）。
+
+    末尾换行去掉——本模块出的是**页面能直接渲染的东西**，页面上是终端样式
+    （`<pre>`），带着行尾换行会多空一行；它替换掉的 `tail_log` 也是拼行返回、
+    本来就不带尾巴。
+    """
+    path = directory / f"{day}.log"
+    if not path.is_file():
+        return ""
+    return path.read_text(encoding="utf-8", errors="replace").rstrip("\n")
+
+
+def box_label(day: str) -> str:
+    """`2026-09-17` → `26_9_17箱子`。
+
+    **只是界面上的叫法**——落盘的文件名还是各自的 `2026-09-17.*`
+    （整理日志是 vault 里的笔记，文件名跟标题一致是现有约定）。
+    """
+    year, month, day_of_month = day.split("-")
+    return f"{year[2:]}_{int(month)}_{int(day_of_month)}箱子"
 
 
 def group_flow(rows: list[dict], steps: list[str] | None = None) -> list[dict]:
@@ -108,11 +147,3 @@ def load_push_templates() -> dict[str, str]:
         path.stem: path.read_text(encoding="utf-8")
         for path in sorted(PUSH_TEMPLATES_DIR.glob("*.md"))
     }
-
-
-def tail_log(path: Path, lines: int) -> str:
-    """日志文件的最后 N 行。文件不存在返回空串。"""
-    if not path.is_file():
-        return ""
-    text = path.read_text(encoding="utf-8", errors="replace")
-    return "\n".join(text.splitlines()[-lines:])

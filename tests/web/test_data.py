@@ -1,6 +1,14 @@
 """Web UI 的数据聚合：把文件变成页面能直接渲染的结构。"""
 
-from kb.web.data import group_flow, parse_journal, read_journals, tail_log
+from kb.web.data import (
+    box_label,
+    group_flow,
+    journal_days,
+    parse_journal,
+    read_journal,
+    read_runtime,
+    runtime_days,
+)
 
 JOURNAL = """---
 更新: '2026-09-16'
@@ -37,40 +45,6 @@ def test_parse_journal_ignores_frontmatter_and_title():
 
 def test_parse_journal_empty():
     assert parse_journal("") == []
-
-
-def test_read_journals_newest_first(tmp_path):
-    d = tmp_path / "_索引" / "整理日志"
-    d.mkdir(parents=True)
-    (d / "2026-09-15.md").write_text(
-        "## 10:00 整理 1 条草稿\n\n- 新建：[[旧]]\n", encoding="utf-8"
-    )
-    (d / "2026-09-16.md").write_text(
-        "## 10:00 整理 1 条草稿\n\n- 新建：[[新]]\n", encoding="utf-8"
-    )
-    got = read_journals(tmp_path)
-    assert [date for date, _ in got] == ["2026-09-16", "2026-09-15"]
-    assert got[0][1][0][1] == ["新建：[[新]]"]
-
-
-def test_read_journals_empty_when_absent(tmp_path):
-    assert read_journals(tmp_path) == []
-
-
-def test_tail_log_returns_last_lines(tmp_path):
-    p = tmp_path / "kb.log"
-    p.write_text("\n".join(f"line{i}" for i in range(10)), encoding="utf-8")
-    assert tail_log(p, 3) == "line7\nline8\nline9"
-
-
-def test_tail_log_missing_file_is_empty(tmp_path):
-    assert tail_log(tmp_path / "没有.log", 10) == ""
-
-
-def test_tail_log_fewer_lines_than_asked(tmp_path):
-    p = tmp_path / "kb.log"
-    p.write_text("只有一行", encoding="utf-8")
-    assert tail_log(p, 10) == "只有一行"
 
 
 def test_group_flow_by_run():
@@ -127,3 +101,68 @@ def test_group_flow_without_steps_keeps_old_shape():
     rows = [{"run": "a", "step": "投递", "text": "t", "at": "t"}]
     g = group_flow(rows)[0]
     assert g["reached"] == {"投递"}
+
+
+def test_journal_days_newest_first(tmp_path):
+    d = tmp_path / "_索引" / "整理日志"
+    d.mkdir(parents=True)
+    for day in ("2026-09-15", "2026-09-17", "2026-09-16"):
+        (d / f"{day}.md").write_text("## 10:00 整理 1 条草稿\n\n- 新建：[[x]]\n",
+                                     encoding="utf-8")
+    assert journal_days(tmp_path) == ["2026-09-17", "2026-09-16", "2026-09-15"]
+
+
+def test_journal_days_missing_dir(tmp_path):
+    assert journal_days(tmp_path) == []
+
+
+def test_journal_days_skips_empty_files(tmp_path):
+    """只有 frontmatter、一个小节都没有的日志不算一天——别列出个空箱子。"""
+    d = tmp_path / "_索引" / "整理日志"
+    d.mkdir(parents=True)
+    (d / "2026-09-15.md").write_text(
+        "---\n更新: '2026-09-15'\n---\n\n# 整理日志 2026-09-15\n", encoding="utf-8"
+    )
+    (d / "2026-09-16.md").write_text(
+        "## 10:00 整理 1 条草稿\n\n- 新建：[[x]]\n", encoding="utf-8"
+    )
+    assert journal_days(tmp_path) == ["2026-09-16"]
+
+
+def test_read_journal_one_day(tmp_path):
+    d = tmp_path / "_索引" / "整理日志"
+    d.mkdir(parents=True)
+    (d / "2026-09-16.md").write_text(
+        "## 23:20 整理 1 条草稿\n\n- 新建：[[A]]\n", encoding="utf-8"
+    )
+    (d / "2026-09-17.md").write_text(
+        "## 09:27 整理 2 条草稿\n\n- 新建：[[B]]\n- 待归类：说不清\n", encoding="utf-8"
+    )
+
+    sections = read_journal(tmp_path, "2026-09-17")
+    assert sections == [("09:27 整理 2 条草稿", ["新建：[[B]]", "待归类：说不清"])]
+
+
+def test_read_journal_unknown_day(tmp_path):
+    """指向没有日志的一天 → 空列表，不抛。"""
+    assert read_journal(tmp_path, "2026-01-01") == []
+
+
+def test_runtime_days_and_read(tmp_path):
+    d = tmp_path / "kb"
+    d.mkdir(parents=True)
+    (d / "2026-09-16.log").write_text("昨天的\n", encoding="utf-8")
+    (d / "2026-09-17.log").write_text("第一行\n第二行\n", encoding="utf-8")
+
+    assert runtime_days(d) == ["2026-09-17", "2026-09-16"]
+    assert read_runtime(d, "2026-09-17") == "第一行\n第二行"
+
+
+def test_read_runtime_unknown_day(tmp_path):
+    assert read_runtime(tmp_path, "2026-01-01") == ""
+
+
+def test_box_label():
+    """箱子名只是界面叫法——`2026-09-17` → `26_9_17箱子`。"""
+    assert box_label("2026-09-17") == "26_9_17箱子"
+    assert box_label("2026-10-01") == "26_10_1箱子"
