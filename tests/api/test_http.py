@@ -35,9 +35,36 @@ def _plan_json(**overrides) -> str:
     return json.dumps(data, ensure_ascii=False)
 
 
+def _chat_json(say: str = "好的，我记下了", action=None, params=None) -> str:
+    return json.dumps(
+        {"say": say, "action": action, "params": params or {}}, ensure_ascii=False
+    )
+
+
+class _ChatAwareLLM:
+    """按系统提示分流的假模型。
+
+    **一个夹具要同时供两条链用**，而它们的输出形状不同：对话要
+    `{say, action, params}`，整理要 `{outcome, target_path, ...}`——传一个
+    固定字符串满足不了两边。对话的系统提示里有动作清单，据此分流。
+    """
+
+    def __init__(self, chat_reply: str | None = None) -> None:
+        self.chat_reply = chat_reply or _chat_json()
+
+    def complete(self, system: str, user: str) -> str:
+        if "你能做的动作" in system:
+            return self.chat_reply
+        return _plan_json()
+
+
 @pytest.fixture
-def client(tmp_path: Path) -> TestClient:
-    """带 git 的 vault + 一个返回固定计划的假模型。"""
+def vault(tmp_path: Path) -> Path:
+    """带 git 的 vault。
+
+    **会话目录也落在这里**（生产里是 `data/`）——落盘位置要能被测试指认，
+    所以 `create_app` 收一个 `data_dir`。
+    """
     (tmp_path / "计算机").mkdir(parents=True)
     _git(tmp_path, "init", "-b", "main")
     _git(
@@ -45,8 +72,14 @@ def client(tmp_path: Path) -> TestClient:
         "-c", "user.name=t", "-c", "user.email=t@x",
         "commit", "--allow-empty", "-m", "init",
     )
-    cfg = Config("k", "u", "m", tmp_path, None)
-    return TestClient(create_app(cfg, llm=FakeLLM(_plan_json())))
+    return tmp_path
+
+
+@pytest.fixture
+def client(vault: Path) -> TestClient:
+    """带 git 的 vault + 一个按提示分流的假模型。"""
+    cfg = Config("k", "u", "m", vault, None)
+    return TestClient(create_app(cfg, llm=_ChatAwareLLM(), data_dir=vault))
 
 
 def test_health(client):
@@ -172,3 +205,62 @@ def test_organize_reports_failures(tmp_path):
 def test_organize_empty_inbox_is_not_an_error(client):
     body = client.post("/organize", json={}).json()
     assert body == {"count": 0, "results": []}
+
+
+# ---------- 对话 ----------
+
+def test_chat_returns_reply_and_creates_session(client, vault):
+    """一轮对话落一个会话文件。"""
+    from kb.core.chat_store import list_chats
+
+    resp = client.post("/chat", json={"message": "你好"})
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["reply"]
+    assert data["chat_id"]
+    assert [c["id"] for c in list_chats(vault)] == [data["chat_id"]]
+
+
+def test_chat_continues_existing_session(client, vault):
+    from kb.core.chat_store import load_chat
+
+    first = client.post("/chat", json={"message": "第一句"}).json()
+    client.post("/chat", json={"chat_id": first["chat_id"], "message": "第二句"})
+    chat = load_chat(vault, first["chat_id"])
+    contents = [m["content"] for m in chat["messages"] if m["role"] == "user"]
+    assert contents == ["第一句", "第二句"]
+
+
+def test_chats_lists_sessions(client, vault):
+    client.post("/chat", json={"message": "一句话"})
+    resp = client.get("/chats")
+    assert resp.status_code == 200
+    assert resp.json()["count"] == 1
+
+
+def test_chat_404_on_unknown_session(client, vault):
+    resp = client.post("/chat", json={"chat_id": "不存在", "message": "x"})
+    assert resp.status_code == 404
+
+
+def test_chat_does_not_persist_tool_messages(vault):
+    """工具结果是过程，不是对话——落盘只留 user / assistant。
+
+    整条列表（含 `tool`）原样落盘的话，下次对话会把它当历史回喂给模型，
+    历史越堆越长，里面全是模型自己拿到的数据。计划 Step 5 没覆盖这条。
+    """
+    from kb.core.chat_store import load_chat
+
+    cfg = Config("k", "u", "m", vault, None)
+    llm = FakeLLM([
+        _chat_json("我记一下", action="push", params={"content": "记一下 X"}),
+        _chat_json("记好了"),
+    ])
+    chat_client = TestClient(create_app(cfg, llm=llm, data_dir=vault))
+    data = chat_client.post("/chat", json={"message": "记一下 X"}).json()
+
+    chat = load_chat(vault, data["chat_id"])
+    # 先确认动作真的跑过（否则下面那条断言会因为「没产生工具结果」而恒真）
+    assert len(list_drafts(vault)) == 1
+    assert [m["role"] for m in chat["messages"]] == ["user", "assistant", "assistant"]
+    assert all("工具结果" not in m["content"] for m in chat["messages"])

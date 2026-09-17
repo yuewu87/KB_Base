@@ -882,7 +882,7 @@ def _push_draft(
     @app.post("/chat")
     def chat_endpoint(req: ChatRequest) -> dict:
         if req.chat_id:
-            chat = load_chat(PROJECT_ROOT, req.chat_id)
+            chat = load_chat(data_dir, req.chat_id)
             if chat is None:
                 raise HTTPException(status_code=404, detail=f"找不到会话 {req.chat_id}")
             history = chat["messages"]
@@ -893,7 +893,7 @@ def _push_draft(
         messages, _ = run_turn(
             cfg.vault_path, history, req.message, get_llm(), organize_fn=_chat_organize_fn
         )
-        save_chat(PROJECT_ROOT, chat_id, messages)
+        save_chat(data_dir, chat_id, messages)
         reply = next(
             (m["content"] for m in reversed(messages) if m["role"] == "assistant"), ""
         )
@@ -901,7 +901,7 @@ def _push_draft(
 
     @app.get("/chats")
     def chats() -> dict:
-        items = list_chats(PROJECT_ROOT)
+        items = list_chats(data_dir)
         return {"count": len(items), "items": items}
 ```
 
@@ -980,10 +980,10 @@ def handle(project_root: Path, vault_root: Path, chat_id: str | None,
 ```python
     @router.get("/", response_class=HTMLResponse)
     def chat_page(request: Request, cid: str = ""):
-        chats = list_chats(PROJECT_ROOT)
+        chats = list_chats(data_dir)
         current = None
         if cid:
-            current = load_chat(PROJECT_ROOT, cid)
+            current = load_chat(data_dir, cid)
         return templates.TemplateResponse(
             request, "chat.html",
             _ctx("chat", chats=chats, current=current, cid=cid),
@@ -992,7 +992,7 @@ def handle(project_root: Path, vault_root: Path, chat_id: str | None,
     @router.post("/chat")
     def chat_post(message: str = Form(...), cid: str = Form("")):
         chat_id, _ = handle(
-            PROJECT_ROOT, cfg.vault_path, cid or None, message,
+            data_dir, cfg.vault_path, cid or None, message,
             build_llm(cfg), organize_fn=make_organize_fn(cfg),
         )
         return RedirectResponse(f"/?cid={chat_id}", status_code=303)
