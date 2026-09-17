@@ -296,7 +296,7 @@ def create_app(
         return cache["llm"]
 
     def apply_settings(raw: dict[str, str]) -> dict[str, str]:
-        """保存 → 重载 → 让该失效的失效。返回值是**真正写下去的**那些。
+        """保存 → 重载 → 让该失效的失效。返回值是**真变了的**那些。
 
         顺序不能反：**先写文件再换内存**。写失败就抛出去——文件没写成，
         内存里跟着变就成了两套真相。
@@ -307,10 +307,20 @@ def create_app(
         （它读不回来就给你一份空壳），所以「重载成功」与「重载退化成空壳」
         从返回值上分不出来。分不出来就会把一个空壳换进去——那等于用手滑
         删掉一行 `.env` 的动作，把正在跑的服务带崩。
+
+        **返回值与「写下去什么」是两回事，别混。** 即使一个都没变，该写的
+        还是要写、该重载的还是要重载——`validate` 已经过了，写下去是幂等的；
+        空手提前返回会让「重载」这一步悄悄少跑一次。返回值只喂给提示文案。
         """
         clean = settings.validate(raw)      # 不对就抛 SettingsError → 400
         if not clean:
             return {}
+
+        # **返回的是「真变了的」，不是「写下去的」。** 设置窗的 form 提交的是
+        # 所有 pane 的字段（隐藏的也在），返回全部的话用户只改一个日志级别，
+        # 提示会是「已保存 5 项」——而模型名与地址只是等值重写（实测过）。
+        before = settings.read_env(env_path)
+        changed = {k: v for k, v in clean.items() if before.get(k) != v}
 
         settings.write_env(env_path, clean)
 
@@ -329,7 +339,7 @@ def create_app(
 
         state["cfg"] = new_cfg
         cache["llm"] = None                                  # 模型三件套可能变了
-        return clean
+        return changed
 
     def _chat_organize_fn(kind: str, content: str, target: str | None) -> str:
         """对话层能调的动作——**只有服务已有的能力**，不新增判断。

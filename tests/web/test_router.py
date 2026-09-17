@@ -582,14 +582,77 @@ def test_save_settings_rejects_bad_value(client):
     assert "日志级别" in resp.json()["detail"]
 
 
-def test_save_settings_ignores_readonly(client):
-    """后端不信前端——只读字段提交了也不改。"""
+def test_save_settings_ignores_readonly(client, tmp_path):
+    """后端不信前端——只读字段提交了也不改。
+
+    **提交一个「真变了」的模型名**，不是等值重写：`saved` 现在只列真变了的，
+    提交 `KB_LLM_MODEL=m`（夹具 `.env` 里就是 `m`）会得到空字典——
+    那样这条用例就退化成看着 `{}` 发呆，只读被不被丢掉它一声不吭。
+    改看 `.env`：只读那栏一个字都没落进去。
+    """
     resp = client.post(
         "/settings",
-        json={"values": {"KB_VAULT_PATH": "E:\\别处", "KB_LLM_MODEL": "m"}},
+        json={"values": {"KB_VAULT_PATH": "E:\\别处", "KB_LLM_MODEL": "m2"}},
     )
     assert resp.status_code == 200
-    assert resp.json()["saved"] == {"KB_LLM_MODEL": "m"}
+    assert resp.json()["saved"] == {"KB_LLM_MODEL": "m2"}   # 只读键不在里头
+    assert "别处" not in (tmp_path / ".env").read_text(encoding="utf-8")
+
+
+def test_saved_only_lists_what_actually_changed(tmp_path):
+    """返回的是「真变了的」，不是「写下去的」。
+
+    设置窗的 form 提交所有 pane 的字段（隐藏的也在）——返回全部的话，
+    用户只改一个日志级别，提示会是「已保存 5 项」。实测过。
+    """
+    env = tmp_path / ".env"
+    env.write_text(
+        "KB_LLM_API_KEY=k\nKB_LLM_BASE_URL=u\nKB_LLM_MODEL=m\n"
+        "KB_LOG_LEVEL=INFO\n",
+        encoding="utf-8",
+    )
+    app = create_app(
+        Config("k", "u", "m", tmp_path, None),
+        data_dir=tmp_path, env_file=env, build_llm_fn=lambda c: FakeLLM("{}"),
+    )
+    client = TestClient(app)
+
+    resp = client.post("/settings", json={"values": {
+        "KB_LLM_MODEL": "m",          # 等值，没变
+        "KB_LLM_BASE_URL": "u",       # 等值，没变
+        "KB_LOG_LEVEL": "DEBUG",      # 真变了
+    }})
+
+    assert resp.status_code == 200
+    assert resp.json()["saved"] == {"KB_LOG_LEVEL": "DEBUG"}
+    assert "KB_LOG_LEVEL=DEBUG" in env.read_text(encoding="utf-8")
+
+
+def test_saving_nothing_new_still_writes_and_reloads(tmp_path):
+    """全都没变时 `saved` 是空的，但**该写的还是要写**——别提前返回。
+
+    `changed` 只影响返回值：`validate` 已经过了，写下去是幂等的；
+    拿 `changed` 当早退条件就会把「重载」那一步也一并省掉。
+    这里靠**文件被重写过的痕迹**认它：`write_env` 会给文件补上结尾换行，
+    所以原文件故意不写这个换行（只断言 `saved == {}` 抓不住这个回归——
+    真提前返回了，那一条照样绿）。
+    """
+    env = tmp_path / ".env"
+    env.write_text(
+        "KB_LLM_API_KEY=k\nKB_LLM_BASE_URL=u\nKB_LLM_MODEL=m", encoding="utf-8"
+    )
+    assert not env.read_text(encoding="utf-8").endswith("\n")    # 前提：没有结尾换行
+    app = create_app(
+        Config("k", "u", "m", tmp_path, None),
+        data_dir=tmp_path, env_file=env, build_llm_fn=lambda c: FakeLLM("{}"),
+    )
+    client = TestClient(app)
+
+    resp = client.post("/settings", json={"values": {"KB_LLM_MODEL": "m"}})
+
+    assert resp.status_code == 200
+    assert resp.json()["saved"] == {}
+    assert env.read_text(encoding="utf-8").endswith("\n")        # 确实又写了一遍
 
 
 def test_settings_fragment_has_no_full_page(client):

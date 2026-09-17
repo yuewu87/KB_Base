@@ -960,3 +960,12 @@ button.side-btn {
    只管模态窗里面，这个 `<p>` 在窗外的另一个遮罩层里——不加这条，
    那句小字会按正文的 14px 画出来，不是「小字」。 */
 .modal.notice .hint { margin: 0; color: var(--faint); font-size: 11.5px; }
+
+/* 4. 同一个提示窗里的「知道了」，跟第 2 条是**同一个毛病**：光板 `<button>`，
+   站内没有任何规则命中，浏览器默认外观直接露出来（灰底、系统边框、
+   字体不继承）。给它 `class="primary"` 复用模态窗那套——跟设置窗的「保存」
+   是同一个视觉（白底、蓝框、方角），**不新写一套**。
+   这里只补盒子：`.modal.notice` 是 flex 纵列，子项默认 `stretch`，
+   光有 `button.primary` 会被拉成整窗宽的一条（2026-09-17 截图确认过）。
+   `flex-start` 让按钮收回自然宽、贴着正文左沿。 */
+.modal.notice button.primary { align-self: flex-start; }
