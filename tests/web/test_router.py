@@ -132,7 +132,8 @@ def test_journal_empty_state(tmp_path):
         llm_api_key="k", llm_base_url="http://x", llm_model="m",
         vault_path=tmp_path, port=None,
     )
-    body = TestClient(create_app(cfg)).get("/journal").text
+    # `data_dir` 传了才隔离——默认是真实 `DATA_DIR`，不传就会往真库写流程日志
+    body = TestClient(create_app(cfg, data_dir=tmp_path)).get("/journal").text
     assert "还没有整理记录" in body
 
 

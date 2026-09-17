@@ -40,18 +40,21 @@ def cfg(tmp_path: Path) -> Config:
 
 
 @pytest.fixture
-def fake_server(monkeypatch, cfg):
+def fake_server(monkeypatch, cfg, tmp_path):
     """把 CLI 的 HTTP 请求接到内存里的假服务上，不真起进程。
 
     用 starlette 的 `TestClient` 而不是 `httpx.ASGITransport`——后者不支持
     `with client as c` 的上下文管理器协议，而 CLI 正是那么用的。
     TestClient 本身就是 httpx.Client 子类。
+
+    **`data_dir` 必须传**：`create_app` 的默认值是真实 `DATA_DIR`，不传的话
+    流程日志会写进真库（`data/logs/flow/`）——测试跑一遍，真日志就涨一截。
     """
     from fastapi.testclient import TestClient
 
     from kb.api.http import create_app
 
-    app = create_app(cfg, llm=FakeLLM(_plan_json()))
+    app = create_app(cfg, llm=FakeLLM(_plan_json()), data_dir=tmp_path)
 
     def _make_client(_cfg):
         return TestClient(app)

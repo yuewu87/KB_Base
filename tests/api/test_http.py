@@ -203,7 +203,8 @@ def test_organize_unknown_id_returns_404(client):
 def test_organize_reports_failures(tmp_path):
     (tmp_path / "计算机").mkdir(parents=True)
     cfg = Config("k", "u", "m", tmp_path, None)
-    bad = TestClient(create_app(cfg, llm=FakeLLM("坏输出")))
+    # `data_dir` 传了才隔离——默认是真实 `DATA_DIR`，不传就会往真库写流程日志
+    bad = TestClient(create_app(cfg, llm=FakeLLM("坏输出"), data_dir=tmp_path))
     bad.post("/push", json={"content": "内容"})
 
     body = bad.post("/organize", json={}).json()
