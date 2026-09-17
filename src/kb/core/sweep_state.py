@@ -14,8 +14,9 @@ from pathlib import Path
 
 from kb.core.vault import atomic_write
 
-# 距上次超过这个间隔就该跑。用户定的是「一次（6 天），超过才跑」。
-SWEEP_INTERVAL = timedelta(days=6)
+# 距上次超过这个间隔就该跑。**默认值**——真值来自配置（`KB_SWEEP_INTERVAL`），
+# 由调用方传进来。用户原话是「一次（6 天），超过才跑」，但 6 这个数是拍的。
+SWEEP_INTERVAL_DAYS = 6
 
 _FILE = "state.json"
 _FMT = "%Y-%m-%d %H:%M:%S"
@@ -52,8 +53,12 @@ def _write(data_dir: Path, state: dict) -> None:
     )
 
 
-def due(data_dir: Path, now: datetime | None = None) -> bool:
-    """距上次巡检是否已超过 `SWEEP_INTERVAL`。从没跑过 → True。"""
+def due(
+    data_dir: Path,
+    now: datetime | None = None,
+    interval_days: int = SWEEP_INTERVAL_DAYS,
+) -> bool:
+    """距上次巡检是否已超过 `interval_days`。从没跑过 → True。"""
     last = load_state(data_dir).get("last_sweep")
     if not last:
         return True
@@ -61,7 +66,7 @@ def due(data_dir: Path, now: datetime | None = None) -> bool:
         last_at = datetime.strptime(last, _FMT)
     except ValueError:
         return True
-    return (now or datetime.now()) - last_at > SWEEP_INTERVAL
+    return (now or datetime.now()) - last_at > timedelta(days=interval_days)
 
 
 def save_report(data_dir: Path, report: dict, when: datetime | None = None) -> None:

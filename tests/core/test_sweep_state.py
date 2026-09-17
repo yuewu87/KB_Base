@@ -2,8 +2,9 @@
 
 from datetime import datetime, timedelta
 
+from kb.core import sweep_state
 from kb.core.sweep_state import (
-    SWEEP_INTERVAL,
+    SWEEP_INTERVAL_DAYS,
     due,
     load_state,
     mark_read,
@@ -32,7 +33,7 @@ def test_boundary_is_six_days(tmp_path):
     save_report(tmp_path, {"summary": "x"}, when=base)
     assert due(tmp_path, now=base + timedelta(days=6)) is False
     assert due(tmp_path, now=base + timedelta(days=7)) is True
-    assert SWEEP_INTERVAL.days == 6
+    assert SWEEP_INTERVAL_DAYS == 6
 
 
 def test_report_starts_unread(tmp_path):
@@ -58,3 +59,21 @@ def test_corrupt_state_treated_as_never_run(tmp_path):
     (tmp_path / "state.json").write_text("{ 坏掉的", encoding="utf-8")
     assert due(tmp_path) is True
     assert load_state(tmp_path) == {}
+
+
+def test_due_respects_the_configured_interval(tmp_path):
+    """巡检间隔现在是配置（`KB_SWEEP_INTERVAL`），不是写死的 6 天。"""
+    when = datetime(2026, 9, 17, 12, 0)
+    sweep_state.save_report(tmp_path, {"summary": "x"}, when=when - timedelta(days=4))
+
+    assert sweep_state.due(tmp_path, now=when, interval_days=3) is True
+    assert sweep_state.due(tmp_path, now=when, interval_days=10) is False
+
+
+def test_due_falls_back_to_the_default(tmp_path):
+    """不给就用默认的 6 天。"""
+    when = datetime(2026, 9, 17, 12, 0)
+    sweep_state.save_report(tmp_path, {"summary": "x"}, when=when - timedelta(days=4))
+
+    assert sweep_state.due(tmp_path, now=when) is False
+    assert sweep_state.due(tmp_path, now=when + timedelta(days=3)) is True

@@ -456,10 +456,10 @@ def main() -> None:
 
     runtime.write_service_info(port)
 
-    # 清理过期的按天日志（流程 90 天、运行 90 天）。
+    # 清理过期的按天日志（流程 + 运行，天数来自配置 `KB_LOG_KEEP_DAYS`）。
     # **放启动时**：它是一次目录扫描，不该压在请求路径上。
     # vault 里的整理日志是知识，**永不自动删**——这里只碰 data/logs/。
-    removed = flow.prune(DATA_DIR) + prune(LOG_DIR)
+    removed = flow.prune(DATA_DIR, cfg.keep_days) + prune(LOG_DIR, cfg.keep_days)
     if removed:
         logging.getLogger(__name__).info("清理了 %d 个过期日志文件", removed)
 
@@ -467,7 +467,7 @@ def main() -> None:
     # 否则巡检抢在前面记流程，「规划」「提交」那几行会因为没有落点而丢掉。
     app = create_app(cfg)
 
-    # 距上次巡检超过 6 天就跑一次——**后台线程**，不挡启动。
+    # 距上次巡检超过配置的间隔（`KB_SWEEP_INTERVAL`）就跑一次——**后台线程**，不挡启动。
     #
     # **放这里而不是 `create_app` 里**：只有走到 `main()` 才是「服务真起来了」。
     # 测试和嵌入用法都直接调 `create_app`，要是那里也算启动，后台巡检会去用
@@ -475,7 +475,7 @@ def main() -> None:
     # 还会拿默认的 `data/` 当落点写状态（跑一次 pytest 就写进一份假报告，
     # 顺带把 `last_sweep` 顶掉——真服务 6 天内都不会再自动跑）。
     # 服务进程只有这一条入口（`runtime.spawn_service` 也是 `-m kb.api.http`）。
-    if sweep_state.due(DATA_DIR):
+    if sweep_state.due(DATA_DIR, interval_days=cfg.sweep_interval_days):
         threading.Thread(
             target=_sweep_in_background,
             args=(cfg.vault_path, DATA_DIR, build_llm(cfg)),
