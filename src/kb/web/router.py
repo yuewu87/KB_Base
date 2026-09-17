@@ -18,8 +18,9 @@ from fastapi import APIRouter, Form, HTTPException, Request
 from fastapi.responses import HTMLResponse, RedirectResponse
 from fastapi.templating import Jinja2Templates
 
-from kb.api.http import push_and_organize
+from kb.api.http import push_and_organize, run_sweep
 from kb.config import Config
+from kb.core import sweep, sweep_state
 from kb.core.chat import handle
 from kb.core.chat_store import list_chats, load_chat
 from kb.core.flow import STEPS, read_flow
@@ -110,9 +111,59 @@ def build_router(
     @router.get("/flow", response_class=HTMLResponse)
     def flow(request: Request):
         groups = group_flow(read_flow(data_dir), steps=STEPS)
+        # 报告读过了就不再拿出来——侧栏那块只在没读时显示
+        state = sweep_state.load_state(data_dir)
         return templates.TemplateResponse(
-            request, "flow.html", _ctx("flow", groups=groups, steps=STEPS)
+            request,
+            "flow.html",
+            _ctx(
+                "flow",
+                groups=groups,
+                steps=STEPS,
+                report=state.get("report"),
+            ),
         )
+
+    @router.post("/sweep/reply")
+    def sweep_reply(reply: str = Form(...), note: str = Form("")):
+        """报告下面那两个按钮（「我知道了」/「还需调整」）。
+
+        **只有 Form 版**：JSON 版那条曾经写在 `api/http.py` 里，是死代码——
+        同一个路径注册两次，`include_router` 先于 app 级路由，先注册的赢。
+        """
+        if reply == "知道了":
+            sweep_state.mark_read(data_dir)
+        elif note.strip():
+            # 你的意见当一条草稿投出去——走整理那条链（和 `/new` 同一条）
+            push_and_organize(cfg, note, get_llm(), source="Web")
+            sweep_state.mark_read(data_dir)
+        return RedirectResponse("/flow", status_code=303)
+
+    @router.post("/sweep/run")
+    def sweep_run():
+        """手动跑一次巡检，**不受 6 天限制**——是你主动要跑的。
+
+        跑完 `run_sweep` 自己会写 `last_sweep`（Task 1 的 `save_report`），
+        所以自动那条也跟着顺延，这里不用额外记。
+
+        **同步跑**，和 `/new` 一个路子：点完等它跑完，页面转到工作日志看报告。
+        巡检比单条投递慢（全库过一遍 + 一次 LLM），但它是低频动作。
+        """
+        try:
+            run_sweep(cfg.vault_path, data_dir, get_llm())
+        except sweep.SweepError as exc:
+            # 模型输出坏了、计划不合规——**人就在这儿等着，不能甩一张 500 页**。
+            # 写成一份没读的报告，语义和后台那条失败路径一致
+            # （`_sweep_in_background` 也是这么落的），侧栏里看得见原因。
+            sweep_state.save_report(
+                data_dir,
+                {
+                    "summary": f"这次巡检没跑成：{exc}",
+                    "tag_merges": [],
+                    "dir_merges": [],
+                },
+            )
+        return RedirectResponse("/flow", status_code=303)
 
     @router.get("/runtime", response_class=HTMLResponse)
     def runtime_page(request: Request):

@@ -184,6 +184,10 @@ body.collapsed .toggle { justify-content: center; padding-left: 0; padding-right
 }
 .side-action .icon { color: var(--blue); }
 
+/* 「记一条」是链接，「巡检一次」是表单按钮——按钮不继承字体、也不带手型，
+   两个并排放在一起，这两条得补上，否则字形和光标对不上 */
+button.side-action { font-family: inherit; cursor: pointer; }
+
 body.collapsed .side-action {
   justify-content: center;
   padding-left: 0;
@@ -577,10 +581,15 @@ code {
   background: var(--line);
 }
 
-/* ---- 侧栏气泡：手机聊天式 ---- */
-.thread { display: flex; flex-direction: column; gap: 8px; margin-bottom: 16px; }
+/* ---- 侧栏气泡：手机聊天式 ----
 
-.bubble {
+   **限定在 `.chat-history` 里面**：`ai对话` 页主区那串对话气泡用的是同一个
+   class（`chat.html` 的 `class="bubble {{ m.role }}"`），不限定的话这套
+   窄字号、小内边距会一并压到主区上——那本该是侧栏的样子。 */
+
+.chat-history .thread { display: flex; flex-direction: column; gap: 8px; margin-bottom: 16px; }
+
+.chat-history .bubble {
   position: relative;
   padding: 9px 12px;
   border-radius: 12px;
@@ -590,12 +599,61 @@ code {
   border: 1px solid var(--line);
   color: #37445a;
   word-break: break-word;
+  /* **必须覆盖掉全局 `.bubble` 的 `pre-wrap`**：侧栏气泡的内容来自模板，
+     标签前后的换行与缩进会被原样画出来——每个气泡凭空多一行空白，
+     报告气泡里的 <ul>/<p> 更是整段错位。
+     （主区对话气泡要靠 `pre-wrap` 保住用户输入的换行，那边不动。） */
+  white-space: normal;
 }
-.bubble.assistant {
+.chat-history .bubble.assistant {
   border-top-left-radius: 4px;          /* 左边一个小尾巴的圆角 */
   background: #f6f8fb;
 }
-.bubble.user { background: var(--blue-soft); border-color: #dbe7f4; }
+.chat-history .bubble.user { background: var(--blue-soft); border-color: #dbe7f4; }
+.chat-history .bubble.report ul { margin: 5px 0; padding-left: 17px; }
+.chat-history .bubble.report li { margin: 3px 0; }
+.chat-history .bubble.report p { margin: 6px 0 0; }
+
+/* ---- 报告下面那两个按钮 ---- */
+
+.sweep-reply {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 7px;
+  margin-bottom: 18px;
+}
+
+.sweep-reply button {
+  padding: 6px 13px;
+  border: 1px solid #cfdeee;
+  border-radius: 999px;
+  background: var(--blue-tint);
+  color: var(--blue);
+  font: inherit;
+  font-size: 12.5px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background var(--dur) var(--ease), border-color var(--dur) var(--ease);
+}
+.sweep-reply button:hover { background: var(--blue-soft); border-color: var(--blue-mid); }
+
+/* 「还需调整」点开才出现的输入框 */
+.sweep-reply input {
+  width: 100%;
+  padding: 8px 12px;
+  border: 1px solid var(--line);
+  border-radius: var(--r-sm);
+  background: var(--surface);
+  font: inherit;
+  font-size: 12.5px;
+  color: var(--ink);
+}
+.sweep-reply input::placeholder { color: var(--faint); }
+.sweep-reply input:focus {
+  outline: none;
+  border-color: var(--blue-mid);
+  box-shadow: 0 0 0 3px rgba(61, 122, 184, .12);
+}
 
 .bubble-at {
   display: block;

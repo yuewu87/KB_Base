@@ -33,6 +33,17 @@
         <span class="side-label">记一条</span>
       </a>
 
+      <form method="post" action="/sweep/run">
+        <button class="side-action" type="submit">
+          <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+               stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <path d="M20 11a8 8 0 1 0-2.3 5.7"/>
+            <path d="M20 5v6h-6"/>
+          </svg>
+          <span class="side-label">巡检一次</span>
+        </button>
+      </form>
+
       <a href="/" class="side-btn {{ 'active' if active == 'chat' }}">
         <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor"
              stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">

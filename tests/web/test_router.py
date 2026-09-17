@@ -197,3 +197,113 @@ def test_push_from_web_organizes_immediately(client, vault):
 def test_push_from_web_rejects_empty(client):
     resp = client.post("/new", data={"content": "   "}, follow_redirects=False)
     assert resp.status_code == 400
+
+
+# ---------- 巡检报告（侧栏 + 两个回复按钮 + 一键巡检） ----------
+
+
+def test_flow_page_shows_sweep_report(client, vault):
+    import re
+
+    from kb.core.sweep_state import save_report
+
+    save_report(vault, {"summary": "合并了 2 组近义标签", "tag_merges": [], "dir_merges": []})
+    body = client.get("/flow").text
+    aside = re.search(r'<aside class="chat-history">(.*?)</aside>', body, re.S).group(1)
+    assert "合并了 2 组近义标签" in aside
+
+
+def test_flow_page_has_two_reply_buttons(client, vault):
+    from kb.core.sweep_state import save_report
+
+    save_report(vault, {"summary": "x", "tag_merges": [], "dir_merges": []})
+    body = client.get("/flow").text
+    assert "我知道了" in body
+    assert "还需调整" in body
+
+
+def test_reply_known_marks_read(client, vault):
+    import re
+
+    from kb.core.sweep_state import load_state, save_report
+
+    save_report(vault, {"summary": "合并了 2 组近义标签", "tag_merges": [], "dir_merges": []})
+    client.post("/sweep/reply", data={"reply": "知道了"}, follow_redirects=False)
+    assert load_state(vault)["report"]["read"] is True          # 记下了
+
+    body = client.get("/flow").text                             # 页面上也不该再有
+    aside = re.search(r'<aside class="chat-history">(.*?)</aside>', body, re.S).group(1)
+    assert "合并了 2 组近义标签" not in aside
+
+
+def test_reply_adjust_sends_the_note_to_the_organize_chain(client, vault, monkeypatch):
+    """「还需调整」——把你写的话当一条草稿投出去，走整理那条链。
+
+    **这条不能断言收件箱里留下一条草稿**：这条路和 `/new` 一样走
+    `push_and_organize`，草稿投出去立刻就被整理了（`/new` 那条用例断言的
+    正是「不留草稿」），收件箱里不会有东西。该盯的是**投出去的是不是
+    你写的那句话**，所以拦在投递那一步看参数。
+    """
+    from kb.core.sweep_state import load_state, save_report
+    from kb.web import router as web_router
+
+    sent: dict[str, str] = {}
+    monkeypatch.setattr(
+        web_router,
+        "push_and_organize",
+        lambda cfg, content, llm, **kw: sent.setdefault("content", content),
+    )
+
+    save_report(vault, {"summary": "x", "tag_merges": [], "dir_merges": []})
+    resp = client.post(
+        "/sweep/reply",
+        data={"reply": "调整", "note": "别把 shell 并进命令行"},
+        follow_redirects=False,
+    )
+    assert resp.status_code == 303
+    assert "别把 shell 并进命令行" in sent["content"]
+    assert load_state(vault)["report"]["read"] is True          # 提了意见就算读过了
+
+
+def test_sweep_run_button_exists_on_every_page(client):
+    """侧栏上有个「巡检一次」按钮——两个动作按钮之一。"""
+    assert "巡检一次" in client.get("/").text
+    assert "巡检一次" in client.get("/flow").text
+
+
+def test_sweep_run_updates_last_sweep(client, vault):
+    """手动跑一次，上次巡检时间要跟着更新（用户明说的要求）。"""
+    from kb.core.sweep_state import load_state
+
+    client.post("/sweep/run", follow_redirects=False)
+    assert load_state(vault).get("last_sweep")
+
+
+def test_sweep_run_ignores_the_six_day_gate(client, vault):
+    """刚跑过也能再手动跑——不受 6 天限制（那是自动触发才看的）。"""
+    from kb.core.sweep_state import save_report
+
+    save_report(vault, {"summary": "刚跑过"})
+    resp = client.post("/sweep/run", follow_redirects=False)
+    assert resp.status_code == 303
+
+
+def test_sweep_run_reports_model_failure_instead_of_500(tmp_path):
+    """模型输出坏了不能甩一张 500 页——要变成一句看得懂的提示。
+
+    假模型给的不是 JSON，`run_sweep` 会抛 `SweepError`。
+    """
+    from kb.core.sweep_state import load_state
+    from kb.llm.base import FakeLLM
+
+    cfg = Config(
+        llm_api_key="k", llm_base_url="http://x", llm_model="m",
+        vault_path=tmp_path, port=None,
+    )
+    c = TestClient(create_app(cfg, llm=FakeLLM("这不是 JSON"), data_dir=tmp_path))
+    resp = c.post("/sweep/run", follow_redirects=False)
+    assert resp.status_code == 303                              # 不是 500 页
+
+    report = load_state(tmp_path)["report"]
+    assert "没跑成" in report["summary"]
+    assert report["read"] is False                              # 人还没看到
