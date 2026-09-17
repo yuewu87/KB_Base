@@ -23,12 +23,13 @@ from kb.config import Config
 from kb.core import sweep, sweep_state
 from kb.core.chat import handle
 from kb.core.chat_store import list_chats, load_chat
-from kb.core.flow import STEPS
+from kb.core.flow import STEPS, latest_run_rows
 from kb.core.flow import list_days as flow_days
 from kb.core.flow import read_day as read_flow_day
 from kb.llm.base import LLM
 from kb.logging_setup import LOG_DIR
 from kb.web.data import (
+    box_label,
     group_flow,
     journal_days,
     load_push_templates,
@@ -41,6 +42,9 @@ TEMPLATES_DIR = Path(__file__).parent / "templates"
 STATIC_DIR = Path(__file__).parent / "static"
 
 templates = Jinja2Templates(directory=str(TEMPLATES_DIR))
+
+# 模板里现算箱子名——三个页面都要用，注册成全局比每个端点传一次干净
+templates.env.globals["box_label"] = box_label
 
 
 def build_router(
@@ -59,6 +63,14 @@ def build_router(
 
     def _ctx(name: str, **extra) -> dict:
         return {"active": name, "vault": str(cfg.vault_path), **extra}
+
+    def _pick_day(d: str, days: list[str]) -> str:
+        """选哪一天：`d` 在列表里就用它，否则落到**最新一天**。
+
+        **非法 `d` 不 404**——手改 URL 或书签过期不该看到错误页，
+        当「没有这一天」处理即可。
+        """
+        return d if d in days else (days[0] if days else "")
 
     @router.get("/", response_class=HTMLResponse)
     def chat_page(request: Request, cid: str = ""):
@@ -110,7 +122,7 @@ def build_router(
     @router.get("/journal", response_class=HTMLResponse)
     def journal(request: Request, d: str = ""):
         days = journal_days(cfg.vault_path)
-        day = d if d in days else (days[0] if days else "")
+        day = _pick_day(d, days)
         return templates.TemplateResponse(
             request,
             "journal.html",
@@ -119,13 +131,14 @@ def build_router(
                 days=days,
                 day=day,
                 sections=read_journal(cfg.vault_path, day) if day else [],
+                latest=latest_run_rows(data_dir),
             ),
         )
 
     @router.get("/flow", response_class=HTMLResponse)
     def flow(request: Request, d: str = ""):
         days = flow_days(data_dir)
-        day = d if d in days else (days[0] if days else "")
+        day = _pick_day(d, days)
         return templates.TemplateResponse(
             request,
             "flow.html",
@@ -135,6 +148,7 @@ def build_router(
                 day=day,
                 groups=group_flow(read_flow_day(data_dir, day), steps=STEPS),
                 steps=STEPS,
+                latest=latest_run_rows(data_dir),
             ),
         )
 
@@ -186,10 +200,28 @@ def build_router(
         """
         return _run_sweep_or_report(None)
 
+    @router.get("/sweep", response_class=HTMLResponse)
+    def sweep_page(request: Request):
+        """巡检页——报告与两个按钮的家（Q93）。
+
+        **报告读过了也显示**，只是不再高亮：这一页就是它的家。原来那条
+        「没读才冒出来」的逻辑是侧栏时代的（那块侧栏已经搬走了）。
+        """
+        state = sweep_state.load_state(data_dir)
+        return templates.TemplateResponse(
+            request,
+            "sweep.html",
+            _ctx(
+                "sweep",
+                report=state.get("report"),
+                last_sweep=state.get("last_sweep"),
+            ),
+        )
+
     @router.get("/runtime", response_class=HTMLResponse)
     def runtime_page(request: Request, d: str = ""):
         days = runtime_days(LOG_DIR)
-        day = d if d in days else (days[0] if days else "")
+        day = _pick_day(d, days)
         return templates.TemplateResponse(
             request,
             "runtime.html",

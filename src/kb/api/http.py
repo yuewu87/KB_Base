@@ -20,7 +20,6 @@ import uvicorn
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
 
-from kb import logging_setup
 from kb.api import runtime
 from kb.config import DATA_DIR, Config, load_config
 from kb.core import flow, organize, sweep, sweep_state
@@ -39,7 +38,7 @@ from kb.core.vault import (
 )
 from kb.llm.base import LLM
 from kb.llm.providers.openai_compat import OpenAICompatLLM
-from kb.logging_setup import LOG_DIR, setup_logging
+from kb.logging_setup import LOG_DIR, prune, setup_logging
 
 # 草稿 id 只有 4 位随机十六进制（65536 种），撞号时重试而不是覆盖
 PUSH_ATTEMPTS = 10
@@ -426,14 +425,10 @@ def create_app(
         items = list_chats(data_dir)
         return {"count": len(items), "items": items}
 
-    @app.get("/sweep")
-    def sweep_latest() -> dict:
-        """最近一次巡检的报告，以及「读没读」。没跑过就是空的。"""
-        state = sweep_state.load_state(data_dir)
-        return {
-            "report": state.get("report"),
-            "last_sweep": state.get("last_sweep"),
-        }
+    # 这里**不**放 `GET /sweep`。它原来是个 JSON 端点，没有任何消费方
+    # （`kb sweep` 走 `POST /sweep`，见 `cli.py`），而网页版的巡检页
+    # （`web/router.py` 的 `GET /sweep`）由 `include_router` 先注册——
+    # **先注册的赢**，留着只会是一段收不到请求的死代码。
 
     @app.post("/sweep")
     def sweep_now() -> dict:
@@ -473,7 +468,7 @@ def main() -> None:
     # 清理过期的按天日志（流程 90 天、运行 90 天）。
     # **放启动时**：它是一次目录扫描，不该压在请求路径上。
     # vault 里的整理日志是知识，**永不自动删**——这里只碰 data/logs/。
-    removed = flow.prune(DATA_DIR) + logging_setup.prune(LOG_DIR)
+    removed = flow.prune(DATA_DIR) + prune(LOG_DIR)
     if removed:
         logging.getLogger(__name__).info("清理了 %d 个过期日志文件", removed)
 
