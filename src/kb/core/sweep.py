@@ -148,3 +148,98 @@ def make_plan(vault_root: Path, llm: LLM) -> SweepPlan:
     except LLMError as exc:
         raise SweepError(f"巡检失败：{exc}") from exc
     return parse_plan(raw)
+
+
+# ------------------------------------------------------------ 校验
+
+def validate(plan: SweepPlan, vault_root: Path) -> None:
+    """纯静态检查。不过就抛 SweepError，**vault 一个字节没动**。"""
+    tags = set(collect_tags(vault_root))
+    dirs = set(list_dir_tree(vault_root))
+
+    for src, dst in plan.tag_merges:
+        if src not in tags:
+            raise SweepError(f"合并源是不存在的标签：{src}")
+        if dst not in tags:
+            raise SweepError(f"合并目标是不存在的标签（不许新建）：{dst}")
+
+    for src, dst in plan.dir_merges:
+        if src not in dirs:
+            raise SweepError(f"合并源是不存在的目录：{src}")
+        if dst not in dirs:
+            raise SweepError(f"合并目标是不存在的目录（不许新建）：{dst}")
+
+    # a→b 且 b→c 会绕圈。所有 from 也不能出现在任何 to 里。
+    sources = {s for s, _ in plan.tag_merges} | {s for s, _ in plan.dir_merges}
+    targets = {d for _, d in plan.tag_merges} | {d for _, d in plan.dir_merges}
+    if sources & targets:
+        raise SweepError(
+            f"合并方案会绕圈——这些既是源又是目标：{'、'.join(sorted(sources & targets))}"
+        )
+
+
+# ------------------------------------------------------------ 落盘
+
+def _retag(meta: dict, merges: dict[str, str]) -> bool:
+    """按合并表改 `主题`。改动了返回 True。"""
+    tags = meta.get("主题") or []
+    if isinstance(tags, str):
+        tags = [tags]
+
+    out: list[str] = []
+    for tag in tags:
+        name = merges.get(str(tag), str(tag))
+        if name not in out:          # 合并后可能与已有的重了——去重
+            out.append(name)
+    if out == list(tags):
+        return False
+    meta["主题"] = out
+    return True
+
+
+def apply_plan(plan: SweepPlan, vault_root: Path) -> list[Path]:
+    """按计划落盘。**不调 LLM**。返回动过的文件（供 commit 用）。
+
+    **返回的清单要同时收旧路径和新路径。**
+    `commit_changes` 拿它去 `git add`——新路径让 git 看见新增，
+    旧路径（已从磁盘消失但 git 跟踪过）让 git 看见删除，两边都 staged
+    才会被识别成一次 rename。**只收新路径的话，移动过的文件会漏提交。**
+    """
+    from kb.core.vault import write_note
+
+    tag_merges = dict(plan.tag_merges)
+    touched: list[Path] = []
+
+    # ① 目录合并：先移文件（连带它的子目录），再改每篇的标签
+    for src, dst in plan.dir_merges:
+        src_dir = vault_root / src
+        dst_dir = vault_root / dst
+        dst_dir.mkdir(parents=True, exist_ok=True)
+        # 目录名本身也是一级标签——并过去
+        tag_merges.setdefault(src.rsplit("/", 1)[-1], dst.rsplit("/", 1)[-1])
+        for path in sorted(src_dir.rglob("*")):
+            if not path.is_file():
+                continue
+            target = dst_dir / path.relative_to(src_dir)
+            target.parent.mkdir(parents=True, exist_ok=True)
+            path.replace(target)
+            touched.append(path)       # 旧路径——让 git 看见「删了」
+            touched.append(target)     # 新路径——让 git 看见「新增」
+        for leftover in sorted(src_dir.rglob("*"), reverse=True):
+            if leftover.is_dir():
+                leftover.rmdir()
+        src_dir.rmdir()
+
+    # ② 标签合并：全库过一遍 frontmatter。
+    #    **放在移动之后**——这时路径已经是新的了。
+    if tag_merges:
+        for path in sorted(vault_root.rglob("*.md")):
+            if any(part.startswith("_") for part in path.relative_to(vault_root).parts):
+                continue
+            meta, body = read_note(path)
+            if _retag(meta, tag_merges):
+                write_note(path, meta, body)
+                if path not in touched:        # 移过来的那些已经在里面了
+                    touched.append(path)
+
+    return touched
