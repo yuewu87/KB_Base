@@ -144,8 +144,21 @@
       const box = document.getElementById('settings-modal');
       box.innerHTML = '<p class="muted" style="padding:20px">载入中…</p>';
       document.getElementById('settings-overlay').hidden = false;
-      const r = await fetch('/settings');
-      box.innerHTML = await r.text();
+      try {
+        const r = await fetch('/settings');
+        // `fetch` 只在**网络层**失败时才 reject，404/500 都是「成功」的响应；
+        // 不看 `r.ok` 就会把一页错误 HTML 塞进模态里。
+        if (!r.ok) throw new Error('HTTP ' + r.status);
+        box.innerHTML = await r.text();
+      } catch (e) {
+        // **收尾要能关得掉**：× 是片段自己带进来的，片段没载进来的时候
+        // 光留一句错误文案，整屏遮罩就没有出口了。自己把 × 画上。
+        box.innerHTML =
+          '<div class="settings-head"><span>设置</span>' +
+          '<button type="button" class="x" onclick="closeSettings()" aria-label="关闭">×</button>' +
+          '</div><p class="muted" id="settings-load-err" style="padding:20px"></p>';
+        box.querySelector('#settings-load-err').textContent = '设置没载入出来：' + e;
+      }
     }
 
     function closeSettings() {
@@ -169,21 +182,40 @@
       el.hidden = false;
     }
 
+    // 失败原因从响应体里取。**`detail` 不一定是字符串**：422（FastAPI 的校验
+    // 错误）给的是个数组，直接拼会得到 `[object Object]`；不是字符串就 JSON 化。
+    function _detail(data, fallback) {
+      const d = data.detail;
+      if (d === undefined || d === null || d === '') return fallback;
+      return typeof d === 'string' ? d : JSON.stringify(d);
+    }
+
     async function saveSettings(form) {
+      // **连点两下会发两次 POST**：整段期间把按钮按住。
+      const btn = form.querySelector('button[type="submit"]');
+      btn.disabled = true;
+
       const values = Object.fromEntries(new FormData(form));
-      const r = await fetch('/settings', {
-        method: 'POST',
-        headers: {'Content-Type': 'application/json'},
-        body: JSON.stringify({values: values}),
-      });
-      const data = await r.json().catch(function () { return {}; });
-      if (r.ok) {
-        const n = Object.keys(data.saved || {}).length;
-        _msg(n ? '已保存 ' + n + ' 项，立刻生效' : '没有要改的', true);
-      } else {
-        _msg((data.detail || '保存失败') + '（HTTP ' + r.status + '）', false);
+      try {
+        const r = await fetch('/settings', {
+          method: 'POST',
+          headers: {'Content-Type': 'application/json'},
+          body: JSON.stringify({values: values}),
+        });
+        const data = await r.json().catch(function () { return {}; });
+        if (r.ok) {
+          const n = Object.keys(data.saved || {}).length;
+          _msg(n ? '已保存 ' + n + ' 项，立刻生效' : '没有要改的', true);
+        } else {
+          _msg(_detail(data, '保存失败') + '（HTTP ' + r.status + '）', false);
+        }
+      } catch (e) {
+        // 服务半路没了、代理断了——`fetch` 自己 reject。**不能一声不吭**，
+        // 否则用户只看到按钮闪了一下，以为存上了。
+        _msg('保存失败：' + e, false);
+      } finally {
+        btn.disabled = false;
       }
-      return false;          // 别让表单自己提交、把页面刷掉
     }
 
     async function testConnection(btn) {
@@ -191,22 +223,33 @@
       btn.disabled = true;
       _msg('测试中…', true);
 
-      // **body 必传**：端点要的是「表单里当前填的值」，不带 body 会 422
-      // （那只能测已保存的配置，而用户刚改的正是表单里的值）。
-      const values = Object.fromEntries(new FormData(form));
-      const r = await fetch('/settings/test', {
-        method: 'POST',
-        headers: {'Content-Type': 'application/json'},
-        body: JSON.stringify({values: values}),
-      });
-      const data = await r.json().catch(function () { return {}; });
+      try {
+        // **body 必传**：端点要的是「表单里当前填的值」，不带 body 会 422
+        // （那只能测已保存的配置，而用户刚改的正是表单里的值）。
+        const values = Object.fromEntries(new FormData(form));
+        const r = await fetch('/settings/test', {
+          method: 'POST',
+          headers: {'Content-Type': 'application/json'},
+          body: JSON.stringify({values: values}),
+        });
+        const data = await r.json().catch(function () { return {}; });
 
-      btn.disabled = false;
-      if (r.ok && data.ok) {
-        _msg('通了 · ' + data.seconds + ' 秒', true);
-      } else {
-        // **带上状态码**：不带的话 422 会显示成「未知原因」，排查时找不到北
-        _msg('不通：' + (data.detail || data.msg || '未知原因') + '（HTTP ' + r.status + '）', false);
+        if (r.ok && data.ok) {
+          _msg('通了 · ' + data.seconds + ' 秒', true);
+        } else if (r.ok) {
+          // **HTTP 通了、模型没通**（模型名不存在之类）。这时状态码是 200，
+          // 缀在后面是噪音——只有请求本身没走通（422 那种）才值得报状态码。
+          _msg('不通：' + _detail(data, '未知原因'), false);
+        } else {
+          // **带上状态码**：不带的话 422 会显示成「未知原因」，排查时找不到北
+          _msg('不通：' + _detail(data, '未知原因') + '（HTTP ' + r.status + '）', false);
+        }
+      } catch (e) {
+        _msg('测试失败：' + e, false);
+      } finally {
+        // **恢复按钮必须走 `finally`**：原来只包了 `r.json()`，`fetch` 本身
+        // 抛错时这行根本执行不到，按钮就此永久禁用，页面上还没有任何说明。
+        btn.disabled = false;
       }
     }
 

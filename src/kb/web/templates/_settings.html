@@ -14,8 +14,12 @@
     {% endfor %}
   </nav>
 
+  {# **`onsubmit` 里不能写 `return saveSettings(this)`**：`saveSettings` 是
+     `async`，返回的是个 Promise（永远真值），`return` 拿到它**取消不了默认动作**，
+     表单照旧原生提交——页面一跳、把整个表单（含密钥）拼进 URL 查询串。
+     分号后面那句 `return false` 才是真正生效的那个。 #}
   <form class="settings-panes" id="settings-form"
-        onsubmit="return saveSettings(this)">
+        onsubmit="saveSettings(this); return false">
     {% for g in groups %}
       <section class="pane" data-group="{{ loop.index0 }}"
                {{ 'hidden' if not loop.first }}>
@@ -50,7 +54,10 @@
     <p class="settings-msg" id="settings-msg" hidden></p>
 
     <div class="settings-actions">
-      <button type="button" onclick="testConnection(this)">测试连接</button>
+      {# 次级操作。**必须有 class**：光板 `<button>` 站内没有任何规则命中，
+         浏览器默认外观（灰底、系统边框、字体不继承）会直接露出来，
+         跟旁边的「保存」成为两个世界。class 见 style.css 的 `button.secondary`。 #}
+      <button type="button" class="secondary" onclick="testConnection(this)">测试连接</button>
       <button type="submit" class="primary">保存</button>
     </div>
   </form>

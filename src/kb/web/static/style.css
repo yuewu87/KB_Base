@@ -92,6 +92,9 @@ a:hover { text-decoration: underline; }
   display: flex;
   flex-direction: column;
   gap: 4px;
+  /* 窗口矮的时候侧栏装不下：`height: 100vh` 是死的，不加这条底部的
+     「退出 / vault」就够不着了。 */
+  overflow-y: auto;
   transition: width var(--dur) var(--ease);
 }
 
@@ -600,13 +603,16 @@ code {
 }
 .chat-history .bubble.user { background: var(--blue-soft); border-color: #dbe7f4; }
 
-/* ---- 报告下面那个按钮（「我知道了」）----
+/* ---- 「次级按钮」这一套样式（胶囊、淡蓝底）----
 
-   **只此一处。** 文件末尾（巡检页那批）原来又写了一份同名选择器，
-   特异度相同、后写的赢——这一份的值被静默顶掉，改这里完全没反应。
-   2026-09-17 删掉重复的那份，只留这一条。
-   下面的值取的是**这里原本写的**，不是被覆盖前实际生效的那套：现在只剩一个
-   按钮，gap 不生效，可见差异只有上下留白，犯不上为此再动一次。 */
+   两处在用，**共用这一条规则**（两个选择器写在一起，不是各写一份值——
+   各写一份就是两处真相，改了一处另一处没反应，这个文件里已经栽过两次）：
+     · 巡检报告下面那个按钮（「我知道了」）
+     · 设置窗里的「测试连接」（`button.secondary`）——它跟旁边的「保存」
+       （`button.primary`：方角、实边框）一眼分得出主次。
+
+   文件末尾（巡检页那批）原来又写了一份同名选择器，特异度相同、后写的赢——
+   这一份的值被静默顶掉，改这里完全没反应。2026-09-17 删掉重复的那份。 */
 
 .sweep-reply {
   display: flex;
@@ -615,7 +621,8 @@ code {
   margin-bottom: 18px;
 }
 
-.sweep-reply button {
+.sweep-reply button,
+button.secondary {
   padding: 6px 13px;
   border: 1px solid #cfdeee;
   border-radius: 999px;
@@ -627,7 +634,8 @@ code {
   cursor: pointer;
   transition: background var(--dur) var(--ease), border-color var(--dur) var(--ease);
 }
-.sweep-reply button:hover { background: var(--blue-soft); border-color: var(--blue-mid); }
+.sweep-reply button:hover,
+button.secondary:hover { background: var(--blue-soft); border-color: var(--blue-mid); }
 
 .bubble-at {
   display: block;
@@ -805,6 +813,12 @@ button.primary {
 }
 button.primary:hover { background: var(--blue-soft); border-color: var(--blue-mid); }
 
+/* 禁用态。**上面两条都把 `cursor: pointer` 写死了**，而设置窗里的
+   「测试连接」「保存」在请求期间会 `btn.disabled = true`——不写这条，
+   灰下去的同时光标还是小手，看不出被按住了。两颗都写，别只顾 `.primary`。 */
+button.primary:disabled,
+button.secondary:disabled { opacity: .6; cursor: default; }
+
 /* ==========================================================================
    设置模态窗与侧栏两个按钮（Q94）
    --------------------------------------------------------------------------
@@ -817,6 +831,11 @@ button.primary:hover { background: var(--blue-soft); border-color: var(--blue-mi
   height: 1px;
   background: #3d4753;
   margin: 8px 6px;
+  /* **必须写死。** 侧栏是 flex 纵列，这两条线是无内容的 div，
+     `min-height: auto` 对它们解析成 0，于是窗口一矮，负自由空间**全被它们
+     吸收**——两条线静默缩成 0（视口高 553px 以下就开始消失），
+     看起来就是「分隔线没了」，且不留任何痕迹。 */
+  flex-shrink: 0;
 }
 
 .side-btn.quit { color: #ffb4b4; }
