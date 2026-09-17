@@ -83,13 +83,15 @@ pip install -r requirements.txt
 
 **不用手动起。** 第一次调 `kb` 命令时它自己会拉起来，之后一直待在后台。
 
-**双击 `web.bat`** 就能用——它确保服务在跑，然后把浏览器打开。等价于 `kb web`。
+**双击 `web.bat`** 就能用——它确保服务在跑，然后把浏览器打开。**双击 `stop.bat`** 停掉它。
 
 ```bash
 ./kb.bat status     # 看它在不在、在哪个端口
 ./kb.bat stop       # 改了代码之后要停
 ./kb.bat web        # 服务没跑就拉起来，然后把网页打开
 ```
+
+网页侧栏底部也有一个红色的**退出**按钮，效果同 `stop`。
 
 > ⚠️ **改了 `src/` 下的代码，一定先 `kb stop`。** 服务是常驻进程，不停的话它仍执行旧逻辑——**而且看起来一切正常**。
 
@@ -145,7 +147,8 @@ KN_Base/
 │  │   ├── 笔记/        ← 笔记骨架 —— 机器读，套进笔记
 │  │   └── 投递/        ← 随手记脚手架 —— 人读，帮他把话说清
 │  ├── docs/           ← 设计文档，见下
-│  └── .env.example · pyproject.toml · requirements.txt · kb.bat · web.bat
+│  └── .env.example · pyproject.toml · requirements.txt
+│      kb.bat（命令行）· web.bat（双击开网页）· stop.bat（双击停服务）
 │
 └─ data/ ────────────────────────── **不进 git**
     ├── logs/
