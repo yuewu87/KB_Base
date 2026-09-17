@@ -464,3 +464,18 @@ def test_organize_emits_flow_steps(vault, monkeypatch):
     assert "规划" in steps
     assert "校验" in steps
     assert "落盘" in steps
+
+
+def test_flow_never_says_the_path_is_None(vault, monkeypatch):
+    """pending 的计划没有 target_path——照原样打会印出「放进「None」」。
+
+    2026-09-17 端到端跑出来的：工作日志页上明晃晃一行
+    「模型决定放进「None」，类型是未定」，读的人只会一头雾水。
+    """
+    rows = []
+    monkeypatch.setattr("kb.core.flow.emit", lambda step, text: rows.append((step, text)))
+
+    _run(vault, FakeLLM(_plan_json(outcome="pending", pending_reason="说不清")))
+
+    for _step, text in rows:
+        assert "None" not in text, f"流程日志里印出了 None：{text}"

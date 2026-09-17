@@ -230,10 +230,16 @@ def make_plan(
             plan.revise_target = draft.revise_target
             planning.validate_plan(plan, vault_root)
             note_type = plan.frontmatter.get(K_TYPE) or "未定"
-            flow.emit(
-                "规划",
-                f"模型决定放进「{plan.target_path}」，类型是{note_type}",
-            )
+            if plan.outcome is Outcome.PENDING:
+                # **pending 没有 target_path。** 照原样打会印出
+                # 「模型决定放进「None」，类型是未定」——工作日志页上就是一句
+                # 废话（2026-09-17 端到端跑出来的）。
+                flow.emit("规划", "模型判断这条归不了类")
+            else:
+                flow.emit(
+                    "规划",
+                    f"模型决定放进「{plan.target_path}」，类型是{note_type}",
+                )
             flow.emit("校验", "校验通过")
             planned_path = plan.target_path
             plan = review.review_plan(plan, vault_root, llm)
