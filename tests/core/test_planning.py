@@ -435,6 +435,33 @@ def test_validate_allows_revise_creating_new_note(vault):
     validate_plan(plan, vault)
 
 
+# ---------- 层级上限（Q94）----------
+
+def test_validate_allows_exactly_four_levels(vault):
+    """4 层是上限，正好 4 层放行。"""
+    (vault / "计算机" / "a" / "b" / "c").mkdir(parents=True)
+    plan = parse_plan(DRAFT.id, _plan_json(target_path="计算机/a/b/c/x.md"))
+    validate_plan(plan, vault)
+
+
+def test_validate_rejects_five_levels(vault):
+    """Q94：目录最多 4 层（领域算第一层）。
+
+    你原话是「顶多三四层的样子吧」——**这话得由代码说了算**，
+    不然模型理论上能建任意深的嵌套。和兜底分类名同一类：机械约束归代码。
+    """
+    (vault / "计算机" / "a" / "b" / "c" / "d").mkdir(parents=True)
+    plan = parse_plan(DRAFT.id, _plan_json(target_path="计算机/a/b/c/d/x.md"))
+    with pytest.raises(PlanError, match="最多 4 层"):
+        validate_plan(plan, vault)
+
+
+def test_prompt_states_the_depth_limit():
+    """提示词里也要说——不然模型每次都撞校验，白跑一轮。"""
+    prompt = build_system_prompt()
+    assert "最多 4 层" in prompt
+
+
 # ---------- 兜底分类名（Q14）----------
 
 @pytest.mark.parametrize(

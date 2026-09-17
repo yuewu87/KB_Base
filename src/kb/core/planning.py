@@ -127,6 +127,7 @@ def build_system_prompt() -> str:
 1. target_path 必须落在**某个既有领域**下，形如 `<领域>/…/<标题>.md`。
    领域是 vault 的一级目录，由人维护，**不许新建**。清单见「现有领域」一节。
    领域内的子分类**由你决定**——但要遵守第 6 条。
+   **整条路径的目录最多 {MAX_DIR_LEVELS} 层**（领域算第一层，文件名不算）。
 2. 文件名（`<标题>.md` 的标题部分）必须是**清洗过的内容标题**：
    不含 `\\ / : * ? " < > |`，不以点结尾，不超过 60 字。
 3. {K_TYPE} 只能取：{allowed}。
@@ -291,6 +292,13 @@ def _is_fallback_name(name: str) -> bool:
     return name.strip().lower() in _FALLBACK_NAMES
 
 
+# 目录最多几层（Q94）。**领域算第一层**——`计算机/Python/x.md` 是两层。
+#
+# 用户原话是「顶多三四层的样子吧」，定在 4。**这条归代码不归模型**：层数是
+# 数出来的，一眼可判，跟兜底分类名（Q91）同一类。
+MAX_DIR_LEVELS = 4
+
+
 def validate_plan(plan: OrganizePlan, vault_root: Path) -> None:
     """第二段：纯静态检查。不过就抛 PlanError，vault 一个字节没动。"""
     if plan.outcome is Outcome.PENDING:
@@ -304,6 +312,13 @@ def validate_plan(plan: OrganizePlan, vault_root: Path) -> None:
     rel = Path(plan.target_path)
     if rel.is_absolute() or ".." in rel.parts:
         raise PlanError(f"target_path 不能是绝对路径或包含 ..：{plan.target_path}")
+
+    depth = len(rel.parts) - 1          # 减掉文件名那一段
+    if depth > MAX_DIR_LEVELS:
+        raise PlanError(
+            f"目录最多 {MAX_DIR_LEVELS} 层，这条排到第 {depth} 层了（Q94）："
+            f"{plan.target_path}。换个浅一点的位置，或者把中间那几层合并掉。"
+        )
 
     fallback = [d for d in rel.parts[:-1] if _is_fallback_name(d)]
     if fallback:
