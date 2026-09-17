@@ -91,3 +91,39 @@ def test_group_flow_marks_reached_steps():
     ]
     got = group_flow(rows)
     assert got[0]["reached"] == {"投递", "落盘"}
+
+
+def test_group_flow_splits_three_states():
+    """走过 / 跳过 / 没走到，是三回事。
+
+    中间没出现的步骤，要看**它后面有没有记录**：
+    后面有 → 流程越过了它，是「跳过」（比如审核没触发）
+    后面没有 → 流程停在那里了，是「没走到」
+    """
+    rows = [
+        {"run": "a", "step": "投递", "text": "t", "at": "t"},
+        {"run": "a", "step": "规划", "text": "t", "at": "t"},
+        {"run": "a", "step": "落盘", "text": "t", "at": "t"},
+    ]
+    g = group_flow(rows, steps=["投递", "规划", "校验", "审核", "落盘", "提交"])[0]
+    assert g["reached"] == {"投递", "规划", "落盘"}
+    assert g["skipped"] == {"校验", "审核"}      # 越过了
+    assert g["todo"] == {"提交"}                 # 停在落盘之后
+
+
+def test_group_flow_last_record_failure_leaves_rest_todo():
+    """流程停在「规划」——后面全是没走到，不是跳过。"""
+    rows = [
+        {"run": "a", "step": "投递", "text": "t", "at": "t"},
+        {"run": "a", "step": "规划", "text": "t", "at": "t"},
+    ]
+    g = group_flow(rows, steps=["投递", "规划", "校验", "审核", "落盘", "提交"])[0]
+    assert g["skipped"] == set()
+    assert g["todo"] == {"校验", "审核", "落盘", "提交"}
+
+
+def test_group_flow_without_steps_keeps_old_shape():
+    """不传 steps 时不算三态——向后兼容，老的调用点不炸。"""
+    rows = [{"run": "a", "step": "投递", "text": "t", "at": "t"}]
+    g = group_flow(rows)[0]
+    assert g["reached"] == {"投递"}

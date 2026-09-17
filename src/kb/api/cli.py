@@ -147,7 +147,9 @@ def cmd_status(args) -> int:
     else:
         print(f"服务在运行：http://127.0.0.1:{port}")
         if runtime.is_stale():
-            print("⚠️  它比磁盘上的代码旧——仍在跑改动前的逻辑。")
+            # 别用 ⚠️ 之类的符号：中文 Windows 的控制台与管道是 GBK，
+            # 编不出来的字符会抛 UnicodeEncodeError。这里两个字就能说明白。
+            print("警告：它比磁盘上的代码旧——仍在跑改动前的逻辑。")
             print("    跑 `kb stop` 停掉，下次调用会自动用当前代码拉起。")
     print(f"vault: {cfg.vault_path}")
     return 0

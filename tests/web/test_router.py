@@ -150,6 +150,29 @@ def test_flow_page_renders_chain(client, vault):
     assert "提交" in body            # 链上没走到的那几步也要画出来
 
 
+def test_flow_chain_uses_svg_marks_not_text_symbols(client, vault):
+    """界面里不许出现 emoji / 类 emoji 符号——标记一律内联 SVG。"""
+    from kb.core.flow import emit, set_run
+
+    set_run("20260917-1400")
+    emit("投递", "投了")
+    emit("落盘", "落了")
+
+    body = client.get("/flow").text
+    assert "✓" not in body
+    assert "○" not in body
+    assert body.count("<svg") >= 6          # 六个步骤各一个标记
+
+
+def test_journal_sidebar_uses_bubbles(client):
+    """整理日志的侧栏也是气泡流。"""
+    import re
+
+    body = client.get("/journal").text
+    aside = re.search(r'<aside class="chat-history">(.*?)</aside>', body, re.S).group(1)
+    assert 'class="bubble assistant"' in aside
+
+
 # ---------- 模板随手记 ----------
 
 def test_new_page_lists_templates(client):

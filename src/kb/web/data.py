@@ -64,19 +64,36 @@ def read_journals(vault_root: Path) -> list[Journal]:
     return out
 
 
-def group_flow(rows: list[dict]) -> list[dict]:
-    """按 run 分组，**新的在前**。每组带上「走到了哪几步」。
+def group_flow(rows: list[dict], steps: list[str] | None = None) -> list[dict]:
+    """按 run 分组，**新的在前**。
 
-    同一批整理的流程共用一个 run id；页面上一条流程链对应一组。
+    传了 `steps` 就把六个步骤分成三类：
+
+    - `reached` —— 有记录的
+    - `skipped` —— 没记录，但**它后面有记录**（流程越过了它）
+    - `todo`    —— 没记录，且后面也没有（流程停在前头了）
+
+    **`skipped` 和 `todo` 要分开。** 比如「审核」常常没记录——那是没触发
+    （没新建分类所以不跑），不是卡住了。画成一样会让人以为出了问题。
     """
     groups: dict[str, dict] = {}
     for row in rows:
         run = row.get("run") or "（未分组）"
-        g = groups.setdefault(run, {"run": run, "rows": [], "reached": set(), "at": ""})
+        g = groups.setdefault(
+            run, {"run": run, "rows": [], "reached": set(), "at": ""}
+        )
         g["rows"].append(row)
         g["reached"].add(row.get("step", ""))
         g["at"] = g["at"] or row.get("at", "")
-    return list(reversed(list(groups.values())))
+
+    out = list(groups.values())
+    if steps:
+        for g in out:
+            seen = [i for i, s in enumerate(steps) if s in g["reached"]]
+            last = max(seen) if seen else -1
+            g["skipped"] = {s for i, s in enumerate(steps) if i < last and s not in g["reached"]}
+            g["todo"] = {s for i, s in enumerate(steps) if i > last}
+    return list(reversed(out))
 
 
 def load_push_templates() -> dict[str, str]:

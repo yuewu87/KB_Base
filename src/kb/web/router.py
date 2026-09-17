@@ -109,7 +109,7 @@ def build_router(
 
     @router.get("/flow", response_class=HTMLResponse)
     def flow(request: Request):
-        groups = group_flow(read_flow(data_dir))
+        groups = group_flow(read_flow(data_dir), steps=STEPS)
         return templates.TemplateResponse(
             request, "flow.html", _ctx("flow", groups=groups, steps=STEPS)
         )

@@ -25,10 +25,37 @@
   <aside class="chat-history">
     <h2>流程</h2>
     {% for g in groups %}
+      <div class="thread">
+        {% for r in g.rows %}
+          <div class="bubble assistant">
+            <span class="bubble-at">{{ r.at[-8:] }}</span>{{ r.text }}
+          </div>
+        {% endfor %}
+      </div>
       <div class="chain">
         {% for step in steps %}
-          <div class="chain-step {{ 'done' if step in g.reached else 'todo' }}">
-            <span class="chain-mark">{{ '✓' if step in g.reached else '○' }}</span>
+          {% set state = 'done' if step in g.reached
+                         else ('skipped' if step in g.skipped else 'todo') %}
+          <div class="chain-step {{ state }}">
+            {% if state == 'done' %}
+              <svg class="mark" viewBox="0 0 16 16" role="img">
+                <title>{{ step }}：走过</title>
+                <circle cx="8" cy="8" r="7" fill="currentColor"/>
+                <path d="M4.8 8.3l2.1 2.1 4.3-4.5" fill="none" stroke="#fff"
+                      stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/>
+              </svg>
+            {% elif state == 'skipped' %}
+              <svg class="mark" viewBox="0 0 16 16" role="img">
+                <title>{{ step }}：没触发（不需要跑）</title>
+                <circle cx="8" cy="8" r="6.3" fill="none" stroke="currentColor" stroke-width="1.4"/>
+                <path d="M5 8h6" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/>
+              </svg>
+            {% else %}
+              <svg class="mark" viewBox="0 0 16 16" role="img">
+                <title>{{ step }}：还没走到</title>
+                <circle cx="8" cy="8" r="6.3" fill="none" stroke="currentColor" stroke-width="1.4"/>
+              </svg>
+            {% endif %}
             <span>{{ step }}</span>
           </div>
           {% if not loop.last %}<div class="chain-line"></div>{% endif %}

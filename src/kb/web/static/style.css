@@ -577,6 +577,42 @@ code {
   background: var(--line);
 }
 
+/* ---- 侧栏气泡：手机聊天式 ---- */
+.thread { display: flex; flex-direction: column; gap: 8px; margin-bottom: 16px; }
+
+.bubble {
+  position: relative;
+  padding: 9px 12px;
+  border-radius: 12px;
+  font-size: 12.5px;
+  line-height: 1.6;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  color: #37445a;
+  word-break: break-word;
+}
+.bubble.assistant {
+  border-top-left-radius: 4px;          /* 左边一个小尾巴的圆角 */
+  background: #f6f8fb;
+}
+.bubble.user { background: var(--blue-soft); border-color: #dbe7f4; }
+
+.bubble-at {
+  display: block;
+  font-family: var(--mono);
+  font-size: 10.5px;
+  color: var(--faint);
+  margin-bottom: 2px;
+}
+
+/* ---- 流程链的三个标记 ---- */
+.mark { width: 14px; height: 14px; flex-shrink: 0; }
+.chain-step.done    .mark { color: var(--blue); }
+.chain-step.skipped .mark { color: var(--faint); }
+.chain-step.todo    .mark { color: var(--line); }
+.chain-step.skipped { color: var(--faint); }
+.chain-step.todo    { color: #b9c3d0; }
+
 /* 视觉隐藏但读屏可读——不要用 `hidden`，那对读屏等于没有 */
 .sr-only {
   position: absolute;

@@ -145,3 +145,35 @@ def test_data_dir_is_gitignored():
         f"{sample} 没被 gitignore 覆盖——它会进 public 仓库。"
         "检查 .gitignore 里 data/ 那条还在不在。"
     )
+
+
+def test_cli_strings_are_gbk_encodable():
+    """`kb` 的终端输出必须能编成 GBK。
+
+    中文 Windows 的控制台和管道都是 GBK(cp936)。Python 直接打控制台走
+    `WriteConsoleW` 能打任意字符，但**输出被重定向或走管道时按 GBK 编码**
+    ——编不出来就抛 `UnicodeEncodeError`，命令直接崩。
+
+    实测过：`print("⚠️ …") > 文件` 必崩（U+26A0 不在 GBK 里）。
+    所以 CLI 里凡是给终端看的字符串，都要能 `.encode("gbk")`。
+    （RPA 项目也踩过同一条，它有回归用例守着——这里补上。）
+
+    **只查 `api/cli.py`**：那是唯一直接面向终端的模块（测试自己的字面量
+    不算——它们不打印）。
+
+    **文档字符串也会被扫到**，那是刻意的：多查一点不亏，而且真要有人
+    `print(cli.cmd_status.__doc__)` 就该拦。**别为了绕过它去关掉这条守卫。**
+    """
+    import ast
+
+    source = (SRC / "api" / "cli.py").read_text(encoding="utf-8")
+    bad: list[str] = []
+    for node in ast.walk(ast.parse(source)):
+        if not isinstance(node, ast.Constant) or not isinstance(node.value, str):
+            continue
+        try:
+            node.value.encode("gbk")
+        except UnicodeEncodeError as exc:
+            bad.append(f"{node.value[:30]!r} —— {exc}")
+
+    assert not bad, "CLI 输出里有 GBK 编不出来的字符：\n" + "\n".join(bad)
