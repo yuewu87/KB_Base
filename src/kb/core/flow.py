@@ -29,8 +29,10 @@ import contextvars
 import json
 import random
 import threading
-from datetime import datetime, timedelta
+from datetime import datetime
 from pathlib import Path
+
+from kb.core import daybox
 
 # 链上的顺序就是流水线的顺序——工作日志页的流程图照它画
 STEPS = ["投递", "规划", "校验", "审核", "落盘", "提交"]
@@ -39,7 +41,7 @@ STEPS = ["投递", "规划", "校验", "审核", "落盘", "提交"]
 KEEP_DAYS = 90
 
 _SUBDIR = "flow"
-_DAY_FMT = "%Y-%m-%d"
+_SUFFIX = ".jsonl"
 
 # 落点是启动时定一次、之后不变——模块全局没问题。
 _data_dir: Path | None = None
@@ -91,8 +93,12 @@ def day_dir(data_dir: Path) -> Path:
     return data_dir / "logs" / _SUBDIR
 
 
-def day_path(data_dir: Path, day: str) -> Path:
-    return day_dir(data_dir) / f"{day}.jsonl"
+def day_path(data_dir: Path, day: str) -> Path | None:
+    """某一天的流程日志文件。`day` 形状不对返回 `None`。
+
+    `day` 可能是 `?d=` 传上来的——**校验在这里**，直接拼路径就是一次任意文件读。
+    """
+    return daybox.day_file(day_dir(data_dir), day, _SUFFIX)
 
 
 def emit(step: str, text: str, now: datetime | None = None) -> None:
@@ -112,7 +118,7 @@ def emit(step: str, text: str, now: datetime | None = None) -> None:
         "step": step,
         "text": text,
     }
-    path = day_path(_data_dir, f"{now:{_DAY_FMT}}")
+    path = day_dir(_data_dir) / f"{now:{daybox.DAY_FMT}}{_SUFFIX}"
     try:
         with _write_lock:
             path.parent.mkdir(parents=True, exist_ok=True)
@@ -139,16 +145,14 @@ def _parse(path: Path) -> list[dict]:
 
 
 def list_days(data_dir: Path) -> list[str]:
-    """有流程记录的日期，**倒序**（新的在前）。目录不存在返回空列表。"""
-    directory = day_dir(data_dir)
-    if not directory.is_dir():
-        return []
-    return sorted((p.stem for p in directory.glob("*.jsonl")), reverse=True)
+    """有流程记录的日期，**倒序**。目录不存在返回空列表。"""
+    return daybox.list_days(day_dir(data_dir), _SUFFIX)
 
 
 def read_day(data_dir: Path, day: str) -> list[dict]:
-    """读某一天的记录，**按写入顺序**。没有这一天返回空列表（不抛）。"""
-    return _parse(day_path(data_dir, day))
+    """读某一天的记录，**按写入顺序**。没有这一天（或 `day` 形状不对）返回空列表。"""
+    path = day_path(data_dir, day)
+    return _parse(path) if path else []
 
 
 def latest_run_rows(data_dir: Path) -> list[dict]:
@@ -156,19 +160,26 @@ def latest_run_rows(data_dir: Path) -> list[dict]:
 
     run 可能跨午夜（23:59 投、00:01 规划），所以**倒着扫**：从最新的那天
     往回找，直到收齐那个 run 的全部记录。
+
+    **跳过空的那几天。** 文件全是坏行（进程被杀在第一条写入中间）或干脆是空的
+    时候，那一天等于没有记录——不能因此让整个页签空掉，前一天明明有完整的一条。
     """
     days = list_days(data_dir)
-    if not days:
-        return []
 
-    rows = read_day(data_dir, days[0])
+    rows: list[dict] = []
+    start = 0
+    for index, day in enumerate(days):
+        rows = read_day(data_dir, day)
+        if rows:
+            start = index
+            break
     if not rows:
         return []
-    run = rows[-1].get("run")
 
+    run = rows[-1].get("run")
     out = [r for r in rows if r.get("run") == run]
     # 往前一天找有没有同 run 的（跨午夜那条）
-    for day in days[1:]:
+    for day in days[start + 1:]:
         earlier = [r for r in read_day(data_dir, day) if r.get("run") == run]
         if not earlier:
             break
@@ -181,14 +192,4 @@ def prune(data_dir: Path, keep_days: int = KEEP_DAYS, now: datetime | None = Non
 
     **只碰服务侧**——vault 里的整理日志是知识，永不自动删。
     """
-    now = now or datetime.now()
-    cutoff = (now - timedelta(days=keep_days)).strftime(_DAY_FMT)
-    removed = 0
-    for p in day_dir(data_dir).glob("*.jsonl"):
-        if p.stem < cutoff:
-            try:
-                p.unlink()
-                removed += 1
-            except OSError:
-                pass
-    return removed
+    return daybox.prune(day_dir(data_dir), _SUFFIX, keep_days, now)

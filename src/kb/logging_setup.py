@@ -20,46 +20,37 @@ from __future__ import annotations
 
 import logging
 import os
-from datetime import datetime, timedelta
+from datetime import datetime
 from pathlib import Path
 
 from kb.config import PROJECT_ROOT
+from kb.core import daybox
 
 LOG_DIR = PROJECT_ROOT / "data" / "logs" / "kb"
 
 # 按天文件保留多久（天）。服务启动时清理更早的。
 KEEP_DAYS = 90
 
-_DAY_FMT = "%Y-%m-%d"
+_SUFFIX = ".log"
 _FORMAT = "%(asctime)s %(levelname)-7s %(name)s: %(message)s"
 
 
-def day_path(directory: Path, day: str) -> Path:
-    return directory / f"{day}.log"
+def day_path(directory: Path, day: str) -> Path | None:
+    """某一天的运行日志文件。`day` 形状不对返回 `None`。
+
+    `day` 可能是 `?d=` 传上来的——**校验在这里**，直接拼路径就是一次任意文件读。
+    """
+    return daybox.day_file(directory, day, _SUFFIX)
 
 
 def list_days(directory: Path) -> list[str]:
     """有日志的日期，**倒序**。目录不存在返回空列表。"""
-    if not directory.is_dir():
-        return []
-    return sorted((p.stem for p in directory.glob("*.log")), reverse=True)
+    return daybox.list_days(directory, _SUFFIX)
 
 
 def prune(directory: Path, keep_days: int = KEEP_DAYS, now: datetime | None = None) -> int:
     """删掉超过 `keep_days` 的按天文件，返回删了几个。"""
-    now = now or datetime.now()
-    cutoff = (now - timedelta(days=keep_days)).strftime(_DAY_FMT)
-    removed = 0
-    if not directory.is_dir():
-        return 0
-    for p in directory.glob("*.log"):
-        if p.stem < cutoff:
-            try:
-                p.unlink()
-                removed += 1
-            except OSError:
-                pass
-    return removed
+    return daybox.prune(directory, _SUFFIX, keep_days, now)
 
 
 class DailyFileHandler(logging.Handler):
@@ -79,20 +70,21 @@ class DailyFileHandler(logging.Handler):
     def emit(self, record: logging.LogRecord, now: datetime | None = None) -> None:
         try:
             now = now or datetime.now()
-            day = f"{now:{_DAY_FMT}}"
+            day = f"{now:{daybox.DAY_FMT}}"
             if day != self._day:
                 self._swap(day)
             self._stream.write(self.format(record) + "\n")
             self._stream.flush()
-        except OSError:
-            # 磁盘满、没权限、路径没了——**只吞掉，不能往上抛**：
-            # 日志是附属品，不该拖垮服务。
+        except Exception:
+            # 磁盘满、没权限、路径没了，或者 formatter 自己抛了——
+            # **只吞掉，不能往上抛**：日志是附属品，不该拖垮服务。
+            # stdlib 里 `Handler.emit` 的一贯做法就是吞掉一切走 handleError。
             self.handleError(record)
 
     def _swap(self, day: str) -> None:
         self._close()
         self.directory.mkdir(parents=True, exist_ok=True)
-        self._stream = day_path(self.directory, day).open("a", encoding="utf-8")
+        self._stream = (self.directory / f"{day}{_SUFFIX}").open("a", encoding="utf-8")
         self._day = day
 
     def _close(self) -> None:
@@ -120,9 +112,9 @@ def setup_logging(level: str | None = None) -> Path:
 
     for handler in root.handlers:
         if isinstance(handler, DailyFileHandler) and handler.directory == LOG_DIR:
-            return day_path(LOG_DIR, f"{datetime.now():{_DAY_FMT}}")
+            return LOG_DIR / f"{datetime.now():{daybox.DAY_FMT}}{_SUFFIX}"
 
     handler = DailyFileHandler(LOG_DIR)
     handler.setFormatter(logging.Formatter(_FORMAT))
     root.addHandler(handler)
-    return day_path(LOG_DIR, f"{datetime.now():{_DAY_FMT}}")
+    return LOG_DIR / f"{datetime.now():{daybox.DAY_FMT}}{_SUFFIX}"

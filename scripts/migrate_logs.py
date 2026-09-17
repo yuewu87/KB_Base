@@ -21,7 +21,6 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "src"))
 
-_DAY_FMT = "%Y-%m-%d"
 # 运行日志行首形如 `2026-09-17 10:00:00,123`
 _STAMP_LEN = 10
 

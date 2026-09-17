@@ -87,3 +87,23 @@ def test_migrate_runtime_splits_by_line_timestamp(tmp_path):
 
 def test_migrate_runtime_noop_when_absent(tmp_path):
     migrate_runtime(tmp_path)
+
+
+def test_dry_run_touches_nothing(tmp_path):
+    """dry-run 只打印，不动文件——它删源文件的，守卫写坏就是不可逆丢数据。"""
+    logs = tmp_path / "logs"
+    logs.mkdir()
+    rows = [{"at": "2026-09-17 10:00:00", "run": "r", "step": "投递", "text": "a"}]
+    (logs / "flow.jsonl").write_text(
+        json.dumps(rows[0], ensure_ascii=False) + "\n", encoding="utf-8"
+    )
+    (logs / "kb.log").write_text(
+        "2026-09-17 10:00:00,000 INFO    kb.push: a\n", encoding="utf-8"
+    )
+    before = sorted(p.relative_to(logs).as_posix() for p in logs.rglob("*"))
+
+    migrate_flow(logs, dry_run=True)
+    migrate_runtime(logs, dry_run=True)
+
+    after = sorted(p.relative_to(logs).as_posix() for p in logs.rglob("*"))
+    assert after == before

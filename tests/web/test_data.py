@@ -162,6 +162,45 @@ def test_read_runtime_unknown_day(tmp_path):
     assert read_runtime(tmp_path, "2026-01-01") == ""
 
 
+def test_journal_days_ignores_non_date_files(tmp_path):
+    """`模板.md` 是模板不是箱子——放进去不该让 `box_label` 拆包崩掉。"""
+    d = tmp_path / "_索引" / "整理日志"
+    d.mkdir(parents=True)
+    (d / "2026-09-17.md").write_text("## 10:00 整理 1 条草稿\n\n- 新建：[[x]]\n",
+                                     encoding="utf-8")
+    (d / "模板.md").write_text("## 这是模板\n\n- 占位\n", encoding="utf-8")
+
+    assert journal_days(tmp_path) == ["2026-09-17"]
+
+
+def test_read_journal_rejects_path_traversal(tmp_path):
+    """`day` 来自 `?d=`，不校验就是一次任意文件读。"""
+    outside = tmp_path / "库外.md"
+    outside.write_text("## 不该读到\n\n- x\n", encoding="utf-8")
+    root = tmp_path / "vault"
+    root.mkdir()
+
+    assert read_journal(root, "../库外") == []
+
+
+def test_runtime_days_ignores_non_date_files(tmp_path):
+    d = tmp_path / "kb"
+    d.mkdir(parents=True)
+    (d / "2026-09-17.log").write_text("x\n", encoding="utf-8")
+    (d / "backup.log").write_text("x\n", encoding="utf-8")
+
+    assert runtime_days(d) == ["2026-09-17"]
+
+
+def test_read_runtime_rejects_path_traversal(tmp_path):
+    outside = tmp_path / "库外.log"
+    outside.write_text("不该读到\n", encoding="utf-8")
+    root = tmp_path / "kb"
+    root.mkdir()
+
+    assert read_runtime(root, "../库外") == ""
+
+
 def test_box_label():
     """箱子名只是界面叫法——`2026-09-17` → `26_9_17箱子`。"""
     assert box_label("2026-09-17") == "26_9_17箱子"

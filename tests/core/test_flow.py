@@ -99,6 +99,45 @@ def test_read_day_unknown_returns_empty(tmp_path):
     assert read_day(tmp_path, "2026-09-01") == []
 
 
+def test_read_day_rejects_path_traversal(tmp_path):
+    """`day` 可能是 `?d=` 传上来的——直接拼路径就是一次任意文件读。"""
+    flow.configure(tmp_path)
+    outside = tmp_path.parent / "秘密.jsonl"
+    outside.write_text('{"text": "库外的东西"}\n', encoding="utf-8")
+    try:
+        assert read_day(tmp_path, "../秘密") == []
+        assert read_day(tmp_path, "../../x") == []
+    finally:
+        outside.unlink()
+
+
+def test_list_days_ignores_non_date_names(tmp_path):
+    """`backup.jsonl` 按字符串排序会排到 `2026-...` 前面（`'b' > '2'`），
+    被当成最新一天。"""
+    flow.configure(tmp_path)
+    emit("投递", "a", now=_at("2026-09-17 10:00"))
+    (tmp_path / "logs" / "flow" / "backup.jsonl").write_text("x", encoding="utf-8")
+
+    assert list_days(tmp_path) == ["2026-09-17"]
+
+
+def test_latest_run_rows_skips_a_corrupt_newest_day(tmp_path):
+    """最新一天全是坏行时不能整个返回空——前一天明明有完整记录。"""
+    flow.configure(tmp_path)
+    set_run("run-A")
+    emit("投递", "前一天的", now=_at("2026-09-16 10:00"))
+
+    corrupt = tmp_path / "logs" / "flow" / "2026-09-17.jsonl"
+    corrupt.write_text('{"text": "断在这\n', encoding="utf-8")
+
+    assert [r["text"] for r in latest_run_rows(tmp_path)] == ["前一天的"]
+
+
+def test_latest_run_rows_returns_empty_when_nothing_anywhere(tmp_path):
+    flow.configure(tmp_path)
+    assert latest_run_rows(tmp_path) == []
+
+
 def test_read_day_skips_broken_lines(tmp_path):
     """半行（进程被杀）跳过，别让整页挂掉。"""
     flow.configure(tmp_path)

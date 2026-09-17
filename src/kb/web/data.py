@@ -13,6 +13,7 @@ from __future__ import annotations
 from pathlib import Path
 
 from kb.config import PROJECT_ROOT
+from kb.core import daybox
 from kb.core.vault import INDEX, JOURNAL_DIR
 
 # 投递脚手架：**给人读**，帮他把话说清（`templates/笔记/` 那份是给机器读的 schema）
@@ -49,7 +50,9 @@ def parse_journal(text: str) -> list[Section]:
 
 
 def read_journal(vault_root: Path, day: str) -> list[Section]:
-    """读某一天的整理日志。没有这一天返回空列表（不抛）。"""
+    """读某一天的整理日志。没有这一天（或 `day` 形状不对）返回空列表。"""
+    if not daybox.is_day(day):
+        return []          # day 来自 ?d=，不校验就是一次任意文件读
     path = vault_root / INDEX / JOURNAL_DIR / f"{day}.md"
     if not path.is_file():
         return []
@@ -61,6 +64,7 @@ def journal_days(vault_root: Path) -> list[str]:
 
     **空的不算一天**——只写了 frontmatter、一个小节都没有的文件不该在
     箱子列表里占一格（那会是个点进去什么都没有的空箱子）。
+    **非日期名字也不算**——`模板.md` 是模板不是箱子。
     """
     directory = vault_root / INDEX / JOURNAL_DIR
     if not directory.is_dir():
@@ -68,27 +72,25 @@ def journal_days(vault_root: Path) -> list[str]:
 
     out: list[str] = []
     for path in sorted(directory.glob("*.md"), reverse=True):
-        if parse_journal(path.read_text(encoding="utf-8")):
+        if daybox.is_day(path.stem) and parse_journal(path.read_text(encoding="utf-8")):
             out.append(path.stem)
     return out
 
 
 def runtime_days(directory: Path) -> list[str]:
     """有运行日志的日期，**倒序**。目录不存在返回空列表。"""
-    if not directory.is_dir():
-        return []
-    return sorted((p.stem for p in directory.glob("*.log")), reverse=True)
+    return daybox.list_days(directory, ".log")
 
 
 def read_runtime(directory: Path, day: str) -> str:
-    """读某一天的运行日志。没有这一天返回空串（不抛）。
+    """读某一天的运行日志。没有这一天（或 `day` 形状不对）返回空串。
 
     末尾换行去掉——本模块出的是**页面能直接渲染的东西**，页面上是终端样式
     （`<pre>`），带着行尾换行会多空一行；它替换掉的 `tail_log` 也是拼行返回、
     本来就不带尾巴。
     """
-    path = directory / f"{day}.log"
-    if not path.is_file():
+    path = daybox.day_file(directory, day, ".log")
+    if path is None or not path.is_file():
         return ""
     return path.read_text(encoding="utf-8", errors="replace").rstrip("\n")
 

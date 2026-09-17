@@ -99,13 +99,24 @@ def test_prune_missing_dir(tmp_path):
 
 
 def test_setup_logging_is_idempotent(tmp_path, monkeypatch):
-    """重复调用不叠加 handler——服务重启、测试里多次调用都会碰到。"""
+    """重复调用不叠加 handler——服务重启、测试里多次调用都会碰到。
+
+    **收尾必须摘掉并关掉 handler**：它挂在 root logger 上，不摘就活过整个
+    pytest 进程，而且 directory 指向已被清理的临时目录——之后任何测试打
+    INFO 都会重建那个目录往里写文件。
+    """
     monkeypatch.setattr("kb.logging_setup.LOG_DIR", tmp_path)
     root = logging.getLogger()
 
     from kb.logging_setup import setup_logging
 
-    setup_logging()
-    setup_logging()
-
-    assert sum(isinstance(h, DailyFileHandler) for h in root.handlers) == 1
+    before = list(root.handlers)
+    try:
+        setup_logging()
+        setup_logging()
+        added = [h for h in root.handlers if h not in before]
+        assert sum(isinstance(h, DailyFileHandler) for h in added) == 1
+    finally:
+        for h in [h for h in root.handlers if h not in before]:
+            root.removeHandler(h)
+            h.close()
