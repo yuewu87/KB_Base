@@ -73,6 +73,20 @@ def save_report(data_dir: Path, report: dict, when: datetime | None = None) -> N
     _write(data_dir, state)
 
 
+def mark_run(data_dir: Path, when: datetime | None = None) -> None:
+    """只占坑：把「上次巡检」推到现在，**不留报告**。
+
+    后台巡检一开始就要占坑（否则服务重启会重复跑），但那一刻还没有报告可写。
+    早先用 `save_report(data_dir, {"summary": "巡检正在跑…"})` 占坑——那条也是
+    `read: false`，侧栏会把它当**正式报告**显示，还带两个回复按钮；进程中途
+    被杀的话它会一直留着。
+    """
+    when = when or datetime.now()
+    state = load_state(data_dir)
+    state["last_sweep"] = f"{when:{_FMT}}"
+    _write(data_dir, state)
+
+
 def mark_read(data_dir: Path) -> None:
     state = load_state(data_dir)
     if "report" in state:

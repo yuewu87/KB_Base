@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import argparse
 import logging
+import threading
 from datetime import datetime
 from pathlib import Path
 
@@ -21,7 +22,7 @@ from pydantic import BaseModel
 
 from kb.api import runtime
 from kb.config import DATA_DIR, Config, load_config
-from kb.core import flow, organize
+from kb.core import flow, organize, sweep, sweep_state
 from kb.core.chat import handle
 from kb.core.chat_store import list_chats, load_chat
 from kb.core.models import Draft, OrganizeResult
@@ -166,6 +167,90 @@ def push_and_organize(
     if r.kind.value == "pending":
         return f"{text}\n归不了类，先搁在待归类：{r.detail}"
     return f"{text}\n已归到 {r.detail}"
+
+
+def _commit_sweep(vault_root: Path, touched: list[Path], plan: sweep.SweepPlan) -> bool:
+    """一次巡检 = 一个 commit，message 用 `plan.summary`（Q46 同样适用）。
+
+    **禁用 `git add -A`**——那会把用户正在编辑、尚未提交的笔记一起裹进
+    这次「AI 收拾」的 commit 里，历史就骗人了。只 add `apply_plan` 报上来的
+    那份清单。
+
+    清单里**旧路径和新路径都有**（`apply_plan` 特意那么返回的）：
+    旧路径让 git 看见「删除」、新路径让 git 看见「新增」，两边都 staged
+    才会被识别成一次 rename。**只 add 新路径的话，移动过的文件会漏提交。**
+
+    git 的两个调用沿用 `organize` 里的那份实现——**编码与 `-c` 参数这些
+    平台坑只该有一处**，复制一份迟早会改漏。
+    """
+    rels: list[str] = []
+    for path in touched:
+        try:
+            rels.append(path.relative_to(vault_root).as_posix())
+        except ValueError:
+            continue
+
+    rels = organize.stageable(vault_root, rels)
+    if not rels:
+        return False
+
+    message = plan.summary or "巡检：收拾标签与目录"
+    organize.git_run(vault_root, "add", "--", *rels)
+    proc = organize.git_run(
+        vault_root,
+        "-c", f"user.name={organize.SERVICE_AUTHOR_NAME}",
+        "-c", f"user.email={organize.SERVICE_AUTHOR_EMAIL}",
+        "commit", "-m", message,
+    )
+    if proc.returncode == 0:
+        flow.emit("提交", f"提交了一个 commit：「{message.splitlines()[0]}」")
+    return proc.returncode == 0
+
+
+def run_sweep(vault_root: Path, data_dir: Path, llm: LLM) -> dict:
+    """跑一次巡检：规划 → 校验 → 落盘 → commit → 存报告。
+
+    **它走的是和整理草稿同一条链**，只是输入换成了整个库的标签与目录。
+    """
+    plan = sweep.make_plan(vault_root, llm)
+    sweep.validate(plan, vault_root)
+
+    if plan.is_empty:
+        report = {"summary": plan.summary or "没什么要收拾的", "tag_merges": [], "dir_merges": []}
+        sweep_state.save_report(data_dir, report)
+        return report
+
+    flow.set_run(flow.new_run_id())
+    flow.emit("规划", f"巡检发现：{plan.summary or '有可以合并的'}")
+    touched = sweep.apply_plan(plan, vault_root)
+    _commit_sweep(vault_root, touched, plan)
+
+    report = {
+        "summary": plan.summary,
+        "tag_merges": [{"from": a, "to": b} for a, b in plan.tag_merges],
+        "dir_merges": [{"from": a, "to": b} for a, b in plan.dir_merges],
+        "touched": [p.relative_to(vault_root).as_posix() for p in touched],
+    }
+    sweep_state.save_report(data_dir, report)
+    return report
+
+
+def _sweep_in_background(vault_root: Path, data_dir: Path, llm: LLM) -> None:
+    """后台跑巡检。**绝不抛异常**——后台线程里抛了没人接。
+
+    `llm` 由 `main()` 用现成的 `cfg` 建好传进来，**这里不重新 `load_config()`**：
+    `load_dotenv` 写的是进程级 `os.environ`，同一进程内只该调用一次
+    （见 `config.load_config` 的 docstring），而 `main()` 已经调过了。
+    """
+    # 先占坑：万一跑挂了也不会每次重启都重跑。
+    # 用 mark_run 而不是 save_report——后者会留一份 read: false 的报告，
+    # 侧栏会把它当正式报告显示（还带两个回复按钮）。
+    sweep_state.mark_run(data_dir)
+    try:
+        run_sweep(vault_root, data_dir, llm)
+    except Exception:      # noqa: BLE001
+        logging.getLogger("kb.sweep").exception("巡检失败")
+        sweep_state.save_report(data_dir, {"summary": "这次巡检没跑成，看运行日志"})
 
 
 def create_app(
@@ -320,6 +405,32 @@ def create_app(
         items = list_chats(data_dir)
         return {"count": len(items), "items": items}
 
+    @app.get("/sweep")
+    def sweep_latest() -> dict:
+        """最近一次巡检的报告，以及「读没读」。没跑过就是空的。"""
+        state = sweep_state.load_state(data_dir)
+        return {
+            "report": state.get("report"),
+            "last_sweep": state.get("last_sweep"),
+        }
+
+    @app.post("/sweep")
+    def sweep_now() -> dict:
+        """手动跑一次巡检（`kb sweep` 与网页「巡检一次」走这里）。
+
+        **同步跑**——巡检是低频动作，等一会儿可以接受；跑完直接拿报告。
+        """
+        try:
+            return run_sweep(cfg.vault_path, data_dir, get_llm())
+        except sweep.SweepError as exc:
+            # 模型输出坏了、计划不合规——原因要说给人听，CLI 是拿它调试的
+            raise HTTPException(status_code=500, detail=str(exc)) from exc
+
+    # 这里**不**放 `/sweep/reply`。它是网页那个表单在用（`web/router.py`
+    # 里的 Form 版），而 `include_router` 先于 app 级路由注册——
+    # 同一个路径注册两次，**先注册的那个赢**，放这儿也是收不到请求的死代码。
+    # 将来别的入口（比如 qqbot）要调，那时会有明确的形状需求，再加不迟。
+
     return app
 
 
@@ -337,8 +448,28 @@ def main() -> None:
     )
 
     runtime.write_service_info(port)
+
+    # 先把 app 建出来（`create_app` 里会把流程日志的落点配好），再放后台巡检——
+    # 否则巡检抢在前面记流程，「规划」「提交」那几行会因为没有落点而丢掉。
+    app = create_app(cfg)
+
+    # 距上次巡检超过 6 天就跑一次——**后台线程**，不挡启动。
+    #
+    # **放这里而不是 `create_app` 里**：只有走到 `main()` 才是「服务真起来了」。
+    # 测试和嵌入用法都直接调 `create_app`，要是那里也算启动，后台巡检会去用
+    # 夹具注入的假模型（把 `FakeLLM` 的应答队列吃掉，实测让对话那条用例变红），
+    # 还会拿默认的 `data/` 当落点写状态（跑一次 pytest 就写进一份假报告，
+    # 顺带把 `last_sweep` 顶掉——真服务 6 天内都不会再自动跑）。
+    # 服务进程只有这一条入口（`runtime.spawn_service` 也是 `-m kb.api.http`）。
+    if sweep_state.due(DATA_DIR):
+        threading.Thread(
+            target=_sweep_in_background,
+            args=(cfg.vault_path, DATA_DIR, build_llm(cfg)),
+            daemon=True,
+        ).start()
+
     try:
-        uvicorn.run(create_app(cfg), host="127.0.0.1", port=port, log_level="info")
+        uvicorn.run(app, host="127.0.0.1", port=port, log_level="info")
     finally:
         runtime.clear_service_info()
 

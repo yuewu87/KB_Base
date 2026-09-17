@@ -139,6 +139,21 @@ def cmd_search(args) -> int:
     return 0
 
 
+def cmd_sweep(args) -> int:
+    """手动跑一次巡检（调试用）。不受 6 天限制——服务那边会写回上次时间。"""
+    cfg = load_config()
+    with make_client(cfg) as client:
+        resp = client.post("/sweep")
+        resp.raise_for_status()
+        data = resp.json()
+    print(f"巡检完成：{data['summary']}")
+    for m in data["tag_merges"]:
+        print(f"  标签：{m['from']} → {m['to']}")
+    for m in data["dir_merges"]:
+        print(f"  目录：{m['from']} → {m['to']}")
+    return 0
+
+
 def cmd_status(args) -> int:
     cfg = load_config()
     port = runtime.running_port()
@@ -187,6 +202,9 @@ def build_parser() -> argparse.ArgumentParser:
     p_search = sub.add_parser("search", help="检索笔记")
     p_search.add_argument("query", help="关键词")
     p_search.set_defaults(func=cmd_search)
+
+    p_sweep = sub.add_parser("sweep", help="巡检一次：收拾全库的标签与目录")
+    p_sweep.set_defaults(func=cmd_sweep)
 
     p_status = sub.add_parser("status", help="查看服务状态")
     p_status.set_defaults(func=cmd_status)

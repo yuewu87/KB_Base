@@ -378,8 +378,11 @@ def build_commit_message(
     return "\n".join(lines).rstrip() + "\n"
 
 
-def _git(vault_root: Path, *args: str) -> subprocess.CompletedProcess:
+def git_run(vault_root: Path, *args: str) -> subprocess.CompletedProcess:
     """调用 git。
+
+    **公开**（不带下划线）：巡检那边（`api/http.py` 的 `_commit_sweep`）也用它。
+    编码与 `-c core.quotepath` 这些平台坑**只该有一处实现**，复制一份迟早改漏。
 
     **必须显式指定 utf-8 与 errors="replace"。** Windows 下 `text=True` 会按
     本地编码（GBK）解码，而 git 输出（中文 commit message、路径）是 UTF-8——
@@ -395,8 +398,10 @@ def _git(vault_root: Path, *args: str) -> subprocess.CompletedProcess:
     )
 
 
-def _stageable(vault_root: Path, rels: list[str]) -> list[str]:
+def stageable(vault_root: Path, rels: list[str]) -> list[str]:
     """筛掉 git 处理不了的路径。
+
+    **公开**：理由同 `git_run`——巡检与整理共用这一份。
 
     **草稿是这里的关键**：它由 `/push` 写入、`/push` 不提交，所以整理时还是个
     未跟踪文件；整理成功后又会被删掉。此时 `git add -- 00_收件箱/xxx.md` 会报
@@ -408,7 +413,7 @@ def _stageable(vault_root: Path, rels: list[str]) -> list[str]:
     """
     if not rels:
         return []
-    tracked = set(_git(vault_root, "ls-files", "-z", "--", *rels).stdout.split("\0"))
+    tracked = set(git_run(vault_root, "ls-files", "-z", "--", *rels).stdout.split("\0"))
     return [r for r in rels if (vault_root / r).exists() or r in tracked]
 
 
@@ -430,13 +435,13 @@ def commit_changes(
         except ValueError:
             continue
 
-    rels = _stageable(vault_root, rels)
+    rels = stageable(vault_root, rels)
     if not rels:
         return False
 
     message = build_commit_message(results, when)
-    _git(vault_root, "add", "--", *rels)
-    proc = _git(
+    git_run(vault_root, "add", "--", *rels)
+    proc = git_run(
         vault_root,
         "-c", f"user.name={SERVICE_AUTHOR_NAME}",
         "-c", f"user.email={SERVICE_AUTHOR_EMAIL}",
