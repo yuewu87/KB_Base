@@ -235,7 +235,7 @@
             el.dataset.init = data.saved[key];
           });
           const n = Object.keys(data.saved || {}).length;
-          _msg(n ? '已保存 ' + n + ' 项，立刻生效' : '没有要改的', true);
+          _msg(n ? '已保存 ' + n + ' 项' : '没有要改的', true);
         } else {
           _msg(_detail(data, '保存失败') + '（HTTP ' + r.status + '）', false);
         }

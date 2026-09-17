@@ -65,8 +65,14 @@ GROUPS: tuple[Group, ...] = (
         Field("KB_LOG_LEVEL", "日志级别", "choice",
               choices=("INFO", "DEBUG"), default="INFO",
               help="排查问题时切 DEBUG"),
-        Field("KB_SWEEP_INTERVAL", "巡检间隔（天）", "int", default="6"),
-        Field("KB_LOG_KEEP_DAYS", "服务侧日志保留（天）", "int", default="90"),
+        # `help` 是**原样印到 HTML 上的**（`_settings.html` 只有 `{{ f.help }}`，
+        # 没有 markdown 过滤器）——所以这里不写 `**加粗**`，浏览器里会原样
+        # 露出两个星号。全站的 help 都遵守这一条。
+        Field("KB_SWEEP_INTERVAL", "巡检间隔（天）", "int", default="6",
+              help="距上次超过这么多天才自动跑。下次启动服务时生效——"
+                   "它只在服务启动那一刻判一次"),
+        Field("KB_LOG_KEEP_DAYS", "服务侧日志保留（天）", "int", default="90",
+              help="更早的启动时清掉。下次启动服务时生效"),
     )),
 )
 

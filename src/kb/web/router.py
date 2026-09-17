@@ -80,13 +80,22 @@ def settings_context(env_path: Path, cfg: Config) -> dict:
 
         可改字段反过来，**必须**是 `.env` 的字面值：留空 = 不改是它们的语义
         （密钥尤其），显示生效值就等于让人一保存把 key 覆盖成掩码。
+
+        **`choice` 是唯一的例外：先 `upper()` 再显示。** 与 `config._log_level`
+        的 `upper()` 口径一致——`.env` 里手写小写 `debug` 时，大写选项列表里
+        匹配不上，下拉框会**落到第一个 option**（画面上是 INFO），而 `data-init`
+        还是 `debug`：用户「什么都不改点保存」，`debug` 就被静默写成 `INFO`。
+        归一之后，显示的就是**实际生效**的那个值，`data-init` 也跟着对得上。
         """
         if f.kind == "readonly":
             if f.key == "KB_VAULT_PATH":
                 return str(cfg.vault_path)
             if f.key == "KB_PORT":
                 return str(cfg.port) if cfg.port else "自动"
-        return _display(f, values.get(f.key, f.default))
+        raw = values.get(f.key, f.default)
+        if f.kind == "choice":
+            raw = raw.upper()
+        return _display(f, raw)
 
     groups = [
         {
@@ -348,7 +357,13 @@ def build_router(
 
     @router.post("/settings")
     def settings_save(body: SettingsBody):
-        """保存 + 重载。**当场生效**，不用重启。
+        """保存 + 重载。模型与日志级别**当场生效**，不用重启。
+
+        **不是每个字段都当场生效**：`KB_SWEEP_INTERVAL` / `KB_LOG_KEEP_DAYS`
+        只在服务启动那一刻用一次（`main()` 里判一次 `due`、清一次旧日志），
+        改完要等下次启动——所以那两个字段的 `help` 里写明「下次启动服务时生效」，
+        前端的成功提示也不再笼统地说「立刻生效」。见
+        `core.settings.GROUPS` 与 `docs/03_问题记录.md` Q98。
 
         `saved` 里是**真变了的**那些，不是提交上来的全部——表单会把所有
         pane 的字段都送过来（隐藏的也在），照单全收的话，只改一个日志级别
@@ -370,7 +385,7 @@ def build_router(
         **不落盘、不动现有的客户端**——所以「先测试再保存」走得通，
         不用为了测一次就把坏配置先写进 `.env`。
 
-        （Task 6 会补它的失败路径用例；这里先给个能用的最小版——
+        （失败路径的用例在 `tests/web/test_router.py` 里——
         保存后的重载要靠它验：兜底值走的是 `get_cfg()`。）
 
         **它要花钱**（一次极小的调用）。这是刻意的：换模型/换 key 时，

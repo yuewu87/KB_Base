@@ -690,6 +690,36 @@ def test_readonly_fields_show_the_effective_values(tmp_path):
     assert "自动" in body            # 端口没配 → 说清是自动找的，不是空白
 
 
+def test_choice_field_normalizes_case_so_a_lowercase_env_is_not_silently_rewritten(
+    tmp_path,
+):
+    """`.env` 里手写小写 `debug` → 下拉框要**选中 DEBUG**，`data-init` 也是 `DEBUG`。
+
+    不归一的话：选项是 `INFO` / `DEBUG`，`debug` 一个都匹配不上，浏览器落到
+    **第一个 option**（画面上写着 INFO），而 `data-init` 还是 `debug`——用户
+    「什么都不改点保存」，`saveSettings` 认为这个字段没动过、不提交，看似无事；
+    可一旦别处触发了提交、或者他顺手改回 INFO 再改过来，`.env` 里那个 `debug`
+    就会被静默写成 `INFO`。归一后显示的就是**实际生效**的那个值
+    （`config._log_level` 本来就 `upper()`）。见 `settings_context._value`。
+    """
+    env = tmp_path / ".env"
+    env.write_text(
+        "KB_LLM_API_KEY=k\nKB_LLM_BASE_URL=http://x\nKB_LLM_MODEL=m\n"
+        "KB_LOG_LEVEL=debug\n",
+        encoding="utf-8",
+    )
+    cfg = Config("k", "http://x", "m", tmp_path / "库", None)
+
+    body = TestClient(
+        create_app(cfg, data_dir=tmp_path, env_file=env)
+    ).get("/settings").text
+
+    assert '<option value="DEBUG" selected>' in body
+    assert '<option value="INFO" selected>' not in body
+    assert 'data-init="DEBUG"' in body
+    assert 'data-init="debug"' not in body
+
+
 def test_service_status_shows_the_start_time(client, monkeypatch):
     """设计第四节那栏的样例是 `已连接 · 启动于 18:31`——启动时间要在。"""
     from kb.api import runtime

@@ -239,3 +239,15 @@ def test_validate_reports_every_bad_field():
         validate({"KB_LOG_LEVEL": "TRACE", "KB_SWEEP_INTERVAL": "0"})
     assert "日志级别" in str(exc.value)
     assert "巡检间隔" in str(exc.value)
+
+
+def test_slow_fields_say_they_need_a_restart():
+    """`KB_SWEEP_INTERVAL` / `KB_LOG_KEEP_DAYS` **只在服务启动那一刻用一次**。
+
+    界面曾经对它们也说「立刻生效」，而实际什么都不会发生——这是对用户的
+    明示承诺，且没有任何地方提示要重启。现在各自在 help 里说清楚。
+    """
+    from kb.core.settings import find_field
+
+    for key in ("KB_SWEEP_INTERVAL", "KB_LOG_KEEP_DAYS"):
+        assert "下次启动" in find_field(key).help
