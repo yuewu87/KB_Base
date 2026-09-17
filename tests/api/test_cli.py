@@ -64,6 +64,30 @@ def fake_server(monkeypatch, cfg, tmp_path):
     return cfg
 
 
+def test_web_opens_the_browser(fake_server, monkeypatch, capsys):
+    """`kb web` = 确保服务在跑 → 打印地址 → 开浏览器。"""
+    opened: list[str] = []
+    monkeypatch.setattr(cli.webbrowser, "open", opened.append)
+    monkeypatch.setattr(cli.runtime, "ensure_service", lambda _cfg: 51823)
+    monkeypatch.setattr(cli.runtime, "is_stale", lambda: False)
+
+    assert cli.cmd_web(_Args()) == 0
+
+    assert opened == ["http://127.0.0.1:51823"]
+    assert "51823" in capsys.readouterr().out
+
+
+def test_web_warns_when_the_service_is_stale(fake_server, monkeypatch, capsys):
+    """服务跑着旧代码时要说一声——不然改了代码看不出效果，能白排查半天。"""
+    monkeypatch.setattr(cli.webbrowser, "open", lambda _url: None)
+    monkeypatch.setattr(cli.runtime, "ensure_service", lambda _cfg: 51823)
+    monkeypatch.setattr(cli.runtime, "is_stale", lambda: True)
+
+    cli.cmd_web(_Args())
+
+    assert "比磁盘上的代码旧" in capsys.readouterr().out
+
+
 # ---------- 纯函数 ----------
 
 def test_read_content_prefers_flag(monkeypatch):

@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import argparse
 import sys
+import webbrowser
 from pathlib import Path
 
 import httpx
@@ -170,6 +171,23 @@ def cmd_status(args) -> int:
     return 0
 
 
+def cmd_web(args) -> int:
+    """确保服务在跑，打印地址，并把网页打开。
+
+    **给人用的入口**（`web.bat` 双击就是调它）。CLI 那边不该关心端口——
+    `service.json` 自动发现就够；人要的是一个**能收藏、不用记**的地址。
+    """
+    cfg = load_config()
+    port = runtime.ensure_service(cfg)
+    url = f"http://127.0.0.1:{port}"
+    print(f"知识库网页：{url}")
+    if runtime.is_stale():
+        print("警告：它比磁盘上的代码旧——仍在跑改动前的逻辑。")
+        print("    跑 `kb stop` 停掉，下次调用会自动用当前代码拉起。")
+    webbrowser.open(url)
+    return 0
+
+
 def cmd_stop(args) -> int:
     if runtime.stop_service():
         print("服务已停止。下次调用会自动用当前代码拉起。")
@@ -202,6 +220,9 @@ def build_parser() -> argparse.ArgumentParser:
     p_search = sub.add_parser("search", help="检索笔记")
     p_search.add_argument("query", help="关键词")
     p_search.set_defaults(func=cmd_search)
+
+    p_web = sub.add_parser("web", help="打开知识库网页（服务没跑就拉起来）")
+    p_web.set_defaults(func=cmd_web)
 
     p_sweep = sub.add_parser("sweep", help="巡检一次：收拾全库的标签与目录")
     p_sweep.set_defaults(func=cmd_sweep)

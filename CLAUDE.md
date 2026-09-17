@@ -67,6 +67,7 @@ Windows 下 `text=True` 按本地编码（GBK）解码，而 git 的输出（中
 "D:/Conda_base/envs/kn_base/python.exe" -m ruff check src tests scripts
 
 # 真跑一遍（服务自己会拉起来）
+./kb.bat web                                    # 开网页（服务没跑就拉起来）
 PYTHONIOENCODING=utf-8 ./kb.bat push --content "..." --source 会话
 PYTHONIOENCODING=utf-8 ./kb.bat organize
 PYTHONIOENCODING=utf-8 ./kb.bat sweep
