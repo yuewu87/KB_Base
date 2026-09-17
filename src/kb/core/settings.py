@@ -11,6 +11,10 @@
 
 **API Key 留空 = 不改。** 掩码显示的字段，用户不填就是不想动它；
 当成空串写回去等于把 key 抹了。
+
+**`text` 字段留空 = 报错。** 模型名、API 地址这些留空会把服务写坏
+（下一次调用模型全是失败），而 `choice` / `int` 本来就会报错——
+只剩 `text` 没管就成了唯一的缺口。
 """
 
 from __future__ import annotations
@@ -81,6 +85,10 @@ def read_env(path: Path) -> dict[str, str]:
 
     **不走 `dotenv`**——这里的用途是「原样拿回来给人看、改完再写回去」，
     要的是文件本身的样子，不是合并了环境变量之后的结果。
+
+    **行内注释不剥离**：`KEY=x # 注释` 会把 ` # 注释` 一起读进值里，
+    而 `dotenv` 会剥掉。现存 `.env` 没有行内注释；真出现了，
+    表单预填的值与真正生效的值可能不是一回事。
     """
     if not path.is_file():
         return {}
@@ -101,24 +109,29 @@ def write_env(path: Path, updates: dict[str, str]) -> None:
     会把注释全抹掉，那是把人写的东西弄丢了。
 
     文件里没有的键**追加到末尾**（第一次加新配置项时走这条）。
+
+    **同名键改最后一处。** 读的是最后一处（`dotenv` 也是后写的赢），
+    改前一处会变成「保存成功但配置没变」——实测过。
     """
     lines = path.read_text(encoding="utf-8").splitlines() if path.is_file() else []
 
-    remaining = dict(updates)
-    out: list[str] = []
-    for line in lines:
+    # 先扫一遍，记下每个键最后一次出现在哪一行——后写的赢。
+    last: dict[str, int] = {}
+    for index, line in enumerate(lines):
         stripped = line.strip()
         if stripped and not stripped.startswith("#") and "=" in stripped:
             key = stripped.split("=", 1)[0].strip()
-            if key in remaining:
-                out.append(f"{key}={remaining.pop(key)}")
-                continue
-        out.append(line)
+            if key in updates:
+                last[key] = index
 
-    for key, value in remaining.items():
-        out.append(f"{key}={value}")
+    for key, index in last.items():
+        lines[index] = f"{key}={updates[key]}"
 
-    path.write_text("\n".join(out) + "\n", encoding="utf-8")
+    for key, value in updates.items():
+        if key not in last:
+            lines.append(f"{key}={value}")
+
+    path.write_text("\n".join(lines) + "\n", encoding="utf-8")
 
 
 # ------------------------------------------------------------ 校验
@@ -128,6 +141,9 @@ def validate(raw: dict[str, str]) -> dict[str, str]:
 
     只读字段、不认识的键、留空的密钥——都在这里丢掉。
     有问题就抛 `SettingsError`，**一次报全**，别让人改一个跑一次。
+
+    **POST 走 JSON，客户端送什么类型都收得到。** 进判断之前一律转成字符串，
+    这里只准抛 `SettingsError`（路由 catch 的就是它）——抛出别的就是 500。
     """
     clean: dict[str, str] = {}
     problems: list[str] = []
@@ -137,10 +153,21 @@ def validate(raw: dict[str, str]) -> dict[str, str]:
         if spec is None or spec.kind == "readonly":
             continue                    # 后端不信前端：只读与服务端不认识的，丢掉
 
-        value = (value or "").strip()
+        # JSON 的 null 不是「改成 None 这个字符串」——密钥按「留空 = 不改」跳过，
+        # 转成字符串再判断就晚了一步（`str(None)` 是 `"None"`，非空）。
+        if value is None and spec.kind == "secret":
+            continue
+
+        # POST 走 JSON，客户端送什么类型都收得到——先统统转成字符串再动手。
+        # 不转的话 `.strip()` 抛的 `AttributeError` 路由不认（只 catch
+        # `SettingsError`），当场就是 500。实测 `{'KB_LOG_LEVEL': 5}` 这么炸的。
+        value = str(value).strip()
 
         if spec.kind == "secret" and not value:
             continue                    # 留空 = 不改
+        if spec.kind == "text" and not value:
+            problems.append(f"{spec.label}不能留空")
+            continue
         if spec.kind == "choice" and value not in spec.choices:
             problems.append(
                 f"{spec.label}只能取 {'、'.join(spec.choices)}，收到的是「{value}」"

@@ -73,6 +73,20 @@ def test_write_env_ignores_commented_out_keys(tmp_path):
     assert lines[1] == "KB_LLM_MODEL=brand-new"
 
 
+def test_write_env_updates_the_last_duplicate(tmp_path):
+    """同名键出现两次时改**最后一处**。
+
+    读的是最后一处（`dotenv` 也是后写的赢），改前一处会变成
+    「保存成功但配置没变」——实测过。
+    """
+    p = tmp_path / ".env"
+    p.write_text("KB_LLM_MODEL=first\nKB_LLM_MODEL=second\n", encoding="utf-8")
+
+    write_env(p, {"KB_LLM_MODEL": "new"})
+
+    assert read_env(p)["KB_LLM_MODEL"] == "new"
+
+
 def test_read_env(tmp_path):
     p = tmp_path / ".env"
     p.write_text(SAMPLE, encoding="utf-8")
@@ -89,6 +103,34 @@ def test_secret_fields_are_marked():
 
     assert find_field("KB_LLM_API_KEY").kind == "secret"
     assert find_field("KB_LLM_MODEL").kind == "text"
+
+
+def test_manifest_snapshot():
+    """**清单是这个模块存在的理由，得钉住。**
+
+    不然把 `default="6"` 改成 `"7"`、或从「服务」组漏掉一个键，
+    测试全绿，而界面上显示的值就错了。
+    """
+    snapshot = [
+        (g.name, [(f.key, f.kind, f.default, f.choices) for f in g.fields])
+        for g in GROUPS
+    ]
+    assert snapshot == [
+        ("模型配置", [
+            ("KB_LLM_MODEL", "text", "", ()),
+            ("KB_LLM_BASE_URL", "text", "", ()),
+            ("KB_LLM_API_KEY", "secret", "", ()),
+        ]),
+        ("知识库", [
+            ("KB_VAULT_PATH", "readonly", "", ()),
+        ]),
+        ("服务", [
+            ("KB_PORT", "readonly", "", ()),
+            ("KB_LOG_LEVEL", "choice", "INFO", ("INFO", "DEBUG")),
+            ("KB_SWEEP_INTERVAL", "int", "6", ()),
+            ("KB_LOG_KEEP_DAYS", "int", "90", ()),
+        ]),
+    ]
 
 
 def test_readonly_fields_are_not_editable():
@@ -140,6 +182,34 @@ def test_validate_keeps_empty_api_key_out():
     """API Key 留空表示「不改」——不能把它当空串写回去。"""
     assert validate({"KB_LLM_API_KEY": ""}) == {}
     assert validate({"KB_LLM_API_KEY": "   "}) == {}
+
+
+@pytest.mark.parametrize("bad", [5, 6.5, ["a"], {"b": 1}, None, True])
+def test_validate_tolerates_non_string_values(bad):
+    """POST 走 JSON——客户端送什么类型都收得到。
+
+    **不能让它炸成 500**：路由只 catch `SettingsError`，`AttributeError`
+    会一路窜出去。实测 `{'KB_LOG_LEVEL': 5}` 就是这么炸的。
+    """
+    out = validate({"KB_LLM_MODEL": bad})       # 不抛
+    assert out == {"KB_LLM_MODEL": str(bad)}
+
+
+def test_validate_treats_json_null_api_key_as_untouched():
+    """JSON 的 null 不是「把 key 改成 None 这个字符串」——等于没填这一项。
+
+    不特判的话 `str(None)` 是 `"None"`，非空，就被当成新 key 写进 `.env`，
+    下一次调模型直接 401。
+    """
+    assert validate({"KB_LLM_API_KEY": None}) == {}
+
+
+def test_validate_rejects_empty_text_fields():
+    """留空会把服务写坏：模型名变成空串，之后每次调模型都失败。"""
+    with pytest.raises(SettingsError, match="模型名"):
+        validate({"KB_LLM_MODEL": ""})
+    with pytest.raises(SettingsError, match="API 地址"):
+        validate({"KB_LLM_BASE_URL": "   "})
 
 
 def test_validate_reports_every_bad_field():
