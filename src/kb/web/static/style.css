@@ -804,3 +804,159 @@ button.primary {
   transition: background var(--dur) var(--ease), border-color var(--dur) var(--ease);
 }
 button.primary:hover { background: var(--blue-soft); border-color: var(--blue-mid); }
+
+/* ==========================================================================
+   设置模态窗与侧栏两个按钮（Q94）
+   --------------------------------------------------------------------------
+   模态是从**任意页面** fetch 进来的片段（`/settings` → `_settings.html`），
+   整页骨架与遮罩层住在 `base.html`。
+   ========================================================================== */
+
+/* ---- 侧栏的分隔线与退出 ---- */
+.side-sep {
+  height: 1px;
+  background: #3d4753;
+  margin: 8px 6px;
+}
+
+.side-btn.quit { color: #ffb4b4; }
+.side-btn.quit:hover { background: #8c3b3b; color: #fff; }
+body.collapsed .side-btn.quit { color: #ffb4b4; }
+
+/* ---- 模态 ---- */
+.overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(26, 34, 51, .38);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 50;
+}
+
+.modal {
+  background: var(--surface);
+  border-radius: var(--r-lg);
+  box-shadow: var(--shadow-lift);
+  width: min(680px, 92vw);
+  max-height: 84vh;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.modal.notice { width: min(400px, 92vw); padding: 22px 24px; gap: 8px; }
+.modal.notice h2 { margin: 0 0 4px; font-size: 17px; }
+
+.settings-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 13px 18px;
+  border-bottom: 1px solid var(--line);
+  font-weight: 600;
+}
+
+.settings-head .x {
+  border: none;
+  background: none;
+  font-size: 20px;
+  line-height: 1;
+  color: var(--faint);
+  cursor: pointer;
+}
+
+.settings-body { display: flex; min-height: 0; flex: 1; }
+
+.settings-nav {
+  flex: 0 0 138px;
+  border-right: 1px solid var(--line);
+  padding: 10px 8px;
+  background: var(--paper);
+}
+
+.settings-nav .nav-item {
+  display: block;
+  width: 100%;
+  text-align: left;
+  border: none;
+  background: none;
+  padding: 8px 11px;
+  border-radius: var(--r-sm);
+  color: var(--muted);
+  font: inherit;
+  cursor: pointer;
+  margin-bottom: 2px;
+}
+
+.settings-nav .nav-item.active {
+  background: var(--blue-soft);
+  color: var(--blue);
+  font-weight: 600;
+}
+
+.settings-panes { flex: 1; padding: 16px 20px; overflow-y: auto; }
+
+.settings-panes .field { margin-bottom: 13px; }
+.settings-panes label { display: block; margin-bottom: 4px; color: var(--muted); }
+
+.settings-panes input,
+.settings-panes select {
+  width: 100%;
+  padding: 7px 10px;
+  border: 1px solid var(--line);
+  border-radius: var(--r-sm);
+  font: inherit;
+  background: var(--surface);
+}
+
+.settings-panes input[readonly] {
+  background: var(--line-soft);
+  color: var(--faint);
+}
+
+.settings-panes .hint { margin: 4px 0 0; color: var(--faint); font-size: 11.5px; }
+
+.settings-msg { margin: 12px 0 0; color: var(--blue); }
+.settings-msg.bad { color: #a33; }
+
+.settings-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 16px;
+  padding-top: 14px;
+  border-top: 1px solid var(--line);
+}
+
+/* `button.primary` 上面（巡检页那批）已经有了一份，这里**没有第二份**——
+   重复定义会静默顶掉先写的那条，改哪儿都没反应。 */
+
+/* ==========================================================================
+   上面那块的补丁（写实现时发现的，2026-09-17）
+   ========================================================================== */
+
+/* 1. **遮罩层会一直挂着**。作者样式里的 `display: flex` 稳压浏览器默认的
+   `[hidden] { display: none }`（UA 规则永远输给作者规则，与特异度无关），
+   两条 `.overlay` 一上来就把整页盖死。必须自己把 `hidden` 说回去。 */
+.overlay[hidden] { display: none; }
+
+/* 2. `.side-btn` 是给 `<a>` 写的，没写 border / background / font——`<a>`
+   本来就干净。新加的「设置」「退出」是 `<button>`，浏览器默认外观会露出来
+   （灰底、系统边框、字体不继承）。补一个重置。
+
+   `font: inherit` 会把字号重置成 body 的 14px，`.side-btn`（0,1,0）压不过
+   `button.side-btn`（0,1,1），所以这里要**再写一次 13.5px**。 */
+button.side-btn {
+  width: 100%;
+  border: 0;
+  background: none;
+  font: inherit;
+  font-size: 13.5px;
+  text-align: left;
+}
+
+/* 3. 「服务已停」那个提示窗里的 `.hint`。上面那份 `.settings-panes .hint`
+   只管模态窗里面，这个 `<p>` 在窗外的另一个遮罩层里——不加这条，
+   那句小字会按正文的 14px 画出来，不是「小字」。 */
+.modal.notice .hint { margin: 0; color: var(--faint); font-size: 11.5px; }

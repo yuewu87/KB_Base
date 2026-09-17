@@ -1,14 +1,24 @@
-{# 设置窗的内容。**只有窗口那一段**——整页骨架由 base.html 提供，
-   模态是从任意页面 fetch 进来的，跳页会把用户的位置弄丢。
+{# 设置窗的内容。**只有窗口那一段**——整页骨架与遮罩层由 base.html 提供，
+   模态是从任意页面 fetch 进来的，跳页会把用户的位置弄丢。 #}
+<div class="settings-head">
+  <span>设置</span>
+  <button type="button" class="x" onclick="closeSettings()" aria-label="关闭">×</button>
+</div>
 
-   这里是 Task 4 的**最小可用版**：够渲染出四组字段与「关于」，
-   所以接线能测。左侧分组导航、保存/退出那几段 JS、样式是 Task 5 的事。 #}
 <div class="settings-body">
-  <form class="settings-panes" id="settings-form">
+  <nav class="settings-nav">
     {% for g in groups %}
-      <section class="pane" data-group="{{ loop.index0 }}">
-        <h3 class="settings-group">{{ g.name }}</h3>
+      <button type="button" class="nav-item {{ 'active' if loop.first }}"
+              data-group="{{ loop.index0 }}"
+              onclick="showGroup(this)">{{ g.name }}</button>
+    {% endfor %}
+  </nav>
 
+  <form class="settings-panes" id="settings-form"
+        onsubmit="return saveSettings(this)">
+    {% for g in groups %}
+      <section class="pane" data-group="{{ loop.index0 }}"
+               {{ 'hidden' if not loop.first }}>
         {% for f in g.fields %}
           <div class="field">
             <label for="f-{{ f.key }}">{{ f.label }}</label>
@@ -36,5 +46,12 @@
         {% endfor %}
       </section>
     {% endfor %}
+
+    <p class="settings-msg" id="settings-msg" hidden></p>
+
+    <div class="settings-actions">
+      <button type="button" onclick="testConnection(this)">测试连接</button>
+      <button type="submit" class="primary">保存</button>
+    </div>
   </form>
 </div>
