@@ -820,7 +820,7 @@ button.primary:disabled,
 button.secondary:disabled { opacity: .6; cursor: default; }
 
 /* ==========================================================================
-   设置模态窗与侧栏两个按钮（Q94）
+   设置模态窗与侧栏两个按钮（Q98）
    --------------------------------------------------------------------------
    模态是从**任意页面** fetch 进来的片段（`/settings` → `_settings.html`），
    整页骨架与遮罩层住在 `base.html`。
@@ -838,9 +838,12 @@ button.secondary:disabled { opacity: .6; cursor: default; }
   flex-shrink: 0;
 }
 
-.side-btn.quit { color: #ffb4b4; }
-.side-btn.quit:hover { background: #8c3b3b; color: #fff; }
-body.collapsed .side-btn.quit { color: #ffb4b4; }
+/* 「退出」是**红底白字**——全站唯一一个红底，故意的。
+   它跟别的入口不是一类东西：其余是「用功能」，这个是「关机」。
+   红用得比正红暗（#8c3b3b），与全站「不要太亮」的基调不冲突。 */
+.side-btn.quit { background: #8c3b3b; color: #fff; }
+.side-btn.quit:hover { background: #a24646; color: #fff; }
+body.collapsed .side-btn.quit { background: #8c3b3b; color: #fff; }
 
 /* ---- 模态 ---- */
 .overlay {
