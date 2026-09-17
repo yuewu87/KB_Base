@@ -271,16 +271,6 @@ body.collapsed .side-action {
   to   { opacity: 1; transform: none; }
 }
 
-.day {
-  margin: 30px 0 12px;
-  font-size: 12px;
-  font-weight: 600;
-  letter-spacing: .08em;
-  text-transform: uppercase;
-  color: var(--faint);
-}
-.day:first-of-type { margin-top: 8px; }
-
 /* ==========================================================================
    检索
    ========================================================================== */
@@ -565,9 +555,13 @@ code {
   font-size: 12px;
 }
 
-/* 走过的步骤主蓝、没走到的灰着——一眼看出这一批走到哪了 */
-.chain-step.done { color: var(--blue); font-weight: 600; }
-.chain-step.todo { color: var(--faint); }
+/* 走过的步骤主蓝、没走到的灰着——一眼看出这一批走到哪了。
+   **状态色只在这里定**：原来 `.chain-step.todo` 的文件末尾还有一份
+   （`#b9c3d0`），后写的赢、这一条被静默盖掉。2026-09-17 收拢过来，
+   取值就是当时实际生效的那个（没走到 ≠ 跳过了，所以比 skipped 浅）。 */
+.chain-step.done    { color: var(--blue); font-weight: 600; }
+.chain-step.skipped { color: var(--faint); }
+.chain-step.todo    { color: #b9c3d0; }
 
 /* 那根竖线：居中挂在标记下面，把六步串成一条链 */
 .chain-line {
@@ -596,8 +590,7 @@ code {
   color: #37445a;
   word-break: break-word;
   /* **必须覆盖掉全局 `.bubble` 的 `pre-wrap`**：侧栏气泡的内容来自模板，
-     标签前后的换行与缩进会被原样画出来——每个气泡凭空多一行空白，
-     报告气泡里的 <ul>/<p> 更是整段错位。
+     标签前后的换行与缩进会被原样画出来——每个气泡凭空多一行空白。
      （主区对话气泡要靠 `pre-wrap` 保住用户输入的换行，那边不动。） */
   white-space: normal;
 }
@@ -606,11 +599,12 @@ code {
   background: #f6f8fb;
 }
 .chat-history .bubble.user { background: var(--blue-soft); border-color: #dbe7f4; }
-.chat-history .bubble.report ul { margin: 5px 0; padding-left: 17px; }
-.chat-history .bubble.report li { margin: 3px 0; }
-.chat-history .bubble.report p { margin: 6px 0 0; }
 
-/* ---- 报告下面那两个按钮 ---- */
+/* ---- 报告下面那个按钮（「我知道了」）----
+
+   **只此一处。** 文件末尾（巡检页那批）原来又写了一份同名选择器，
+   特异度相同、后写的赢——这一份的值被静默顶掉，改这里完全没反应。
+   2026-09-17 删掉重复的那份，值都留在这一条里。 */
 
 .sweep-reply {
   display: flex;
@@ -625,31 +619,13 @@ code {
   border-radius: 999px;
   background: var(--blue-tint);
   color: var(--blue);
-  font: inherit;
-  font-size: 12.5px;
+  font: inherit;                 /* 按钮不继承字体，先继承回来… */
+  font-size: 12.5px;             /* …再按这里的字号覆盖（`font` 会重置它） */
   font-weight: 600;
   cursor: pointer;
   transition: background var(--dur) var(--ease), border-color var(--dur) var(--ease);
 }
 .sweep-reply button:hover { background: var(--blue-soft); border-color: var(--blue-mid); }
-
-/* 「还需调整」点开才出现的输入框 */
-.sweep-reply input {
-  width: 100%;
-  padding: 8px 12px;
-  border: 1px solid var(--line);
-  border-radius: var(--r-sm);
-  background: var(--surface);
-  font: inherit;
-  font-size: 12.5px;
-  color: var(--ink);
-}
-.sweep-reply input::placeholder { color: var(--faint); }
-.sweep-reply input:focus {
-  outline: none;
-  border-color: var(--blue-mid);
-  box-shadow: 0 0 0 3px rgba(61, 122, 184, .12);
-}
 
 .bubble-at {
   display: block;
@@ -659,13 +635,11 @@ code {
   margin-bottom: 2px;
 }
 
-/* ---- 流程链的三个标记 ---- */
+/* ---- 流程链的三个标记（状态色见上面 `.chain-step` 那一组）---- */
 .mark { width: 14px; height: 14px; flex-shrink: 0; }
 .chain-step.done    .mark { color: var(--blue); }
 .chain-step.skipped .mark { color: var(--faint); }
 .chain-step.todo    .mark { color: var(--line); }
-.chain-step.skipped { color: var(--faint); }
-.chain-step.todo    { color: #b9c3d0; }
 
 /* 视觉隐藏但读屏可读——不要用 `hidden`，那对读屏等于没有 */
 .sr-only {
@@ -778,13 +752,16 @@ code {
    复用会话按钮的 `.chat-item`，这里只补日期那行的字形。 */
 .chat-item { font-variant-numeric: tabular-nums; }
 
-/* 主区顶上的箱子名 */
-h2.day {
+/* 主区顶上的箱子名。
+   **只此一处**：原先 `.day` 与 `h2.day` 各写一份、字号各说各话（12px vs 13px），
+   实际生效的是 `h2.day` 加 `.day:first-of-type` 的 `margin-top`。
+   2026-09-17 合并成这一条，取值就是当时实际生效的那套。 */
+.day {
+  margin: 8px 0 10px;
   font-size: 13px;
   font-weight: 600;
-  color: var(--faint);
-  margin: 0 0 10px;
   letter-spacing: 1px;
+  color: var(--faint);
 }
 
 /* ---- 巡检页 ----
@@ -803,26 +780,23 @@ h2.day {
 
 .card.sweep.read h3 { color: var(--faint); }
 
-button.primary,
-.sweep-reply button {
-  border: 1px solid var(--blue);
-  color: var(--blue);
-  background: #fff;
-  border-radius: 5px;
+/* `.card.sweep` 与 `.card:hover` 特异度相同，写在后面就把 hover 的金框变化
+   整个盖掉。**显式写 hover**：金框卡加深金、已读卡回到普通卡那套。 */
+.card.sweep:hover { border-color: #b8934f; box-shadow: var(--shadow); }
+.card.sweep.read:hover { border-color: #d3dce7; box-shadow: var(--shadow); }
+
+/* 「巡检一次」——这一页唯一的主按钮。
+   **不要并进 `.sweep-reply button`**：那个是胶囊、淡蓝底；这个是方角、
+   实边框，一眼能分出主次。 */
+button.primary {
   padding: 6px 14px;
-  font: inherit;
-  cursor: pointer;
-}
-
-button.primary:hover,
-.sweep-reply button:hover { background: var(--blue-soft); }
-
-.sweep-reply { display: flex; flex-wrap: wrap; gap: 8px; margin: 12px 0; }
-
-.sweep-reply input {
-  flex: 1 0 100%;
-  padding: 7px 9px;
-  border: 1px solid var(--line);
+  border: 1px solid var(--blue);
   border-radius: 5px;
+  background: #fff;
+  color: var(--blue);
   font: inherit;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background var(--dur) var(--ease), border-color var(--dur) var(--ease);
 }
+button.primary:hover { background: var(--blue-soft); border-color: var(--blue-mid); }
