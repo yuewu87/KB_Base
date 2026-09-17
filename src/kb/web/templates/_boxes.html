@@ -1,0 +1,13 @@
+{# 箱子列表。`days` 是倒序的日期，`day` 是选中的那个。
+
+   箱子名是**界面叫法**（`26_9_17箱子`），落盘还是 `2026-09-17.*`
+   ——整理日志是 vault 里的笔记，文件名跟标题一致是现有约定。 #}
+{% if days %}
+  {% for d in days %}
+    <a class="chat-item {{ 'active' if d == day }}" href="?d={{ d }}">
+      {{ box_label(d) }}
+    </a>
+  {% endfor %}
+{% else %}
+  <p class="muted">还没有日志。</p>
+{% endif %}

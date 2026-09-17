@@ -544,6 +544,53 @@ code {
 .chat-item.active .chat-title { color: var(--blue); font-weight: 600; }
 .chat-item .mono { display: block; }
 
+/* ---- 竖排页签（三个日志页的右侧栏）----
+
+   贴着侧栏左边缘、文字竖排、点哪个哪个高亮。切换靠 `base.html` 底部那几行
+   脚本——不引入框架，和侧栏折叠同一个路子。
+
+   `.chat-history.tabbed` 自己变成 flex 容器：页签一列、面板一列。
+   **没带 `tabbed` 的侧栏（运行日志页、ai对话页）一点没变。 */
+
+.chat-history.tabbed {
+  display: flex;
+  gap: 13px;
+  padding-left: 8px;               /* 原来的 22px 让给页签那一列 */
+}
+
+.tabs {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  flex-shrink: 0;
+  align-self: flex-start;
+}
+
+.tab {
+  writing-mode: vertical-rl;       /* 竖排——用户明确要求的 */
+  padding: 11px 5px;
+  border: 1px solid transparent;
+  border-radius: var(--r-sm);
+  background: none;
+  font: inherit;
+  font-size: 12px;
+  letter-spacing: .06em;
+  color: var(--faint);
+  cursor: pointer;
+  transition: background var(--dur) var(--ease), color var(--dur) var(--ease),
+              border-color var(--dur) var(--ease);
+}
+.tab:hover { background: var(--line-soft); color: var(--ink); }
+.tab.active {
+  background: var(--blue-soft);
+  border-color: #dbe7f4;
+  color: var(--blue);
+  font-weight: 600;
+}
+
+/* 面板那一列撑满剩下的宽度——`min-width: 0` 让长内容不把侧栏顶宽 */
+.pane { flex: 1; min-width: 0; }
+
 /* ---- 竖排流程链（工作日志页右侧）---- */
 
 /* 竖排是用户明确要求的：横排六步在窄侧栏里挤不下 */
@@ -654,6 +701,40 @@ code {
   border-color: var(--blue-mid);
   box-shadow: 0 0 0 3px rgba(61, 122, 184, .12);
 }
+
+/* ---- 巡检页 ----
+
+   「金框」的报告卡片。**读过了也还显示**（只是不再高亮）——这一页就是
+   它的家，跟侧栏时代那条「没读才冒出来」的逻辑不一样。 */
+
+.card.sweep {
+  background: #fdfaf2;
+  border-color: #ecdcb8;
+  padding: 18px 20px;
+}
+.card.sweep h3 { color: #7a5a15; }
+.card.sweep.read { background: var(--surface); border-color: var(--line); }
+.card.sweep.read h3 { color: var(--faint); }
+.card.sweep .mono { display: block; margin: 10px 0 0; }
+
+/* 巡检页上那两个按钮比侧栏里的大一号——这里没有别的东西跟它挤 */
+.sweep-page-actions, .card.sweep + .sweep-reply { margin-bottom: 22px; }
+.sweep-reply input { max-width: 420px; }
+
+/* 「巡检一次」——页面上唯一的主按钮 */
+button.primary {
+  padding: 10px 20px;
+  border: 1px solid #cfdeee;
+  border-radius: 999px;
+  background: var(--blue-tint);
+  color: var(--blue);
+  font: inherit;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background var(--dur) var(--ease), border-color var(--dur) var(--ease);
+}
+button.primary:hover { background: var(--blue-soft); border-color: var(--blue-mid); }
 
 .bubble-at {
   display: block;
