@@ -234,15 +234,34 @@ import json
 
 import pytest
 
-from kb.core.sweep import SweepError, SweepPlan, collect_tags, list_dir_tree, parse_plan
+from kb.core.sweep import SweepError, collect_tags, list_dir_tree, parse_plan
 from kb.core.vault import write_note
-from kb.llm.base import FakeLLM
+
+# 注意：`SweepPlan` 和 `FakeLLM` 这两轮用不上——Task 3 的测试在函数里
+# 局部 import `SweepPlan`，Task 4 才用 `FakeLLM`。写在这里会 F401。
 
 
 def _vault(tmp_path):
-    write_note(tmp_path / "计算机" / "git" / "a.md", {"类型": "概念", "主题": ["计算机", "git"]}, "x")
-    write_note(tmp_path / "计算机" / "版本控制" / "b.md", {"类型": "概念", "主题": ["计算机", "版本控制"]}, "y")
-    write_note(tmp_path / "艺术" / "透视" / "c.md", {"类型": "概念", "主题": ["艺术", "透视"]}, "z")
+    """一个能看出「有近义词该合并」的小库。
+
+    **每行都拆开写**——中文按东亚宽度算两列，塞一行就过不了
+    `line-length = 100`（看着只有 90 来个字符，实际超）。
+    """
+    write_note(
+        tmp_path / "计算机" / "git" / "a.md",
+        {"类型": "概念", "主题": ["计算机", "git"]},
+        "x",
+    )
+    write_note(
+        tmp_path / "计算机" / "版本控制" / "b.md",
+        {"类型": "概念", "主题": ["计算机", "版本控制"]},
+        "y",
+    )
+    write_note(
+        tmp_path / "艺术" / "透视" / "c.md",
+        {"类型": "概念", "主题": ["艺术", "透视"]},
+        "z",
+    )
     return tmp_path
 
 
@@ -298,14 +317,32 @@ def test_parser_rejects_non_list_merges():
 
 
 def test_plan_tells_llm_only_about_tags_and_dirs(tmp_path):
-    """提示词里只有标签和目录——**不喂正文**（用户定的边界）。"""
+    """提示词里只有标签和目录——**不喂正文**（用户定的边界）。
+
+    **正文里要放一个独有的标记再断言它不在提示词里。**
+    早先这版断言的是 `"x" not in prompt`，而笔记正文正好是 `"x"`——
+    它碰巧过了，但过的原因是**提示词里根本没出现过字母 x**，不是因为
+    正文被挡住了。将来提示词里出现 `text`、`example` 这类词，这条就会
+    因为无关原因挂掉，而且挂的时候你会以为是边界破了。
+    """
     from kb.core.sweep import build_prompt
 
-    v = _vault(tmp_path)
+    v = tmp_path
+    write_note(
+        v / "计算机" / "git" / "a.md",
+        {"类型": "概念", "主题": ["计算机", "git"]},
+        "# 标题\n\n正文里有个独有标记 ZQXMARK。\n",
+    )
+    write_note(
+        v / "计算机" / "版本控制" / "b.md",
+        {"类型": "概念", "主题": ["计算机", "版本控制"]},
+        "y",
+    )
+
     prompt = build_prompt(v)
     assert "git" in prompt
     assert "计算机/版本控制" in prompt
-    assert "x" not in prompt          # 笔记正文不该出现
+    assert "ZQXMARK" not in prompt      # 正文的独有标记没进提示词
 ```
 
 - [ ] **Step 2: 跑测试确认失败**
@@ -572,6 +609,43 @@ def test_apply_returns_files_touched(tmp_path):
     assert any(p.name == "a.md" for p in touched)
 
 
+def test_apply_reports_both_sides_of_a_move(tmp_path):
+    """目录移动要**旧路径和新路径都报**。
+
+    `commit_changes` 拿这份清单去 `git add`：新路径让 git 看见新增，
+    旧路径（已从磁盘消失但 git 跟踪过）让 git 看见删除。只报新路径的话，
+    **移动过的文件会漏提交**——而且 commit 照样成功，你看不出来。
+    """
+    from kb.core.sweep import SweepPlan, apply_plan
+
+    v = _vault(tmp_path)
+    touched = apply_plan(SweepPlan(dir_merges=[("计算机/git", "计算机/版本控制")]), v)
+
+    rels = {p.relative_to(v).as_posix() for p in touched}
+    assert "计算机/git/a.md" in rels        # 旧路径（让 git 看见删除）
+    assert "计算机/版本控制/a.md" in rels    # 新路径（让 git 看见新增）
+
+
+def test_apply_reports_a_moved_file_even_if_its_tags_did_not_change(tmp_path):
+    """光移动目录、标签没变的文件也要进清单。
+
+    早先的写法只在 `_retag` 返回 True 时才 append，于是这类文件
+    **不会被 add**——目录挪了，文件却留在 git 的旧位置上。
+    """
+    from kb.core.sweep import SweepPlan, apply_plan
+
+    v = tmp_path
+    # 主题里本来就没有目录名那一级，所以移动之后 `_retag` 不会改它
+    write_note(v / "计算机" / "git" / "a.md", {"类型": "概念", "主题": ["计算机"]}, "x")
+    write_note(v / "计算机" / "版本控制" / "b.md", {"类型": "概念", "主题": ["计算机"]}, "y")
+
+    touched = apply_plan(SweepPlan(dir_merges=[("计算机/git", "计算机/版本控制")]), v)
+
+    rels = {p.relative_to(v).as_posix() for p in touched}
+    assert "计算机/版本控制/a.md" in rels
+    assert "计算机/git/a.md" in rels
+
+
 def test_apply_empty_plan_is_noop(tmp_path):
     from kb.core.sweep import SweepPlan, apply_plan
 
@@ -636,34 +710,40 @@ def _retag(meta: dict, merges: dict[str, str]) -> bool:
 
 
 def apply_plan(plan: SweepPlan, vault_root: Path) -> list[Path]:
-    """按计划落盘。**不调 LLM**。返回动过的文件（供 commit 用）。"""
+    """按计划落盘。**不调 LLM**。返回动过的文件（供 commit 用）。
+
+    **返回的清单要同时收旧路径和新路径。**
+    `commit_changes` 拿它去 `git add`——新路径让 git 看见新增，
+    旧路径（已从磁盘消失但 git 跟踪过）让 git 看见删除，两边都 staged
+    才会被识别成一次 rename。**只收新路径的话，移动过的文件会漏提交。**
+    """
     from kb.core.vault import write_note
 
     tag_merges = dict(plan.tag_merges)
     touched: list[Path] = []
 
     # ① 目录合并：先移文件（连带它的子目录），再改每篇的标签
-    dir_merges = dict(plan.dir_merges)
     for src, dst in plan.dir_merges:
         src_dir = vault_root / src
         dst_dir = vault_root / dst
         dst_dir.mkdir(parents=True, exist_ok=True)
-        src_name = src.rsplit("/", 1)[-1]
         # 目录名本身也是一级标签——并过去
-        tag_merges.setdefault(src_name, dst.rsplit("/", 1)[-1])
+        tag_merges.setdefault(src.rsplit("/", 1)[-1], dst.rsplit("/", 1)[-1])
         for path in sorted(src_dir.rglob("*")):
-            if path.is_file():
-                target = dst_dir / path.relative_to(src_dir)
-                target.parent.mkdir(parents=True, exist_ok=True)
-                path.replace(target)
+            if not path.is_file():
+                continue
+            target = dst_dir / path.relative_to(src_dir)
+            target.parent.mkdir(parents=True, exist_ok=True)
+            path.replace(target)
+            touched.append(path)       # 旧路径——让 git 看见「删了」
+            touched.append(target)     # 新路径——让 git 看见「新增」
         for leftover in sorted(src_dir.rglob("*"), reverse=True):
             if leftover.is_dir():
                 leftover.rmdir()
         src_dir.rmdir()
-        del dir_merges[src]           # 已处理
 
     # ② 标签合并：全库过一遍 frontmatter。
-    #    注意目录合并之后路径变了，所以这一步放在移动**之后**。
+    #    **放在移动之后**——这时路径已经是新的了。
     if tag_merges:
         for path in sorted(vault_root.rglob("*.md")):
             if any(part.startswith("_") for part in path.relative_to(vault_root).parts):
@@ -671,7 +751,8 @@ def apply_plan(plan: SweepPlan, vault_root: Path) -> list[Path]:
             meta, body = read_note(path)
             if _retag(meta, tag_merges):
                 write_note(path, meta, body)
-                touched.append(path)
+                if path not in touched:        # 移过来的那些已经在里面了
+                    touched.append(path)
 
     return touched
 ```
