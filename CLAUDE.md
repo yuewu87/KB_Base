@@ -4,9 +4,12 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## 项目状态
 
-**知识库项目，技术方案尚未确定。** 当前仓库只有约定与脚手架，没有业务代码。
-在方案定稿前，不要假设技术栈（向量库、LLM SDK、Web 框架等均未选型）。
-选型确定后，需要回到本文件补充「架构」和「常用命令」两节。
+**已实现并跑通，测试全绿。** 骨架：投递（CLI + Web）→ 整理（规划/校验/审核/落盘）
+→ 落 vault + 一个 git commit → 报告；`--revise` 改已有笔记；每周巡检收拾标签与目录；
+Web UI 六个入口（记一条 / ai对话 / 整理日志 / 工作日志 / 运行日志 / 巡检）。
+
+- **细节以 `docs/` 为准**，别在本文件里复述设计——`README.md` 也只是入口
+- **还缺什么、明确不做什么**，见 `docs/01_架构.md` 第十四节
 
 ## 语言约定
 
@@ -59,9 +62,26 @@ Windows 下 `text=True` 按本地编码（GBK）解码，而 git 的输出（中
 # 跑单个测试文件 / 单个测试
 "D:/Conda_base/envs/kn_base/python.exe" -m pytest tests/test_config.py -v
 "D:/Conda_base/envs/kn_base/python.exe" -m pytest tests/test_config.py::test_reads_required_values -v
+
+# 风格检查
+"D:/Conda_base/envs/kn_base/python.exe" -m ruff check src tests scripts
+
+# 真跑一遍（服务自己会拉起来）
+PYTHONIOENCODING=utf-8 ./kb.bat push --content "..." --source 会话
+PYTHONIOENCODING=utf-8 ./kb.bat organize
+PYTHONIOENCODING=utf-8 ./kb.bat sweep
 ```
 
 测试配置在 `pyproject.toml`（`pythonpath = ["src"]`），因此**无需安装包**即可 `from kb.config import ...`。
+
+> **`pythonpath` 只对 pytest 生效。** 用 `python -c` 跑脚本时要自己加 `PYTHONPATH=src`。
+
+> ⚠️ **改了 `src/` 下的代码，一定先 `./kb.bat stop`。** 服务是常驻进程，不停的话它仍执行
+> 旧逻辑——**而且看起来一切正常**，能白排查半天。这个坑反复踩。
+
+> ⚠️ **`PYTHONIOENCODING=utf-8` 不能省。** Windows 上 `kb.bat` 按 GBK 输出，从管道读回来
+> 全是乱码（`���գ�id=...`）。**没写进 `kb.bat`**，是因为那样用户在自己的 cmd 窗口里会反过来
+> 看到乱码——管道要 UTF-8、控制台要 GBK，只能待在调用侧。
 
 ## 网络与代理
 
@@ -84,7 +104,7 @@ git config --global --unset http.proxy
 git config --global --unset https.proxy
 ```
 
-代理地址在 CLAUDE.md 中**不写死到代码或脚本**里；运行时需要的场景通过环境变量传入：
+代理地址**不要写死到代码或脚本里**；运行时需要的场景通过环境变量传入：
 
 ```bash
 export http_proxy=http://127.0.0.1:5408
@@ -102,6 +122,11 @@ export https_proxy=http://127.0.0.1:5408
 
 - 新增功能、改动行为前先走 `superpowers:brainstorming` 明确需求，再进入实现。
 - 涉及 3 个以上步骤的任务，先写计划再动手。
+- **机械约束归代码，判断题归模型。** 写一条规则之前先问：**这条能不能落成一行 `if`？**
+  能，就别写进提示词或文档里。同一个坑踩了三次才总结出来（见 `docs/04_踩坑与经验.md` 第 10 条），
+  已经落地的两条是「兜底分类名」和「目录最多 4 层」。
+- **设计状态的唯一真源是 `docs/03_问题记录.md`。** 结论变了改那里，别另开文档；
+  **作废的条目直接删掉**，不留存根。
 
 ## 相关文档
 
@@ -113,11 +138,25 @@ export https_proxy=http://127.0.0.1:5408
 | `docs/02_需求.md` | **要什么** |
 | `docs/03_问题记录.md` | **全部设计决策与理由**——设计状态的唯一真源，只写「为什么」 |
 | `docs/04_踩坑与经验.md` | **踩过什么、学到了什么**——动手前扫一眼，多半能少踩一次 |
+| `docs/接入指南/` | **会话层 AI 怎么用这个库**——装成 skill 用的，不是给人读的说明 |
 | `docs/superpowers/plans/` | 实施计划 |
 | `README.md` | **入口**——背景 / 架构 / 使用方式。适合先读；细节以 `01_架构.md` 为准 |
 
 **过程规矩：没有讨论出结果的问题，不先动手实现。** 新问题记入 `docs/03_问题记录.md`，格式为「问题 → 结论」，未决的标 🔴。
 
-## 待补充（方案定稿后回填）
+## 两处容易忘的
 
-- [ ] 技术选型：文档解析、切分策略、embedding 模型、向量库、检索与生成链路（阶段二 RAG）
+**① skill 有两份，会漂移。**
+
+`docs/接入指南/kn-record/SKILL.md` 是**源**，装在 `~/.claude/skills/kn-record/SKILL.md`。
+改了源，记得拷过去：
+
+```bash
+cp "E:/Study_Projects/KN_Base/docs/接入指南/kn-record/SKILL.md" \
+   "C:/Users/wuyeu/.claude/skills/kn-record/SKILL.md"
+```
+
+**② vault 是另一个仓库，且刻意没有远端。**
+
+知识数据在 `E:\KB_Library`，独立 git 管理。**不要给它配 GitHub 远端**——2026-09-15 误推过一次，
+已撤回。推之前先确认两件事：**推到哪个仓库**、**谁能看见**。
