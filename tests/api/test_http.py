@@ -243,11 +243,14 @@ def test_chat_404_on_unknown_session(client, vault):
     assert resp.status_code == 404
 
 
-def test_chat_does_not_persist_tool_messages(vault):
-    """工具结果是过程，不是对话——落盘只留 user / assistant。
+def test_chat_persists_only_user_and_final_reply(vault):
+    """落盘只留 [这一句用户消息] + [最终回复]——中间的全丢。
 
-    整条列表（含 `tool`）原样落盘的话，下次对话会把它当历史回喂给模型，
-    历史越堆越长，里面全是模型自己拿到的数据。计划 Step 5 没覆盖这条。
+    两类都丢：
+    - `tool` 是过程不是对话，存下去下次会当历史回喂，越堆越长
+    - **中间几轮的 `say` 也丢**：模型每个动作轮都会说一句话，于是
+      「记一下 X」会落成「我这就去记」+「记好了」两条回复——一问两答。
+      （这条是端到端跑真实 LLM 时看出来的，计划里没有。）
     """
     from kb.core.chat_store import load_chat
 
@@ -262,5 +265,7 @@ def test_chat_does_not_persist_tool_messages(vault):
     chat = load_chat(vault, data["chat_id"])
     # 先确认动作真的跑过（否则下面那条断言会因为「没产生工具结果」而恒真）
     assert len(list_drafts(vault)) == 1
-    assert [m["role"] for m in chat["messages"]] == ["user", "assistant", "assistant"]
+    assert [m["role"] for m in chat["messages"]] == ["user", "assistant"]
+    assert chat["messages"][-1]["content"] == "记好了"
     assert all("工具结果" not in m["content"] for m in chat["messages"])
+    assert all("我记一下" not in m["content"] for m in chat["messages"])

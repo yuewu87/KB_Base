@@ -174,10 +174,23 @@ def handle(
         history, chat_id = [], new_chat_id()
 
     messages, _ = run_turn(vault_root, history, message, llm, organize_fn=organize_fn)
-    # 落盘只留 user / assistant：`tool` 是过程不是对话，
-    # 原样存下去下次会当历史回喂给模型，越堆越长。
-    save_chat(data_dir, chat_id, [m for m in messages if m["role"] != "tool"])
     reply = next(
         (m["content"] for m in reversed(messages) if m["role"] == "assistant"), ""
+    )
+
+    # 落盘只留 [这一句用户消息] + [最终回复]，中间的全丢：
+    #
+    # - `tool` 是过程不是对话，存下去下次会当历史回喂给模型，越堆越长
+    # - **中间几轮的 `say` 也要丢**：模型每个动作轮都会说一句话，
+    #   于是「记一下 X」会落成「我这就去记」+「记好了，编号 …」两条回复
+    #   ——一问两答，对话流看着很吵。用户要的是结论。
+    save_chat(
+        data_dir,
+        chat_id,
+        [
+            *history,
+            {"role": "user", "content": message},
+            {"role": "assistant", "content": reply},
+        ],
     )
     return chat_id, reply
