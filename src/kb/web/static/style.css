@@ -160,6 +160,36 @@ body.collapsed .toggle { justify-content: center; padding-left: 0; padding-right
 }
 .side-btn.active .icon { color: var(--blue); }
 
+/* 「记一条」是**动作**，不是页面——用主蓝描边和数据区分开，
+   免得看起来像第五个导航项 */
+.side-action {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-height: 38px;
+  padding: 8px 10px;
+  margin: 2px 0 10px;
+  border: 1px solid #cfdeee;
+  border-radius: var(--r-sm);
+  background: var(--blue-tint);
+  color: var(--blue);
+  font-size: 13.5px;
+  font-weight: 600;
+  transition: background var(--dur) var(--ease), border-color var(--dur) var(--ease);
+}
+.side-action:hover {
+  background: var(--blue-soft);
+  border-color: var(--blue-mid);
+  text-decoration: none;
+}
+.side-action .icon { color: var(--blue); }
+
+body.collapsed .side-action {
+  justify-content: center;
+  padding-left: 0;
+  padding-right: 0;
+}
+
 .icon {
   width: 18px; height: 18px;
   flex-shrink: 0;
@@ -293,6 +323,84 @@ body.collapsed .toggle { justify-content: center; padding-left: 0; padding-right
 .searchbar button:active { transform: translateY(1px); }
 
 /* ==========================================================================
+   随手记（/new）：选脚手架 + 写正文
+   ========================================================================== */
+
+.chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 7px;
+  margin-bottom: 16px;
+}
+
+.chip {
+  padding: 5px 13px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: var(--surface);
+  color: var(--muted);
+  font-size: 12.5px;
+  line-height: 1.6;
+  transition: border-color var(--dur) var(--ease), color var(--dur) var(--ease),
+              background var(--dur) var(--ease);
+}
+.chip:hover {
+  border-color: var(--blue-mid);
+  color: var(--blue);
+  text-decoration: none;
+}
+.chip.active {
+  background: var(--blue);
+  border-color: var(--blue);
+  color: #fff;
+}
+
+.compose textarea {
+  display: block;
+  width: 100%;
+  padding: 13px 15px;
+  border: 1px solid var(--line);
+  border-radius: var(--r-md);
+  background: var(--surface);
+  font: inherit;
+  font-size: 14px;
+  line-height: 1.75;
+  color: var(--ink);
+  resize: vertical;
+  transition: border-color var(--dur) var(--ease), box-shadow var(--dur) var(--ease);
+}
+.compose textarea::placeholder { color: var(--faint); }
+.compose textarea:focus {
+  outline: none;
+  border-color: var(--blue-mid);
+  box-shadow: 0 0 0 3px rgba(61, 122, 184, .12);
+}
+
+.compose-foot {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+  margin-top: 12px;
+}
+
+.compose-foot button {
+  padding: 0 24px;
+  min-height: 40px;
+  border: 0;
+  border-radius: var(--r-md);
+  background: var(--blue);
+  color: #fff;
+  font: inherit;
+  font-size: 14px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: background var(--dur) var(--ease), transform var(--dur) var(--ease);
+}
+.compose-foot button:hover { background: var(--blue-mid); }
+.compose-foot button:active { transform: translateY(1px); }
+
+/* ==========================================================================
    标签
    ========================================================================== */
 
@@ -371,6 +479,66 @@ code {
   text-transform: uppercase;
   color: var(--faint);
 }
+
+/* ---- 消息流 ---- */
+
+.thread {
+  display: flex;
+  flex-direction: column;
+  gap: 9px;
+  min-height: 140px;
+  margin-bottom: 22px;
+}
+
+.bubble {
+  max-width: 78%;
+  padding: 10px 14px;
+  border: 1px solid var(--line);
+  border-radius: var(--r-md);
+  background: var(--surface);
+  font-size: 13.5px;
+  line-height: 1.7;
+  white-space: pre-wrap;        /* 对话里的换行是内容，不能压成一行 */
+  word-break: break-word;
+}
+
+/* 用户靠右淡蓝、助手靠左白——谁说的要一眼分得清 */
+.bubble.user {
+  align-self: flex-end;
+  background: var(--blue-soft);
+  border-color: #dbe7f4;
+}
+
+.bubble.assistant { align-self: flex-start; }
+
+/* ---- 会话历史项 ---- */
+
+.chat-item {
+  display: block;
+  padding: 8px 10px;
+  margin-bottom: 3px;
+  border-left: 2px solid transparent;
+  border-radius: var(--r-sm);
+  color: var(--ink);
+  transition: background var(--dur) var(--ease), border-color var(--dur) var(--ease);
+}
+.chat-item:hover { background: var(--line-soft); text-decoration: none; }
+
+.chat-item.active {
+  background: var(--blue-soft);
+  border-left-color: var(--blue);
+}
+
+.chat-title {
+  display: block;
+  font-size: 12.5px;
+  line-height: 1.45;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.chat-item.active .chat-title { color: var(--blue); font-weight: 600; }
+.chat-item .mono { display: block; }
 
 /* 视觉隐藏但读屏可读——不要用 `hidden`，那对读屏等于没有 */
 .sr-only {

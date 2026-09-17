@@ -1,42 +1,41 @@
 {% extends "base.html" %}
 {% block title %}ai对话 · KN_Base{% endblock %}
 {% block content %}
-<div class="page-head">
-  <h1>ai对话</h1>
-  <p>说一个关键词，或描述一段话——检索不挑文件夹，靠标签和全文匹配。</p>
-</div>
-
 <div class="chat-layout">
   <section>
-    <form class="searchbar" method="get" action="/">
-      <label for="q" class="sr-only">检索关键词</label>
-      <input id="q" type="text" name="q" value="{{ q }}"
-             placeholder="例如：编码、窗口置前、并发写入" autofocus autocomplete="off">
-      <button type="submit">查找</button>
-    </form>
+    <div class="page-head">
+      <h1>ai对话</h1>
+      <p>说一句就行——记东西、查东西、改东西都可以。</p>
+    </div>
 
-    {% if q and not hits %}
-      <div class="empty">没找到跟「{{ q }}」相关的内容。</div>
-    {% endif %}
-
-    {% for hit in hits %}
-      <article class="card journal">
-        <h3>{{ hit.title }}</h3>
-        <p class="mono">{{ hit.path }}</p>
-        {% if hit.tags %}
-          <p class="tags">{% for t in hit.tags %}<span class="tag">{{ t }}</span>{% endfor %}</p>
+    <div class="thread">
+      {% for m in (current.messages if current else []) %}
+        {% if m.role != "tool" %}
+          <div class="bubble {{ m.role }}">{{ m.content }}</div>
         {% endif %}
-      </article>
-    {% endfor %}
+      {% endfor %}
+      {% if not current %}
+        <div class="empty">新会话。试试「记一下……」「……是怎么说的」。</div>
+      {% endif %}
+    </div>
 
-    {% if not q %}
-      <div class="empty">输入关键词开始查找。现在是「关键词 → 命中列表」，还不是对话式。</div>
-    {% endif %}
+    <form class="searchbar" method="post" action="/">
+      <input type="hidden" name="cid" value="{{ cid }}">
+      <label for="message" class="sr-only">要说的话</label>
+      <input id="message" name="message" placeholder="说点什么……" autofocus autocomplete="off">
+      <button type="submit">发送</button>
+    </form>
   </section>
 
   <aside class="chat-history">
     <h2>会话历史</h2>
-    <p class="muted">对话功能还没做，这里是占位。</p>
+    {% if not chats %}<p class="muted">还没有会话。</p>{% endif %}
+    {% for c in chats %}
+      <a class="chat-item {{ 'active' if c.id == cid }}" href="/?cid={{ c.id }}">
+        <span class="chat-title">{{ c.title }}</span>
+        <span class="mono">{{ c.updated }}</span>
+      </a>
+    {% endfor %}
   </aside>
 </div>
 {% endblock %}

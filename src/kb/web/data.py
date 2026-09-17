@@ -12,7 +12,11 @@ from __future__ import annotations
 
 from pathlib import Path
 
+from kb.config import PROJECT_ROOT
 from kb.core.vault import INDEX, JOURNAL_DIR
+
+# 投递脚手架：**给人读**，帮他把话说清（`templates/笔记/` 那份是给机器读的 schema）
+PUSH_TEMPLATES_DIR = PROJECT_ROOT / "templates" / "投递"
 
 # 每个整理日志小节：`## <标题>` 后面跟若干 `- <条目>`
 Entry = str
@@ -58,6 +62,20 @@ def read_journals(vault_root: Path) -> list[Journal]:
         if sections:
             out.append((path.stem, sections))
     return out
+
+
+def load_push_templates() -> dict[str, str]:
+    """随手记的脚手架，返回 `{名字: 正文}`。
+
+    **每次现读不缓存**——模板是用户可以随手改、随手加的（Q26），
+    缓存会让改动不生效。目录不存在时返回空字典：模板没了不该让页面挂掉。
+    """
+    if not PUSH_TEMPLATES_DIR.is_dir():
+        return {}
+    return {
+        path.stem: path.read_text(encoding="utf-8")
+        for path in sorted(PUSH_TEMPLATES_DIR.glob("*.md"))
+    }
 
 
 def tail_log(path: Path, lines: int) -> str:

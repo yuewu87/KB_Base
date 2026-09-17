@@ -1,0 +1,25 @@
+{% extends "base.html" %}
+{% block title %}记一条 · KN_Base{% endblock %}
+{% block content %}
+<div class="page-head">
+  <h1>记一条</h1>
+  <p>选个脚手架帮自己把话说清。放哪、叫什么、算什么类型——整理的时候再定。</p>
+</div>
+
+<div class="chips">
+  {% for name in templates %}
+    <a class="chip {{ 'active' if name == chosen }}" href="/new?t={{ name }}">{{ name }}</a>
+  {% endfor %}
+  <a class="chip {{ 'active' if not chosen }}" href="/new">空白</a>
+</div>
+
+<form class="compose" method="post" action="/new">
+  <label for="content" class="sr-only">正文</label>
+  <textarea id="content" name="content" rows="12"
+            placeholder="想到什么写什么……">{{ body }}</textarea>
+  <div class="compose-foot">
+    <span class="muted">只填正文就行，不用先想放在哪。</span>
+    <button type="submit">投递</button>
+  </div>
+</form>
+{% endblock %}

@@ -22,6 +22,7 @@ import re
 from pathlib import Path
 
 from kb.core.actions import describe_actions, run_action
+from kb.core.chat_store import load_chat, new_chat_id, save_chat
 from kb.llm.base import LLM, LLMError
 
 MAX_ROUNDS = 4
@@ -147,3 +148,36 @@ def run_turn(
         {"role": "assistant", "content": "我转的圈数太多了，先停下。你再说一句我接着办。"}
     )
     return messages, MAX_ROUNDS
+
+
+def handle(
+    data_dir: Path,
+    vault_root: Path,
+    chat_id: str | None,
+    message: str,
+    llm: LLM,
+    *,
+    organize_fn=None,
+) -> tuple[str, str]:
+    """一轮对话的完整处理：读历史 → 跑 → 落盘。返回 `(会话 id, 回复)`。
+
+    **Web 层与 HTTP 端点共用这一份**——否则对话会有两份实现，
+    「落盘只留 user / assistant」这条规则也会跟着分叉。
+
+    ⚠️ 第一个参数是 `data_dir`（= `config.DATA_DIR`），**不是工程根**——
+    传错会话就落进仓库了，见 `chat_store` 的模块说明。
+    """
+    if chat_id:
+        chat = load_chat(data_dir, chat_id)
+        history = chat["messages"] if chat else []
+    else:
+        history, chat_id = [], new_chat_id()
+
+    messages, _ = run_turn(vault_root, history, message, llm, organize_fn=organize_fn)
+    # 落盘只留 user / assistant：`tool` 是过程不是对话，
+    # 原样存下去下次会当历史回喂给模型，越堆越长。
+    save_chat(data_dir, chat_id, [m for m in messages if m["role"] != "tool"])
+    reply = next(
+        (m["content"] for m in reversed(messages) if m["role"] == "assistant"), ""
+    )
+    return chat_id, reply

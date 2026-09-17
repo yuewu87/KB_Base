@@ -22,8 +22,8 @@ from pydantic import BaseModel
 from kb.api import runtime
 from kb.config import DATA_DIR, Config, load_config
 from kb.core import organize
-from kb.core.chat import run_turn
-from kb.core.chat_store import list_chats, load_chat, new_chat_id, save_chat
+from kb.core.chat import handle
+from kb.core.chat_store import list_chats, load_chat
 from kb.core.models import Draft, OrganizeResult
 from kb.core.search import search_notes
 from kb.core.vault import (
@@ -76,7 +76,7 @@ def _result_payload(result: OrganizeResult) -> dict:
     }
 
 
-def _push_draft(
+def push_draft(
     cfg: Config,
     content: str,
     *,
@@ -85,6 +85,9 @@ def _push_draft(
     revise_target: str | None = None,
 ) -> tuple[str, str]:
     """落一条草稿，返回 `(给人看的文本, 草稿 id)`。
+
+    **公开**（不带下划线）：`web/router.py` 也调它——投递只能有一份实现。
+    HTTP 端点、对话层、Web 表单三条路都走这里。
 
     `/push` 端点与对话层共用这一份——否则「投递」会有两份实现。
 
@@ -136,13 +139,33 @@ def create_app(
             cache["llm"] = build_llm(cfg)
         return cache["llm"]
 
+    def _chat_organize_fn(kind: str, content: str, target: str | None) -> str:
+        """对话层能调的动作——**只有服务已有的能力**，不新增判断。
+
+        Web 对话页也用它（`build_router` 收的就是这个闭包），
+        两个入口的动作清单才是同一份。
+        """
+        if kind == "push":
+            text, _ = push_draft(cfg, content, source="Web")
+            return text
+        if kind == "revise":
+            text, _ = push_draft(cfg, content, source="Web", revise_target=target)
+            return text
+        if kind == "organize":
+            results = organize.organize_selected(
+                cfg.vault_path, list_drafts(cfg.vault_path), get_llm()
+            )
+            ok = sum(1 for r in results if not r.error)
+            return f"整理了 {len(results)} 条，成功 {ok} 条。"
+        return f"未知动作：{kind}"
+
     app = FastAPI(title="KN_Base 知识库服务")
 
     from fastapi.staticfiles import StaticFiles
 
     from kb.web.router import STATIC_DIR, build_router
 
-    app.include_router(build_router(cfg))
+    app.include_router(build_router(cfg, data_dir, _chat_organize_fn))
     app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
 
     @app.get("/health")
@@ -156,7 +179,7 @@ def create_app(
         if not body:
             raise HTTPException(status_code=400, detail="正文不能为空")
 
-        _, draft_id = _push_draft(
+        _, draft_id = push_draft(
             cfg,
             body,
             project=req.project,
@@ -228,42 +251,18 @@ def create_app(
             "results": [_result_payload(r) for r in results],
         }
 
-    def _chat_organize_fn(kind: str, content: str, target: str | None) -> str:
-        """对话层能调的动作——**只有服务已有的能力**，不新增判断。"""
-        if kind == "push":
-            text, _ = _push_draft(cfg, content, source="Web")
-            return text
-        if kind == "revise":
-            text, _ = _push_draft(cfg, content, source="Web", revise_target=target)
-            return text
-        if kind == "organize":
-            results = organize.organize_selected(
-                cfg.vault_path, list_drafts(cfg.vault_path), get_llm()
-            )
-            ok = sum(1 for r in results if not r.error)
-            return f"整理了 {len(results)} 条，成功 {ok} 条。"
-        return f"未知动作：{kind}"
-
     @app.post("/chat")
     def chat_endpoint(req: ChatRequest) -> dict:
         """一轮对话。会话历史落服务侧，不入库（Q83）。"""
-        if req.chat_id:
-            chat = load_chat(data_dir, req.chat_id)
-            if chat is None:
-                raise HTTPException(status_code=404, detail=f"找不到会话 {req.chat_id}")
-            history = chat["messages"]
-            chat_id = req.chat_id
-        else:
-            history, chat_id = [], new_chat_id()
-
-        messages, _ = run_turn(
-            cfg.vault_path, history, req.message, get_llm(), organize_fn=_chat_organize_fn
-        )
-        # 落盘只留 user / assistant：`tool` 是过程不是对话，
-        # 原样存下去下次会当历史回喂给模型，越堆越长。
-        save_chat(data_dir, chat_id, [m for m in messages if m["role"] != "tool"])
-        reply = next(
-            (m["content"] for m in reversed(messages) if m["role"] == "assistant"), ""
+        if req.chat_id and load_chat(data_dir, req.chat_id) is None:
+            raise HTTPException(status_code=404, detail=f"找不到会话 {req.chat_id}")
+        chat_id, reply = handle(
+            data_dir,
+            cfg.vault_path,
+            req.chat_id,
+            req.message,
+            get_llm(),
+            organize_fn=_chat_organize_fn,
         )
         return {"chat_id": chat_id, "reply": reply}
 
