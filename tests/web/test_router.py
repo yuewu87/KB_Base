@@ -523,9 +523,21 @@ def test_settings_has_the_about_group(client):
     assert "服务状态" in body
 
 
-def test_settings_never_echoes_the_api_key(client, monkeypatch):
-    """**API Key 不回显原文。** 只给掩码。"""
-    monkeypatch.setenv("KB_LLM_API_KEY", "sk-super-secret-value")
+def test_settings_never_echoes_the_api_key(client, tmp_path):
+    """**API Key 不回显原文。** 只给掩码。
+
+    **掩码算的是夹具注入的那份 `.env`**（`tmp_path` 里的临时文件），
+    不是工程根目录那个真的——原来这条靠 `monkeypatch.setenv` 顶，而
+    `read_env` 根本不看 `os.environ`，真正决定掩码出不出得来的是开发机上
+    恰好存在、且那行非空的真 `.env`。**新克隆的仓库没有它，这条必红。**
+    """
+    (tmp_path / ".env").write_text(
+        "KB_LLM_API_KEY=sk-super-secret-value\n"
+        "KB_LLM_BASE_URL=http://x\n"
+        "KB_LLM_MODEL=m\n",
+        encoding="utf-8",
+    )
+
     body = client.get("/settings").text
     assert "sk-super-secret-value" not in body
     assert "••" in body

@@ -87,6 +87,23 @@ def test_write_env_updates_the_last_duplicate(tmp_path):
     assert read_env(p)["KB_LLM_MODEL"] == "new"
 
 
+def test_write_env_keeps_lf_line_endings(tmp_path):
+    """**写回不许把换行翻译成 CRLF。**
+
+    `Path.write_text` 在 Windows 上默认做换行翻译——用户保存一次设置，
+    他那份 LF 的 `.env` 就整份变成 CRLF，与「原样保留」矛盾。
+    上一批是从一条红测的断言 diff 里看见的。
+    """
+    p = tmp_path / ".env"
+    p.write_bytes(b"KB_LLM_MODEL=old\nKB_PORT=\n")
+
+    write_env(p, {"KB_LLM_MODEL": "new"})
+
+    raw = p.read_bytes()
+    assert b"\r" not in raw, "写回把换行翻译成 CRLF 了"
+    assert raw == b"KB_LLM_MODEL=new\nKB_PORT=\n"
+
+
 def test_read_env(tmp_path):
     p = tmp_path / ".env"
     p.write_text(SAMPLE, encoding="utf-8")

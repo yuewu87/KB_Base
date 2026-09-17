@@ -21,7 +21,7 @@ from fastapi.templating import Jinja2Templates
 from pydantic import BaseModel
 
 from kb.api.http import push_and_organize, run_sweep
-from kb.config import PROJECT_ROOT, Config
+from kb.config import Config
 from kb.core import settings, sweep, sweep_state
 from kb.core.chat import handle
 from kb.core.chat_store import list_chats, load_chat
@@ -53,13 +53,18 @@ class SettingsBody(BaseModel):
     values: dict[str, str] = {}
 
 
-def settings_context() -> dict:
+def settings_context(env_path: Path) -> dict:
     """给模板的：四组字段 + 它们当前的值（密钥掩码）。
 
     **「关于」那一组不在 `.env` 里**——它显示的是运行时的东西（服务状态、
     版本），所以在这里拼出来。这样模板仍然只是一个循环，不用为一组开特例。
+
+    **`env_path` 由 `create_app` 传进来**，不许自己拼 `PROJECT_ROOT / ".env"`：
+    这一页该显示的是**这个 app 实际在用的那份配置**，不是「工程根目录下恰好
+    存在的那个文件」。生产里两者一样，测试里不该一样——写死真 `.env` 的话，
+    新克隆的仓库没有那个文件，掩码那条用例必红。
     """
-    values = settings.read_env(PROJECT_ROOT / ".env")
+    values = settings.read_env(env_path)
 
     groups = [
         {
@@ -124,6 +129,7 @@ def build_router(
     get_llm: Callable[[], LLM],
     apply_settings: Callable[[dict[str, str]], dict[str, str]],
     quit_fn: Callable[[], None],
+    env_path: Path,
     build_llm_fn: Callable[[Config], LLM],
 ) -> APIRouter:
     """`data_dir`、`organize_fn`、`get_llm` 都由 `create_app` 传进来。
@@ -134,6 +140,9 @@ def build_router(
 
     `get_cfg` 同理，而且是**回调不是值**：配置在网页上能改，改完 `create_app`
     里那个盒子会换一份新的——把 `cfg` 当值收下来的话，这里拿到的永远是旧的。
+
+    `env_path` 是**这个 app 实际在用的**那份 `.env`（`create_app` 决定，
+    测试里是临时文件）。设置页显示它，不显示「工程根目录下恰好存在的那个」。
     """
     router = APIRouter()
 
@@ -298,7 +307,9 @@ def build_router(
         模态是从任意页面 fetch 进来的，跳页会把用户的位置弄丢。
         """
         return templates.TemplateResponse(
-            request, "_settings.html", _ctx("settings", **settings_context())
+            request,
+            "_settings.html",
+            _ctx("settings", **settings_context(env_path)),
         )
 
     @router.post("/settings")

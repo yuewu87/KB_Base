@@ -350,9 +350,11 @@ def create_app(
 
     from kb.web.router import STATIC_DIR, build_router
 
+    # `env_path` 一路传下去：设置页要显示的是**这个 app 实际在用的**那份配置，
+    # 不是「工程根目录下恰好存在的那个文件」（测试里是夹具给的临时文件）。
     app.include_router(build_router(
         get_cfg, data_dir, _chat_organize_fn, get_llm,
-        apply_settings, quit_fn or _default_quit, make_llm,
+        apply_settings, quit_fn or _default_quit, env_path, make_llm,
     ))
     app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
 

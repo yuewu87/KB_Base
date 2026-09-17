@@ -115,6 +115,10 @@ def write_env(path: Path, updates: dict[str, str]) -> None:
 
     **同名键改最后一处。** 读的是最后一处（`dotenv` 也是后写的赢），
     改前一处会变成「保存成功但配置没变」——实测过。
+
+    **换行一律写 LF。** `Path.write_text` 在 Windows 上默认做换行翻译，
+    不显式指定的话用户保存一次，他那份 LF 的 `.env` 就整份变成 CRLF——
+    这跟「原样保留」是矛盾的。
     """
     lines = path.read_text(encoding="utf-8").splitlines() if path.is_file() else []
 
@@ -134,7 +138,7 @@ def write_env(path: Path, updates: dict[str, str]) -> None:
         if key not in last:
             lines.append(f"{key}={value}")
 
-    path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+    path.write_text("\n".join(lines) + "\n", encoding="utf-8", newline="\n")
 
 
 # ------------------------------------------------------------ 校验
