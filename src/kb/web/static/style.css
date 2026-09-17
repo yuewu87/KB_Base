@@ -540,6 +540,43 @@ code {
 .chat-item.active .chat-title { color: var(--blue); font-weight: 600; }
 .chat-item .mono { display: block; }
 
+/* ---- 竖排流程链（工作日志页右侧）---- */
+
+/* 竖排是用户明确要求的：横排六步在窄侧栏里挤不下 */
+.chain {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  margin-bottom: 18px;
+}
+
+.chain-step {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12.5px;
+  line-height: 1.6;
+}
+
+.chain-mark {
+  width: 14px;
+  flex-shrink: 0;
+  text-align: center;
+  font-size: 12px;
+}
+
+/* 走过的步骤主蓝、没走到的灰着——一眼看出这一批走到哪了 */
+.chain-step.done { color: var(--blue); font-weight: 600; }
+.chain-step.todo { color: var(--faint); }
+
+/* 那根竖线：居中挂在标记下面，把六步串成一条链 */
+.chain-line {
+  width: 1px;
+  height: 12px;
+  margin-left: 6.5px;
+  background: var(--line);
+}
+
 /* 视觉隐藏但读屏可读——不要用 `hidden`，那对读屏等于没有 */
 .sr-only {
   position: absolute;

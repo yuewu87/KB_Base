@@ -142,7 +142,7 @@ def push_and_organize(
     """
     # 先开一个 run——这样这次「投递」和紧接着的整理是同一个 run，
     # 工作日志页上它们才会画进同一条流程链。
-    run = f"{datetime.now():%Y%m%d-%H%M%S}"
+    run = flow.new_run_id()
     flow.set_run(run)
 
     text, draft_id = push_draft(

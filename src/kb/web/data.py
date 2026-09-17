@@ -64,6 +64,21 @@ def read_journals(vault_root: Path) -> list[Journal]:
     return out
 
 
+def group_flow(rows: list[dict]) -> list[dict]:
+    """按 run 分组，**新的在前**。每组带上「走到了哪几步」。
+
+    同一批整理的流程共用一个 run id；页面上一条流程链对应一组。
+    """
+    groups: dict[str, dict] = {}
+    for row in rows:
+        run = row.get("run") or "（未分组）"
+        g = groups.setdefault(run, {"run": run, "rows": [], "reached": set(), "at": ""})
+        g["rows"].append(row)
+        g["reached"].add(row.get("step", ""))
+        g["at"] = g["at"] or row.get("at", "")
+    return list(reversed(list(groups.values())))
+
+
 def load_push_templates() -> dict[str, str]:
     """随手记的脚手架，返回 `{名字: 正文}`。
 

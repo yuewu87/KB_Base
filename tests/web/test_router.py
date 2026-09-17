@@ -109,6 +109,24 @@ def test_journal_shows_entries(client):
     assert "新建：[[队列串行化]]" in body
 
 
+def test_journal_has_side_summary(client):
+    """右侧栏里发的**是整理总结**。
+
+    不能直接断言那串文字在整页里——它在左侧卡片里本来就有，改不改右侧栏
+    都过（这条测试的第一版就是这样，等于只测了「有个 sidebar 容器」）。
+    把 `<aside>` 那段单独抠出来看。
+    """
+    import re
+
+    body = client.get("/journal").text
+    aside = re.search(
+        r'<aside class="chat-history">(.*?)</aside>', body, re.S
+    )
+    assert aside, "右侧栏不在"
+    assert "23:20 整理 1 条草稿" in aside.group(1)
+    assert "bubble assistant" in aside.group(1)          # 手机聊天式的气泡
+
+
 def test_journal_empty_state(tmp_path):
     cfg = Config(
         llm_api_key="k", llm_base_url="http://x", llm_model="m",
@@ -120,11 +138,16 @@ def test_journal_empty_state(tmp_path):
 
 # ---------- 工作日志 ----------
 
-def test_flow_says_not_implemented(client):
-    """流程日志的字段清单还没定，页面要如实说明，不能装作有数据。"""
+def test_flow_page_renders_chain(client, vault):
+    from kb.core.flow import emit, set_run
+
+    set_run("20260917-1400")
+    emit("投递", "你在网页上投递了一条草稿")
+    emit("规划", "模型决定放进「计算机/git」")
     body = client.get("/flow").text
-    assert "还没实现" in body
-    assert "字段清单还没定" in body
+    assert "你在网页上投递了一条草稿" in body
+    assert "模型决定放进" in body
+    assert "提交" in body            # 链上没走到的那几步也要画出来
 
 
 # ---------- 模板随手记 ----------

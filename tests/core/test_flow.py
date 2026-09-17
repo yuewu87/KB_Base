@@ -82,3 +82,62 @@ def test_emit_rotates_when_large(tmp_path, monkeypatch):
 def test_steps_are_the_pipeline_order():
     """链上的顺序就是流水线的顺序——页面的流程图照它画。"""
     assert STEPS == ["投递", "规划", "校验", "审核", "落盘", "提交"]
+
+
+def test_new_run_id_has_random_suffix():
+    """只用秒的话，同一秒内的两次投递会共用同一个 run——
+    页面把它们并成一条流程链。实测挤过 41 条记录。"""
+    from kb.core.flow import new_run_id
+
+    a, b = new_run_id(), new_run_id()
+    assert a != b                     # 同一秒内也不该撞
+    assert len(a) == len(b) == 20     # YYYYMMDD(8) + -(1) + HHMMSS(6) + -(1) + xxxx(4)
+    assert a[:15] == b[:15]           # 前 15 位是时间，应当一样
+
+
+def test_run_does_not_leak_across_threads(tmp_path):
+    """并发请求各记各的 run。
+
+    FastAPI 的同步端点跑在**线程池**里，两个并发请求是真并行的。run 若是
+    模块全局，会被后一个请求覆盖，前一个后续记的流程就挂到别人名下——
+    实测两个并发投递，12 条记录被拆成 10/2，串得一塌糊涂。
+    """
+    import threading
+    import time
+
+    flow.configure(tmp_path)
+
+    seen: dict[str, str] = {}
+
+    def worker(name: str) -> None:
+        set_run(name)
+        time.sleep(0.02)          # 给另一个线程机会去改（全局实现下就会串）
+        seen[name] = flow.current_run()
+
+    threads = [
+        threading.Thread(target=worker, args=(f"run-{i}",)) for i in range(2)
+    ]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join()
+
+    assert seen == {"run-0": "run-0", "run-1": "run-1"}
+
+
+def test_concurrent_emit_loses_nothing(tmp_path):
+    """并发写同一文件不能丢行——实测两个线程同时写只落到一条。"""
+    import threading
+
+    flow.configure(tmp_path)
+
+    def worker(i: int) -> None:
+        emit("投递", f"第 {i} 条")
+
+    threads = [threading.Thread(target=worker, args=(i,)) for i in range(20)]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join()
+
+    assert len(read_flow(tmp_path)) == 20

@@ -21,7 +21,10 @@
 
 from __future__ import annotations
 
+import contextvars
 import json
+import random
+import threading
 from datetime import datetime
 from pathlib import Path
 
@@ -31,10 +34,31 @@ STEPS = ["投递", "规划", "校验", "审核", "落盘", "提交"]
 MAX_BYTES = 1_000_000
 _FILE = "flow.jsonl"
 
-# 模块级状态：单进程、整理是同步的，够用。
-# **并发整理时会串**（一批的 run 被另一批改掉）——知道有这个边界。
+# 落点是启动时定一次、之后不变——模块全局没问题。
 _data_dir: Path | None = None
-_run: str = ""
+
+# **当前 run 必须用 ContextVar，不能用模块全局。**
+#
+# FastAPI 的同步端点跑在**线程池**里，两个并发请求是真并行的。模块全局的
+# run 会被后一个请求覆盖，前一个请求后续记的流程就挂到别人的 run 上了——
+# 实测两个并发投递，12 条记录被拆成 10/2，串得一塌糊涂。
+#
+# ContextVar 是 per-thread 的，各请求各记各的。
+_run: contextvars.ContextVar[str] = contextvars.ContextVar("flow_run", default="")
+
+# 并发写同一文件会丢行——实测两个线程同时 emit，只落到一条。
+# 日志丢一条不算大事，但既然看见了就加锁，三行的事。
+_write_lock = threading.Lock()
+
+
+def new_run_id(now: datetime | None = None) -> str:
+    """`YYYYMMDD-HHMMSS-` + 4 位随机十六进制。
+
+    **随机后缀不是装饰**：只用秒的话，同一秒内的两次投递会共用同一个 run，
+    页面把它们并成一条流程链——实测一条 run 里挤过 41 条记录。
+    """
+    now = now or datetime.now()
+    return f"{now:%Y%m%d-%H%M%S}-{random.randrange(16 ** 4):04x}"
 
 
 def configure(data_dir: Path | None) -> None:
@@ -44,9 +68,16 @@ def configure(data_dir: Path | None) -> None:
 
 
 def set_run(run_id: str) -> None:
-    """标记「这一批整理」的开始。之后记的流程都挂在这个 id 下。"""
-    global _run
-    _run = run_id
+    """标记「这一批整理」的开始。之后记的流程都挂在这个 id 下。
+
+    写进 ContextVar（per-thread），并发请求各记各的。
+    """
+    _run.set(run_id)
+
+
+def current_run() -> str:
+    """当前线程的 run id。并发时各线程拿到各自的。"""
+    return _run.get()
 
 
 def flow_path(data_dir: Path) -> Path:
@@ -62,17 +93,18 @@ def emit(step: str, text: str) -> None:
         return
     row = {
         "at": f"{datetime.now():%Y-%m-%d %H:%M:%S}",
-        "run": _run,
+        "run": _run.get(),
         "step": step,
         "text": text,
     }
     path = flow_path(_data_dir)
     try:
-        path.parent.mkdir(parents=True, exist_ok=True)
-        if path.is_file() and path.stat().st_size > MAX_BYTES:
-            path.replace(path.with_name(_FILE + ".1"))
-        with path.open("a", encoding="utf-8") as handle:
-            handle.write(json.dumps(row, ensure_ascii=False) + "\n")
+        with _write_lock:
+            path.parent.mkdir(parents=True, exist_ok=True)
+            if path.is_file() and path.stat().st_size > MAX_BYTES:
+                path.replace(path.with_name(_FILE + ".1"))
+            with path.open("a", encoding="utf-8") as handle:
+                handle.write(json.dumps(row, ensure_ascii=False) + "\n")
     except OSError:
         pass          # 满了、没权限、路径没了——都不该让整理失败
 

@@ -22,10 +22,11 @@ from kb.api.http import push_and_organize
 from kb.config import Config
 from kb.core.chat import handle
 from kb.core.chat_store import list_chats, load_chat
+from kb.core.flow import STEPS, read_flow
 from kb.core.vault import list_domains
 from kb.llm.base import LLM
 from kb.logging_setup import LOG_FILE
-from kb.web.data import load_push_templates, read_journals, tail_log
+from kb.web.data import group_flow, load_push_templates, read_journals, tail_log
 
 TEMPLATES_DIR = Path(__file__).parent / "templates"
 STATIC_DIR = Path(__file__).parent / "static"
@@ -108,8 +109,10 @@ def build_router(
 
     @router.get("/flow", response_class=HTMLResponse)
     def flow(request: Request):
-        """流程日志的字段清单还没定（见 03_问题记录.md 待解决 #2），先不接。"""
-        return templates.TemplateResponse(request, "flow.html", _ctx("flow"))
+        groups = group_flow(read_flow(data_dir))
+        return templates.TemplateResponse(
+            request, "flow.html", _ctx("flow", groups=groups, steps=STEPS)
+        )
 
     @router.get("/runtime", response_class=HTMLResponse)
     def runtime_page(request: Request):

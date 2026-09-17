@@ -1,6 +1,6 @@
 """Web UI 的数据聚合：把文件变成页面能直接渲染的结构。"""
 
-from kb.web.data import parse_journal, read_journals, tail_log
+from kb.web.data import group_flow, parse_journal, read_journals, tail_log
 
 JOURNAL = """---
 更新: '2026-09-16'
@@ -71,3 +71,23 @@ def test_tail_log_fewer_lines_than_asked(tmp_path):
     p = tmp_path / "kb.log"
     p.write_text("只有一行", encoding="utf-8")
     assert tail_log(p, 10) == "只有一行"
+
+
+def test_group_flow_by_run():
+    rows = [
+        {"run": "a", "step": "投递", "text": "投了", "at": "t1"},
+        {"run": "a", "step": "规划", "text": "规划了", "at": "t2"},
+        {"run": "b", "step": "投递", "text": "又投了", "at": "t3"},
+    ]
+    got = group_flow(rows)
+    assert [g["run"] for g in got] == ["b", "a"]        # 新的在前
+    assert [r["step"] for r in got[1]["rows"]] == ["投递", "规划"]
+
+
+def test_group_flow_marks_reached_steps():
+    rows = [
+        {"run": "a", "step": "投递", "text": "x", "at": "t"},
+        {"run": "a", "step": "落盘", "text": "y", "at": "t"},
+    ]
+    got = group_flow(rows)
+    assert got[0]["reached"] == {"投递", "落盘"}

@@ -320,7 +320,7 @@ def organize_selected(
     #
     # `run_id` 由调用方给：Web 投递要把它那次「投递」和随后的整理串成同一个
     # run，所以先设好再传进来。
-    flow.set_run(run_id or f"{when:%Y%m%d-%H%M%S}")
+    flow.set_run(run_id or flow.new_run_id(when))
     if paths:
         flow.emit("投递", f"开始整理，共 {len(paths)} 条草稿")
 
