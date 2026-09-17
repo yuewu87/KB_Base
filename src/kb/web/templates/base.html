@@ -95,7 +95,7 @@
       </button>
     </nav>
 
-    <main class="main">
+    <main class="main{{ ' main-chat' if active == 'chat' }}">
       {% block content %}{% endblock %}
     </main>
 

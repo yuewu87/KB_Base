@@ -1005,3 +1005,38 @@ button.side-btn {
    光有 `button.primary` 会被拉成整窗宽的一条（2026-09-17 截图确认过）。
    `flex-start` 让按钮收回自然宽、贴着正文左沿。 */
 .modal.notice button.primary { align-self: flex-start; }
+
+/* ==========================================================================
+   ai对话页：输入框钉在视口底部
+   ========================================================================== */
+
+/* `.main` 的 `padding-bottom: 64px` 是给长文阅读留的留白。聊天页用不着那么多，
+   留着输入框会离底边老远、像浮在半空。 */
+.main-chat { padding-bottom: 24px; }
+
+/* 主区撑满视口、走 flex 纵列：标题在上 → 消息区自己滚 → 输入框钉在底部。
+   原来是顺序排下来的，输入框紧跟最后一条消息——消息少的时候下面留一大片
+   空白，消息多了整页跟着滚（输入框被推出视口）。 */
+.chat-main {
+  display: flex;
+  flex-direction: column;
+  height: calc(100vh - 34px - 24px);   /* 减掉 .main 的上下 padding */
+}
+
+.chat-main .thread {
+  flex: 1;
+  min-height: 0;        /* flex 子项默认不肯缩到内容以下，不给 0 它不会滚 */
+  overflow-y: auto;
+  margin-bottom: 14px;  /* 原来是 22px，钉底之后收一点更像聊天软件 */
+}
+
+.chat-main .searchbar { margin: 0; }
+
+/* 会话历史可能比消息区长得多（12 个会话就 ~576px）。不封顶的话 grid 那一行
+   被它撑高 → **整页出现外层滚动条** → 输入框落到了那个更长的页面底部，
+   而不是视口底部。封顶 + 自己滚，两个滚动区各管各的。 */
+.main-chat .chat-history {
+  max-height: calc(100vh - 34px - 24px);
+  overflow-y: auto;
+  padding-bottom: 8px;
+}
