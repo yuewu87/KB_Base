@@ -43,7 +43,9 @@ def _plan_json(**overrides) -> str:
     data = {
         "outcome": "create",
         "target_path": "计算机/并发写锁.md",
-        "frontmatter": {"类型": "概念", "主题": ["后端"]},
+        # frontmatter 里只剩类型——主题与项目由服务算（Q101）
+        "frontmatter": {"类型": "概念"},
+        "semantic_tags": [],
         "content": "# 并发写锁\n\n见 [[队列串行化]]\n",
         "pending_reason": None,
     }
@@ -353,6 +355,109 @@ def test_system_prompt_says_the_reason_must_be_checkable():
     assert "说了等于没说" in prompt
 
 
+# ---------- 标签：路径派生归代码（Q101）----------
+
+def test_normalize_tag_folds_whitespace_and_lowercases():
+    assert planning.normalize_tag("  Git  Bash ") == "git-bash"
+    assert planning.normalize_tag("PowerShell") == "powershell"
+
+
+def test_normalize_tag_truncates_to_twenty_chars():
+    assert len(planning.normalize_tag("a" * 50)) == 20
+
+
+def test_normalize_tag_of_blank_is_empty():
+    assert planning.normalize_tag("   ") == ""
+
+
+def test_derive_tags_puts_path_dirs_first():
+    """路径派生排最前，领域名打头（规则 7 原话）。"""
+    tags = planning.derive_tags("计算机/Python/并发写锁.md", [])
+    assert tags == ["计算机", "python"]
+
+
+def test_derive_tags_keeps_semantic_tags_after_path_ones():
+    tags = planning.derive_tags("计算机/艺术生成.md", ["艺术", "图像"])
+    assert tags == ["计算机", "艺术", "图像"]
+
+
+def test_derive_tags_dedups_path_against_semantic():
+    """语义标签重复路径派生时不许出现两遍。"""
+    tags = planning.derive_tags("计算机/Python/x.md", ["计算机", "python", "asyncio"])
+    assert tags == ["计算机", "python", "asyncio"]
+
+
+def test_derive_tags_never_empty_when_path_has_a_domain():
+    """这条是重点：**标签空不再可能**。
+
+    路径至少有一级目录，所以派生出来至少有一个标签——检索的命脉
+    不再靠模型记得填。改之前 48 篇全都填了，纯属自觉，代码一行没兜。
+    """
+    assert planning.derive_tags("计算机/x.md", []) == ["计算机"]
+    assert planning.derive_tags("计算机/x.md", [""]) == ["计算机"]
+
+
+def test_parse_plan_reads_semantic_tags():
+    plan = parse_plan(DRAFT.id, _plan_json(semantic_tags=["git", "版本控制"]))
+    assert plan.semantic_tags == ["git", "版本控制"]
+
+
+def test_parse_plan_semantic_tags_default_to_empty():
+    data = json.loads(_plan_json())
+    del data["semantic_tags"]
+    assert parse_plan(DRAFT.id, json.dumps(data, ensure_ascii=False)).semantic_tags == []
+
+
+def test_validate_create_rejects_more_than_three_semantic_tags(vault):
+    """0-3 个是规则 7 写的数——数字是机械约束，落成一行 if。"""
+    plan = parse_plan(DRAFT.id, _plan_json(semantic_tags=["a", "b", "c", "d"]))
+    with pytest.raises(PlanError, match="最多 3 个"):
+        validate_plan(plan, vault)
+
+
+def test_validate_create_accepts_exactly_three_semantic_tags(vault):
+    plan = parse_plan(DRAFT.id, _plan_json(semantic_tags=["a", "b", "c"]))
+    validate_plan(plan, vault)      # 不抛就算过
+
+
+def test_resolve_frontmatter_takes_project_from_the_draft():
+    """项目名**由代码搬运**，不问模型（Q101）。
+
+    实测四篇笔记的 `项目` 字段丢了——草稿里明明有，模型生成 frontmatter
+    时漏掉了，而校验只管 `类型`。搬运没有任何判断成分，不该交给模型。
+    """
+    draft = Draft(
+        id="x", body="b", source="会话", project="KN_Base", created_at="t"
+    )
+    plan = parse_plan(DRAFT.id, _plan_json())
+    assert planning.resolve_frontmatter(plan, draft)["项目"] == "KN_Base"
+
+
+def test_resolve_frontmatter_drops_a_project_the_model_invented():
+    """草稿没有项目（Web 投递）时，模型自己编的要丢掉——草稿是唯一真源。"""
+    plan = parse_plan(DRAFT.id, _plan_json())
+    plan.frontmatter["项目"] = "模型编的项目"
+    assert "项目" not in planning.resolve_frontmatter(plan, DRAFT)
+
+
+def test_resolve_frontmatter_computes_topic_in_code():
+    plan = parse_plan(DRAFT.id, _plan_json(semantic_tags=["版本控制"]))
+    meta = planning.resolve_frontmatter(plan, DRAFT)
+    assert meta["主题"] == ["计算机", "版本控制"]
+
+
+def test_resolve_frontmatter_overrides_whatever_the_model_put_in_topic():
+    plan = parse_plan(DRAFT.id, _plan_json())
+    plan.frontmatter["主题"] = ["模型自己填的"]
+    assert planning.resolve_frontmatter(plan, DRAFT)["主题"] == ["计算机"]
+
+
+def test_resolve_frontmatter_keeps_the_note_type_from_the_model():
+    """类型是判断题，仍归模型。"""
+    plan = parse_plan(DRAFT.id, _plan_json())
+    assert planning.resolve_frontmatter(plan, DRAFT)["类型"] == "概念"
+
+
 def test_system_prompt_uses_frontmatter_key_constants():
     """提示词里的键名必须与 K_* 同源。
 
@@ -362,40 +467,6 @@ def test_system_prompt_uses_frontmatter_key_constants():
     prompt = build_system_prompt()
     for key in (K_TYPE, K_TOPIC, K_PROJECT):
         assert key in prompt
-
-
-# ---------- 用户的判断（Q23）----------
-
-def test_strip_user_judgment_empties_the_section():
-    content = "# 标题\n\n## 用户的判断\n\n他说这个方案更好。\n\n## 相关\n"
-    out = planning.strip_user_judgment(content)
-    assert "他说这个方案更好" not in out
-    # 标题与下一节之间要留空行，否则 Markdown 里两行标题会贴在一起
-    assert "## 用户的判断\n\n## 相关" in out
-
-
-def test_strip_user_judgment_keeps_other_sections():
-    content = "# 标题\n\n## 展开\n\n正文\n\n## 用户的判断\n\n代填\n\n## 相关\n\n- [[x]]\n"
-    out = planning.strip_user_judgment(content)
-    assert "正文" in out
-    assert "- [[x]]" in out
-    assert "代填" not in out
-
-
-def test_strip_user_judgment_when_last_section():
-    content = "# 标题\n\n## 用户的判断\n\n代填\n"
-    out = planning.strip_user_judgment(content)
-    assert "代填" not in out
-    assert out.rstrip().endswith("## 用户的判断")
-
-
-def test_strip_user_judgment_noop_when_absent():
-    content = "# 标题\n\n## 展开\n\n正文\n"
-    assert planning.strip_user_judgment(content) == content
-
-
-def test_strip_user_judgment_preserves_trailing_newline():
-    assert planning.strip_user_judgment("## 用户的判断\n\n代填\n").endswith("\n")
 
 
 # ---------- 模板接入 ----------
@@ -418,7 +489,17 @@ def test_load_note_skeletons_excludes_service_generated_types():
 def test_system_prompt_embeds_skeletons():
     prompt = build_system_prompt()
     assert "各类型的正文骨架" in prompt
-    assert "## 用户的判断" in prompt
+    assert "## 展开" in prompt
+
+
+def test_the_judgment_section_is_gone_everywhere():
+    """「用户的判断」2026-09-18 删了——用户说基本不看，48 篇一次没填过。
+
+    这一节原本靠机械清空防 AI 代填（Q23）。整节删掉之后，**提示词、模板、
+    落盘三处都不该再有它的影子**——留一处，模型就会照着写一个没人看的空标题。
+    """
+    assert "用户的判断" not in build_system_prompt()
+    assert not any("用户的判断" in body for body in load_note_skeletons().values())
 
 
 def test_system_prompt_survives_missing_templates(monkeypatch, tmp_path):

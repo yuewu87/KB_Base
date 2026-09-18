@@ -96,6 +96,10 @@ class OrganizePlan:
     pending_reason: str | None = None
     revise_target: str | None = None      # 从草稿带过来（Task 8）
 
+    # 模型**只**负责跨领域的语义标签（0-3 个）。路径派生那部分由代码算，
+    # 见 planning.derive_tags——那是搬运，不是判断（Q101）。
+    semantic_tags: list[str] = field(default_factory=list)
+
 
 class ResultKind(StrEnum):
     """一次整理的执行结果。

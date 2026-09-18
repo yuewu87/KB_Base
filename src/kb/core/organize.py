@@ -9,6 +9,7 @@
 
 from __future__ import annotations
 
+import re
 import subprocess
 import time
 from datetime import datetime
@@ -100,15 +101,11 @@ def _today(when: datetime | None) -> str:
     return f"{(when or datetime.now()):%Y-%m-%d}"
 
 
-def _ensure_indexes(vault_root: Path, plan: OrganizePlan, txn: Transaction) -> None:
+def _ensure_indexes(vault_root: Path, topics: list[str], txn: Transaction) -> None:
     """确保引用的主题索引页存在——让第一条笔记就有东西可链（Q21）。
 
     只处理**已存在**的主题；不存在的主题是校验阶段就该拦下的（Q11）。
     """
-    topics = plan.frontmatter.get(K_TOPIC) or []
-    if isinstance(topics, str):
-        topics = [topics]
-
     known = set(list_domains(vault_root))
     for topic in topics:
         if topic not in known:
@@ -119,11 +116,33 @@ def _ensure_indexes(vault_root: Path, plan: OrganizePlan, txn: Transaction) -> N
             ensure_topic_index(vault_root, topic)
 
 
+# `## 相关` 是模板的收尾节。fold 追加的内容要排在它**前面**——
+# 加在它后面等于把收尾节挤到文章中间（Q101 端到端跑出来的实例）。
+_RELATED_RE = re.compile(r"^## 相关\s*$", re.M)
+
+
+def _insert_before_related(body: str, chunk: str) -> str:
+    """把 fold 的新章节插到 `## 相关` 之前，正文之后。
+
+    找不到 `## 相关` 就照旧追加到末尾——那种笔记是用户自己改过的，
+    别猜他想放哪。
+    """
+    body = body.rstrip("\n")
+    match = _RELATED_RE.search(body)
+    if match is None:
+        return f"{body}\n\n{chunk}\n"
+    # 拼之前先滤掉空段：正文是空的（笔记只有 `## 相关`）时，
+    # 直接拼会拼出两个前导空行。
+    parts = [body[: match.start()].strip("\n"), chunk, body[match.start():].strip("\n")]
+    return "\n\n".join(p for p in parts if p) + "\n"
+
+
 # ------------------------------------------------------------ 第三段：落盘
 
 def apply_plan(
     vault_root: Path,
     draft_path: Path,
+    draft: Draft,
     plan: OrganizePlan,
     txn: Transaction,
     when: datetime | None = None,
@@ -144,22 +163,20 @@ def apply_plan(
     assert plan.target_path is not None      # 已在 validate_plan 保证
     target = vault_root / plan.target_path
 
-    # 「用户的判断」只由用户本人填写（Q23），这里机械清空——不靠模型自觉
-    body_content = planning.strip_user_judgment(plan.content)
-
     if plan.outcome is Outcome.CREATE:
         txn.touch_create(target)
-        meta = dict(plan.frontmatter)
+        # 主题/项目由这里算出来，不问模型——见 planning.resolve_frontmatter（Q101）
+        meta = planning.resolve_frontmatter(plan, draft)
         meta.setdefault(K_CREATED, _today(when))
         meta[K_UPDATED] = _today(when)
-        _write_note_safe(target, meta, body_content)
-        _ensure_indexes(vault_root, plan, txn)
+        _write_note_safe(target, meta, plan.content)
+        _ensure_indexes(vault_root, meta.get(K_TOPIC) or [], txn)
         kind = ResultKind.CREATED
     else:
         txn.touch_modify(target)
         meta, body = read_note(target)
         meta[K_UPDATED] = _today(when)
-        body = body.rstrip("\n") + "\n\n" + body_content.strip() + "\n"
+        body = _insert_before_related(body, plan.content.strip())
         _write_note_safe(target, meta, body)
         kind = ResultKind.FOLDED
 
@@ -286,7 +303,7 @@ def organize_draft(
 
     txn = Transaction(vault_root)
     try:
-        result = apply_plan(vault_root, draft_path, plan, txn, when)
+        result = apply_plan(vault_root, draft_path, draft, plan, txn, when)
     except Exception as exc:  # noqa: BLE001 —— 落盘要兜住一切并回滚
         txn.rollback()
         return (

@@ -59,36 +59,6 @@ def load_note_skeletons() -> dict[str, str]:
     return skeletons
 
 
-JUDGMENT_HEADING = "## 用户的判断"
-
-
-def strip_user_judgment(content: str) -> str:
-    """清空「## 用户的判断」一节的正文，只保留标题。
-
-    Q23：这一节记录的是**用户本人的立场**，只能由用户自己在 Obsidian 里写。
-
-    不能靠提示词保证：模型面对一个空标题，默认行为就是把它填满，而且分不清
-    「用户陈述的事实」与「用户的观点」——实测第一条真实草稿就被代填了
-    （还写成第三人称「用户认为……」）。所以在这里机械清空，写了也丢掉。
-    """
-    out: list[str] = []
-    skipping = False
-    for line in content.splitlines():
-        stripped = line.strip()
-        if stripped == JUDGMENT_HEADING:
-            out.append(line)
-            out.append("")          # 留一个空行，别让标题贴住下一节
-            skipping = True
-            continue
-        if skipping and stripped.startswith("## "):
-            skipping = False
-        if not skipping:
-            out.append(line)
-
-    text = "\n".join(out)
-    return text + "\n" if content.endswith("\n") else text
-
-
 def _skeleton_block() -> str:
     skeletons = load_note_skeletons()
     if not skeletons:
@@ -98,6 +68,73 @@ def _skeleton_block() -> str:
     for name, body in skeletons.items():
         lines += [f"### {name}", "```markdown", body, "```", ""]
     return "\n".join(lines)
+
+
+# ------------------------------------------------------------ 标签（Q101）
+
+# 单个标签最长多少字符。规则 7 本来只是提示词里的一句话，但「截到 20 字」
+# 是数得出来的——**数得出来的就别指望模型**（Q91/Q94 同一类）。
+_TAG_MAX = 20
+
+# 模型最多补几个跨领域语义标签（规则 7 原话是 0-3）。
+_SEMANTIC_TAG_MAX = 3
+
+
+def normalize_tag(raw: str) -> str:
+    """标签规范化：折空白为 `-`、转小写、截到 20 字符。
+
+    **机械约束，归代码。** 这三条以前只写在提示词里（规则 7），
+    模型照不照做没有任何东西兜底——现在照不照做都一样，代码会把它掰回来。
+    """
+    tag = re.sub(r"\s+", "-", str(raw or "").strip()).lower()
+    return tag[:_TAG_MAX]
+
+
+def derive_tags(target_path: str, semantic: list[str]) -> list[str]:
+    """最终的 `主题` 标签 = **路径派生** + 模型给的语义标签。
+
+    路径派生：目标路径上每一级目录名，领域名排最前。规则 7 本来就要求这个，
+    但它要模型**抄一遍代码手里已有的东西**——抄漏了 `主题` 就空，
+    而 `主题` 是检索的命脉（Q25），空了这篇笔记只剩全文搜得到。
+
+    实测 48 篇 `主题` 全都填了，靠的是模型自觉；代码里一行兜底都没有
+    （2026-09-18）。而 `target_tags`——提示词里让它填的那个字段——
+    `OrganizePlan` 根本没有对应属性，模型认真算完直接丢掉。
+
+    **路径至少有一级目录，所以这个函数不会返回空列表**：只要路径合法，
+    笔记一定有几个标签。
+    """
+    out: list[str] = []
+    path_dirs = Path(target_path).parts[:-1] if target_path else ()
+    for raw in [*path_dirs, *semantic]:
+        tag = normalize_tag(raw)
+        if tag and tag not in out:
+            out.append(tag)
+    return out
+
+
+def resolve_frontmatter(plan: OrganizePlan, draft: Draft) -> dict:
+    """落盘前把 frontmatter 补全——**这里才是「什么归代码」的分界线**。
+
+    | 字段 | 归谁 | 为什么 |
+    |---|---|---|
+    | `类型` | 模型 | 判断题：这条算概念还是踩坑 |
+    | `主题` | **代码** | 派生 + 搬运，没有判断成分 |
+    | `项目` | **代码** | 从草稿搬过来，一个字都不用改 |
+
+    `项目` 从草稿搬而不是问模型：实测四篇笔记的 `项目` 丢了，草稿里明明有
+    （模型生成 frontmatter 时漏了，而校验只管类型）。**草稿是唯一真源**——
+    草稿没有时（Web 投递）把模型自己编的删掉，不许它无中生有。
+
+    只用于 create。fold 是往已有笔记里追加，frontmatter 不动。
+    """
+    meta = dict(plan.frontmatter)
+    meta[K_TOPIC] = derive_tags(plan.target_path or "", plan.semantic_tags)
+    if draft.project:
+        meta[K_PROJECT] = draft.project
+    else:
+        meta.pop(K_PROJECT, None)
+    return meta
 
 
 def build_system_prompt() -> str:
@@ -117,8 +154,8 @@ def build_system_prompt() -> str:
 {{
   "outcome": "create" | "fold" | "pending",
   "target_path": "相对 vault 根的路径",
-  "frontmatter": {{"{K_TYPE}": "概念", "{K_TOPIC}": ["计算机", "git"], "{K_PROJECT}": "项目名"}},
-  "target_tags": ["计算机", "git", "版本控制"],
+  "frontmatter": {{"{K_TYPE}": "概念"}},
+  "semantic_tags": ["版本控制"],
   "content": "笔记正文（markdown）",
   "pending_reason": "仅 outcome=pending 时填"
 }}
@@ -145,16 +182,20 @@ def build_system_prompt() -> str:
 6. **分类能复用就复用——能用已有的就用已有的。** 「领域下已有分类」里列出的名字，只要装得下这条内容，
    就**必须用它**，不许另起一个近义的（有「版本控制」就别建「git」）。
    真的都装不下，才新建一层或一个新分类——新建要在 `pending_reason` 里说明理由。
-7. {K_TOPIC} 与 `target_tags` 按**标签规则**填：
-   - 路径派生：目标路径上的**每一级目录名**都要进 `target_tags`，领域名排最前
-   - 另提语义：再补 0-3 个跨领域的标签（如一篇讲「用代码生成艺术」的笔记，
-     除路径派生外还可以带 `艺术`）
-   - 英文标签一律小写；中间空白折成 `-`；单个标签不超过 20 字符
-8. 骨架里的「## 用户的判断」一节**必须留空**（保留标题，标题下什么都不写）。
-   这一节记录用户本人的立场，服务端会机械清空——写了也会被丢掉，别浪费。
-   绝不要替用户总结、推断或改写成第三人称（「用户认为……」是典型的伪造）。
-9. fold 时 content **只写要追加的段落**——不要带一级标题（`# `），不要写
+7. frontmatter 里**只填 `{K_TYPE}` 一个**。`{K_TOPIC}` 和 `{K_PROJECT}` 由服务自己算，
+   你填了也会被覆盖——`{K_PROJECT}` 从草稿原样搬过来，`{K_TOPIC}` 的路径派生部分
+   服务会从 target_path 拆（每一级目录名一个标签，领域名排最前）。
+   你只负责 `semantic_tags`：**路径上看不出来的跨领域标签**，0-3 个。
+   跟路径上的目录名重复的，一个都不要写。比如一篇讲「用代码生成艺术」的笔记
+   放在 `计算机/` 下，可以带 `艺术`；但 `计算机` 不用填，服务自己会加。
+   （大小写、空格怎么折、超长怎么办，服务统一处理，你不用操心。）
+8. fold 时 content **只写要追加的段落**——不要带一级标题（`# `），不要写
    frontmatter，也不要重复目标笔记已有的章节。追加不是嵌一篇新笔记进去。
+   新章节插在 `## 相关` **之前**（那是收尾节），位置服务会处理，你不用管。
+9. **先看「可能相关的已有笔记」里有没有已经讲过同一条洞见的。**
+   换个说法、换个例子，还是同一条结论——那就 fold 进去补充，**不要另起一篇**。
+   只有确实是新的一条（新的成因、新的适用场景、新的取舍）才 create。
+   同一个洞见摊成三篇，读的人会以为有三条结论。
 
 {_skeleton_block()}"""
 
@@ -250,6 +291,10 @@ def parse_plan(draft_id: str, raw: str) -> OrganizePlan:
     if not isinstance(frontmatter, dict):
         raise PlanError("frontmatter 必须是对象")
 
+    semantic = data.get("semantic_tags") or []
+    if not isinstance(semantic, list):
+        raise PlanError("semantic_tags 必须是数组")
+
     return OrganizePlan(
         draft_id=draft_id,
         outcome=outcome,
@@ -257,6 +302,7 @@ def parse_plan(draft_id: str, raw: str) -> OrganizePlan:
         frontmatter=frontmatter,
         content=data.get("content") or "",
         pending_reason=(data.get("pending_reason") or None),
+        semantic_tags=[str(t) for t in semantic],
     )
 
 
@@ -369,6 +415,14 @@ def validate_plan(plan: OrganizePlan, vault_root: Path) -> None:
         if clean_title(stem) != stem:
             raise PlanError(
                 f"文件名不合规，必须是清洗过的内容标题（见架构第五节）：{stem}"
+            )
+
+        if len(plan.semantic_tags) > _SEMANTIC_TAG_MAX:
+            raise PlanError(
+                f"semantic_tags 最多 {_SEMANTIC_TAG_MAX} 个，给了 "
+                f"{len(plan.semantic_tags)} 个：{'、'.join(plan.semantic_tags)}。"
+                "这里只放**路径上看不出来的**跨领域标签——路径派生由服务自己做，"
+                "别把目录名抄一遍。"
             )
 
         if not _LINK_RE.search(plan.content):

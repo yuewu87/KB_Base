@@ -118,38 +118,43 @@ def test_create_sets_timestamps(vault):
     assert meta["更新"] == "2026-09-15"
 
 
-def test_create_empties_fabricated_user_judgment(vault):
-    """Q23：模型代填的「用户的判断」必须在落盘前被清掉。
+# ---------- 字段归属：主题与项目归代码（Q101）----------
 
-    首次真实 LLM 运行就踩了这个坑——模型把用户陈述的**事实**当成判断，
-    还追加了两点用户没说过的话。提示词拦不住，所以这里是机械清空。
-    """
-    _run(vault, FakeLLM(_plan_json(content=(
-        "# 并发写锁\n\n## 现象\n\n会锁表\n\n"
-        "## 用户的判断\n\n用户认为应该用队列解决，并补充说队列满时要限流。\n\n"
-        "## 相关\n\n- [[计算机]]\n"
-    ))))
-
-    _, body = read_note(vault / "计算机" /"并发写锁.md")
-    assert "用户认为应该用队列解决" not in body
-    assert "## 用户的判断" in body      # 标题留着，给用户自己填
-    assert "## 现象" in body            # 其余内容不受影响
-    assert "- [[计算机]]" in body
-
-
-def test_fold_also_empties_fabricated_user_judgment(vault):
-    target = vault / "计算机" /"队列串行化.md"
-    write_note(target, {"类型": "概念"}, "# 队列串行化\n\n原有内容\n")
-
+def test_create_derives_topic_from_the_path_not_from_the_model(vault):
+    """标签是路径派生出来的，模型填什么都覆盖掉（Q101）。"""
     _run(vault, FakeLLM(_plan_json(
-        outcome="fold",
-        target_path="计算机/队列串行化.md",
-        content="## 用户的判断\n\n他更喜欢这个做法。\n\n## 相关\n\n- [[计算机]]\n",
+        frontmatter={"类型": "概念", "主题": ["模型自己填的"]},
     )))
+    meta, _ = read_note(vault / "计算机" /"并发写锁.md")
+    assert meta["主题"] == ["计算机"]
 
-    _, body = read_note(target)
-    assert "他更喜欢这个做法" not in body
-    assert "原有内容" in body
+
+def test_create_puts_path_dirs_before_semantic_tags(vault):
+    _run(vault, FakeLLM(_plan_json(semantic_tags=["版本控制", "Git 操作"])))
+    meta, _ = read_note(vault / "计算机" /"并发写锁.md")
+    assert meta["主题"] == ["计算机", "版本控制", "git-操作"]
+
+
+def test_create_writes_the_draft_project_even_when_the_model_omits_it(vault):
+    """实测四篇笔记的 `项目` 丢了——草稿里明明有，模型漏填、校验不管（Q101）。"""
+    draft = Draft(
+        id=DRAFT.id, body=DRAFT.body, source="会话",
+        project="KN_Base", created_at=DRAFT.created_at,
+    )
+    path = write_draft(vault, draft)
+    organize.organize_draft(vault, path, FakeLLM(_plan_json()), when=WHEN, sleep=NO_SLEEP)
+
+    meta, _ = read_note(vault / "计算机" /"并发写锁.md")
+    assert meta["项目"] == "KN_Base"
+
+
+def test_create_drops_a_project_the_model_invented(vault):
+    """草稿没有项目（Web 投递）时，模型自己编的不许写进去。"""
+    _run(vault, FakeLLM(_plan_json(
+        frontmatter={"类型": "概念", "项目": "模型编的项目"},
+    )))
+    meta, _ = read_note(vault / "计算机" /"并发写锁.md")
+    assert "项目" not in meta
 
 
 def test_create_result_detail_links_to_note(vault):
@@ -189,6 +194,47 @@ def test_fold_bumps_update_date(vault):
 
     meta, _ = read_note(target)
     assert meta["更新"] == "2026-09-15"
+
+
+def test_fold_inserts_before_the_related_section(vault):
+    """`## 相关` 是收尾节，fold 追加的内容要排在它**前面**（Q101）。
+
+    原先是 `body + 新内容`，直接怼在文件末尾——`## 相关` 就被挤到中间去了，
+    后面还挂着新章节。实测两篇已经这样（`Windows 批处理文件必须用 GBK 编码`、
+    `IE 缩放不是 100% 导致点击坐标算歪`）。
+    """
+    target = vault / "计算机" /"队列串行化.md"
+    write_note(
+        target,
+        {"类型": "概念", "主题": ["计算机"]},
+        "# 队列串行化\n\n原有内容\n\n## 相关\n\n- [[计算机]]\n",
+    )
+
+    _run(vault, FakeLLM(_plan_json(
+        outcome="fold",
+        target_path="计算机/队列串行化.md",
+        content="## 补充：限流\n\n队列满时要限流\n",
+    )))
+
+    _, body = read_note(target)
+    assert body.index("队列满时要限流") < body.index("## 相关")
+    assert body.index("## 相关") < body.index("- [[计算机]]")
+    assert body.index("原有内容") < body.index("队列满时要限流")
+
+
+def test_fold_appends_at_the_end_when_there_is_no_related_section(vault):
+    """没有 `## 相关` 就照旧追加到末尾——别为了插位置把笔记搅乱。"""
+    target = vault / "计算机" /"队列串行化.md"
+    write_note(target, {"类型": "概念"}, "# 队列串行化\n\n原有内容\n")
+
+    _run(vault, FakeLLM(_plan_json(
+        outcome="fold",
+        target_path="计算机/队列串行化.md",
+        content="补充内容\n",
+    )))
+
+    _, body = read_note(target)
+    assert body.index("原有内容") < body.index("补充内容")
 
 
 def test_pending_moves_draft_aside(vault):
