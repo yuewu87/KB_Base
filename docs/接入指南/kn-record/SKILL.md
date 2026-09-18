@@ -24,6 +24,9 @@ KN_Base 是这个用户自己的知识库。**你是会话层，只负责投递�
 
 # 请求整理
 "E:/Study_Projects/KN_Base/kb.bat" organize
+
+# 撤回一条投错的草稿（还能一次给多个 id）
+"E:/Study_Projects/KN_Base/kb.bat" drop 20260918-9e4f
 ```
 
 ### ⚠️ 必须加 `PYTHONIOENCODING=utf-8`
@@ -108,6 +111,33 @@ PYTHONIOENCODING=utf-8 "E:/Study_Projects/KN_Base/kb.bat" push --revise "文件�
 - `--revise` 后面是**目标笔记的文件名**，**不含路径、不含 `.md`**（Obsidian 就是按文件名链接的）
 - 服务会全库搜同名文件：**唯一命中才算数**，零个或多个都会让这条进待归类、不猜
 - 结果是**新写一篇**、把旧的打上失效标记——**不是覆盖**。同一个文件名下永远只有一种说法
+
+---
+
+## 投错了：撤回来重投
+
+**投出去的草稿不是定案**——它还在收件箱里缓冲，没整理就还能撤。
+
+```bash
+PYTHONIOENCODING=utf-8 "E:/Study_Projects/KN_Base/kb.bat" drop 20260918-9e4f
+PYTHONIOENCODING=utf-8 "E:/Study_Projects/KN_Base/kb.bat" drop 20260918-9654 20260918-9e4f   # 一次几条
+```
+
+**什么时候用：**
+
+- **项目名取错了** —— 默认取的是 **cwd 的 git 仓库根目录名**。你在临时目录、别的仓库、
+  或一个刚 `git init` 的目录里推，就会记成那个目录名。**发现取错 → drop 掉 → 带 `--project` 重投**
+- 投重复了、投完发现写歪了、投错库了
+
+**规矩跟投递一样，一个字都不许绕：**
+
+- **只走 `kb drop`，绝不手改 `E:\KB_Library` 里的文件** —— 绕过服务就没有串行化、没有校验，
+  等于把「写入只此一路」开了口子。**哪怕只改一行 frontmatter 也不行**
+- 删掉的草稿**不留痕迹**（不记日志、不打 commit），这是有意的——删等于「当没发生过」
+
+**别怕撤。** 投错一条很正常，让它烂在库里才贵——它会跟着整理变成一篇字段错误的正式笔记。
+
+> **`--project` 只在默认值不对时才写。** 正常情况下还是别填，服务自己取。
 
 ---
 

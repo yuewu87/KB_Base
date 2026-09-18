@@ -232,3 +232,49 @@ def test_no_args_exits_with_usage():
     """不给子命令应该报用法错误，而不是静默退出。"""
     with pytest.raises(SystemExit):
         cli.main([])
+
+
+# ---------- 删草稿（Q99）----------
+
+def _draft(vault, draft_id: str, body: str = "写错了\n") -> None:
+    from kb.core.models import Draft
+    from kb.core.vault import write_draft
+
+    write_draft(vault, Draft(
+        id=draft_id, body=body, source="会话", project=None, created_at="2026-01-01 00:00",
+    ))
+
+
+def test_drop_deletes_and_reports(fake_server, capsys):
+    """投错的东西得能撤——这是收件箱唯一的退路。"""
+    _draft(fake_server.vault_path, "20260101-aaaa")
+
+    code = cli.main(["drop", "20260101-aaaa"])
+
+    assert code == 0
+    assert "20260101-aaaa" in capsys.readouterr().out
+    assert list_drafts(fake_server.vault_path) == []
+
+
+def test_drop_takes_several_ids_at_once(fake_server, capsys):
+    _draft(fake_server.vault_path, "20260101-aaaa")
+    _draft(fake_server.vault_path, "20260101-bbbb")
+
+    code = cli.main(["drop", "20260101-aaaa", "20260101-bbbb"])
+
+    assert code == 0
+    assert list_drafts(fake_server.vault_path) == []
+
+
+def test_drop_missing_id_reports_to_stderr_and_exits_one(fake_server, capsys):
+    """删不掉的要说清楚是「没这条」，别假装删成功了。"""
+    code = cli.main(["drop", "20260101-dead"])
+
+    captured = capsys.readouterr()
+    assert code == 1
+    assert "20260101-dead" in captured.err
+
+
+def test_drop_needs_at_least_one_id():
+    with pytest.raises(SystemExit):
+        cli.build_parser().parse_args(["drop"])

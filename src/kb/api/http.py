@@ -13,6 +13,7 @@ from __future__ import annotations
 import argparse
 import logging
 import os
+import re
 import threading
 from collections.abc import Callable
 from datetime import datetime
@@ -36,6 +37,7 @@ from kb.core.vault import (
     new_draft_id,
     read_draft,
     read_note,
+    remove_draft,
     write_draft,
 )
 from kb.llm.base import LLM
@@ -55,6 +57,10 @@ class PushRequest(BaseModel):
 
 class OrganizeRequest(BaseModel):
     draft_id: str | None = None
+
+
+class DropRequest(BaseModel):
+    ids: list[str] = []
 
 
 class ChatRequest(BaseModel):
@@ -402,19 +408,54 @@ def create_app(
             )
         return {"id": draft_id}
 
+    @app.post("/drop")
+    def drop(req: DropRequest) -> dict:
+        """删草稿（Q99）。投错了的唯一退路——走服务，不手改文件。
+
+        **不留记录、不进 commit**（2026-09-18 定的）：删等于「当没发生过」，
+        工作日志上不该多一笔，也不该为它单打一个 commit。
+
+        找不到的 id **不报错**，原样列进 `missing` 交回调用方——批量删的时候，
+        一条对不上不该把其余几条一起废掉。
+        """
+        # 去重：同一个 id 写两遍，第二遍会找不到（已经删了），
+        # 于是凭空多出一条 `missing`，看着像出了错。
+        ids = [i.strip() for i in dict.fromkeys(req.ids) if i.strip()]
+        if not ids:
+            raise HTTPException(status_code=400, detail="没给要删的草稿 id")
+
+        dropped: list[str] = []
+        missing: list[str] = []
+        for draft_id in ids:
+            path = find_draft(get_cfg().vault_path, draft_id)
+            if path is None:
+                missing.append(draft_id)
+                continue
+            remove_draft(path)
+            dropped.append(draft_id)
+        return {
+            "dropped": dropped,
+            "missing": missing,
+            "remaining": len(list_drafts(get_cfg().vault_path)),
+        }
+
     @app.get("/inbox")
     def inbox() -> dict:
         items = []
         for path in list_drafts(get_cfg().vault_path):
             draft = read_draft(path)
-            first_line = draft.body.strip().splitlines()
+            lines = draft.body.strip().splitlines()
+            # 预览是**给人扫一眼**的，markdown 记号在这里只会碍事：
+            # 草稿开头写 `# bat 必须是 CRLF`，列表里就顶着个 `#`（2026-09-18）。
+            # 只剥行首的标题记号，正文一个字都不动（Q55 的「原样写入」管的是存储）。
+            preview = re.sub(r"^#{1,6}\s+", "", lines[0])[:80] if lines else ""
             items.append(
                 {
                     "id": draft.id,
                     "project": draft.project,
                     "source": draft.source,
                     "created_at": draft.created_at,
-                    "preview": first_line[0][:80] if first_line else "",
+                    "preview": preview,
                     "pending": path.parent.name == PENDING,
                 }
             )

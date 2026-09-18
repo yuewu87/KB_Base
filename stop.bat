@@ -26,5 +26,8 @@ REM Always pause. Unlike web.bat (which opens a browser, so you get visible
 REM feedback either way), this one only prints a line -- double-clicked from
 REM Explorer the window would close before you could read it. Scripts should
 REM call the kb CLI directly instead.
+set "KN_RC=%ERRORLEVEL%"
 pause
-endlocal
+
+REM endlocal resets ERRORLEVEL to 0 -- capture it first (above), exit with it.
+endlocal & exit /b %KN_RC%

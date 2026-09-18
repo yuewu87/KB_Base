@@ -17,4 +17,9 @@ if exist "D:\Conda_base\envs\kn_base\python.exe" (
 ) else (
   python -m kb.api.cli %*
 )
-endlocal
+
+REM endlocal resets ERRORLEVEL to 0, so without this every failure (empty
+REM content, a drop target that does not exist) still looks like success to
+REM whoever called us. Capture the code first, then exit with it.
+set "KN_RC=%ERRORLEVEL%"
+endlocal & exit /b %KN_RC%

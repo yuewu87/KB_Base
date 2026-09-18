@@ -298,3 +298,120 @@ def test_chat_push_runs_organize_immediately(vault):
 
     assert list_drafts(vault) == []              # 草稿被消费掉了
     assert [p.stem for p in list_notes(vault)]   # 笔记建出来了
+
+
+# ---------- 删草稿（Q99）----------
+
+def test_drop_removes_the_draft(client, tmp_path):
+    """投错的草稿要能撤。走服务删——手改 vault 会把「写入只此一路」的规矩开口子。"""
+    draft_id = client.post("/push", json={"content": "写错了"}).json()["id"]
+
+    resp = client.post("/drop", json={"ids": [draft_id]})
+
+    assert resp.status_code == 200
+    assert resp.json() == {"dropped": [draft_id], "missing": [], "remaining": 0}
+    assert list_drafts(tmp_path) == []
+
+
+def test_drop_takes_several_at_once(client, tmp_path):
+    ids = [
+        client.post("/push", json={"content": f"第 {i} 条"}).json()["id"]
+        for i in range(3)
+    ]
+
+    resp = client.post("/drop", json={"ids": ids[:2]})
+
+    assert resp.json()["dropped"] == ids[:2]
+    assert [p.stem for p in list_drafts(tmp_path)] == [ids[2]]
+
+
+def test_drop_reports_missing_without_killing_the_rest(client, tmp_path):
+    """找不到的 id 报出来就好——另外几条还得删掉，不能整条命令炸掉。"""
+    draft_id = client.post("/push", json={"content": "留着的"}).json()["id"]
+
+    resp = client.post("/drop", json={"ids": ["20260101-dead", draft_id]})
+
+    assert resp.status_code == 200
+    assert resp.json() == {
+        "dropped": [draft_id],
+        "missing": ["20260101-dead"],
+        "remaining": 0,
+    }
+    assert list_drafts(tmp_path) == []
+
+
+def test_drop_nothing_is_rejected(client):
+    """一条 id 都不给——没有东西要删，别当成成功。"""
+    assert client.post("/drop", json={"ids": []}).status_code == 400
+
+
+def test_drop_reaches_pending_drafts(client, vault):
+    """待归类里的也是草稿，一样要能撤。"""
+    from kb.core.vault import move_to_pending
+
+    draft_id = client.post("/push", json={"content": "归不了类"}).json()["id"]
+    move_to_pending(vault, next(p for p in list_drafts(vault) if p.stem == draft_id))
+
+    assert client.post("/drop", json={"ids": [draft_id]}).json()["dropped"] == [draft_id]
+    assert list_drafts(vault) == []
+
+
+def test_drop_leaves_no_flow_log(client, vault):
+    """**不留记录**（Q99）：删是「当没发生过」，工作日志上不该多一笔。"""
+    from kb.core.flow import list_days, read_day
+
+    draft_id = client.post("/push", json={"content": "x"}).json()["id"]
+    before = sum(len(read_day(vault, d)) for d in list_days(vault))
+
+    resp = client.post("/drop", json={"ids": [draft_id]})
+    assert resp.json()["dropped"] == [draft_id]  # 先确认删真的发生了
+
+    assert sum(len(read_day(vault, d)) for d in list_days(vault)) == before
+
+
+def test_drop_does_not_commit(client, vault):
+    """**不进 commit**（Q99）——跟 push 一致，提交由整理或人来定。"""
+    draft_id = client.post("/push", json={"content": "x"}).json()["id"]
+    before = _git(vault, "rev-list", "--count", "HEAD").stdout.strip()
+
+    resp = client.post("/drop", json={"ids": [draft_id]})
+    assert resp.json()["dropped"] == [draft_id]  # 先确认删真的发生了
+
+    assert _git(vault, "rev-list", "--count", "HEAD").stdout.strip() == before
+
+
+def test_drop_does_not_touch_notes(client, vault):
+    """只删草稿。笔记跟草稿 id 撞名也不许误伤。"""
+    from kb.core.vault import list_notes
+
+    client.post("/push", json={"content": "一条要整理的"})
+    client.post("/organize", json={})
+    notes = [p.stem for p in list_notes(vault)]
+    assert notes, "整理没成功的话这条测试就白测了"
+
+    # 再投一条留在收件箱里，删它——笔记不该少一根汗毛
+    draft_id = client.post("/push", json={"content": "这条留在草稿里"}).json()["id"]
+    assert client.post("/drop", json={"ids": [draft_id]}).json()["dropped"] == [draft_id]
+
+    assert [p.stem for p in list_notes(vault)] == notes
+
+
+# ---------- 收件箱预览 ----------
+
+def test_inbox_preview_strips_the_heading_marker(client):
+    """正文开头的 H1 在预览里不该顶着个 `#`——那是 markdown 记号，不是内容。"""
+    client.post("/push", json={"content": "# bat 必须是 CRLF\n\n正文"})
+
+    assert client.get("/inbox").json()["items"][0]["preview"] == "bat 必须是 CRLF"
+
+
+def test_inbox_preview_strips_deeper_headings_too(client):
+    client.post("/push", json={"content": "### K23 执行策略\n\n正文"})
+
+    assert client.get("/inbox").json()["items"][0]["preview"] == "K23 执行策略"
+
+
+def test_inbox_preview_leaves_plain_text_alone(client):
+    client.post("/push", json={"content": "#标签不是标题\n正文"})
+
+    assert client.get("/inbox").json()["items"][0]["preview"] == "#标签不是标题"

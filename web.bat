@@ -20,7 +20,11 @@ if exist "D:\Conda_base\envs\kn_base\python.exe" (
   python -m kb.api.cli web
 )
 
+set "KN_RC=%ERRORLEVEL%"
+
 REM Keep the window on failure. A double-clicked console window closes the
 REM instant the command exits, so the error would be gone before you read it.
-if errorlevel 1 pause
-endlocal
+if not "%KN_RC%"=="0" pause
+
+REM endlocal resets ERRORLEVEL to 0 -- capture it first (above), exit with it.
+endlocal & exit /b %KN_RC%

@@ -122,6 +122,29 @@ def cmd_organize(args) -> int:
     return 1 if failed == data["count"] else 0
 
 
+def cmd_drop(args) -> int:
+    """删草稿（Q99）。投错、投重复、投完发现写歪了——这是唯一的退路。
+
+    **不走整理那条链**：不写流程日志、不调 git。删是「当没发生过」。
+    """
+    cfg = load_config()
+    with make_client(cfg) as client:
+        resp = client.post("/drop", json={"ids": args.ids})
+        resp.raise_for_status()
+        data = resp.json()
+
+    for draft_id in data["dropped"]:
+        print(f"已删 {draft_id}")
+    if data["missing"]:
+        # 找不到不是「成功」，退出码要如实——脚本里拿它判成败。
+        for draft_id in data["missing"]:
+            print(f"没有这条草稿：{draft_id}", file=sys.stderr)
+        return 1
+
+    print(f"收件箱还剩 {data['remaining']} 条。")
+    return 0
+
+
 def cmd_search(args) -> int:
     cfg = load_config()
     with make_client(cfg) as client:
@@ -216,6 +239,10 @@ def build_parser() -> argparse.ArgumentParser:
 
     p_inbox = sub.add_parser("inbox", help="查看收件箱")
     p_inbox.set_defaults(func=cmd_inbox)
+
+    p_drop = sub.add_parser("drop", help="删掉投错的草稿（可以给多个 id）")
+    p_drop.add_argument("ids", nargs="+", help="草稿 id，至少一个")
+    p_drop.set_defaults(func=cmd_drop)
 
     p_search = sub.add_parser("search", help="检索笔记")
     p_search.add_argument("query", help="关键词")
