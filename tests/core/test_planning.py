@@ -331,6 +331,28 @@ def test_system_prompt_states_reuse_classification_rule():
     assert "能用已有的就用已有的" in prompt
 
 
+def test_system_prompt_demands_a_reason_for_every_link():
+    """链接要说得出共性（Q100）。
+
+    只管「有没有把要求写出来」，管不了模型写得好不好——这正是 Q100 里
+    决定不加机械校验的地方，别在这儿加格式检查。
+    """
+    prompt = build_system_prompt()
+    assert "共性" in prompt
+    assert "——" in prompt          # `## 相关` 里的理由怎么写，得给个样子
+
+
+def test_system_prompt_says_the_reason_must_be_checkable():
+    """光有理由不够，还得具体（Q100 的第二句）。
+
+    「都是坑」这种话放哪两篇上都成立——模型分得清具体和泛泛，
+    但得先把边界告诉它，否则最省力的合规路径就是写一句空话。
+    """
+    prompt = build_system_prompt()
+    assert "具体到能被检验" in prompt
+    assert "说了等于没说" in prompt
+
+
 def test_system_prompt_uses_frontmatter_key_constants():
     """提示词里的键名必须与 K_* 同源。
 
