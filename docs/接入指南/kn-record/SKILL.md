@@ -54,6 +54,11 @@ PYTHONIOENCODING=utf-8 "E:/Study_Projects/KN_Base/kb.bat" push --content "..." -
 PYTHONIOENCODING=utf-8 "E:/Study_Projects/KN_Base/kb.bat" push --file /tmp/note.md --source 会话
 ```
 
+> ⚠️ **多行正文绝对不要写进 `--content`。** Windows 命令行参数里传不了换行——
+> `cmd.exe` 在第一个换行处就把命令截断了，`--content` **只收到第一行，后面的全丢**，
+> 而且**不报任何错**（2026-09-18 实测：7 行正文推过去，落盘只剩标题一行）。
+> `--content` 只适合单行的一句话。
+
 ---
 
 ## 什么时候记
