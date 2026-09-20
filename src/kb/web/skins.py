@@ -58,10 +58,15 @@ SKINS: tuple[Skin, ...] = (
          "#2f5d8a", "#eef4fb", None, _LIGHT),
     Skin("dark-pink", "炭黑甜酷粉", "#1a1a1d", "#242429", "#f0f0f3", "#35353d",
          "#e6397c", "#3b1b2b", None, _DARK),
-    Skin("aurora", "极光紫蜜柚黄", "#fbfaff", "#ffffff", "#2a2440", "#e7e3f5",
-         "#9f82fd", "#efeaff", "#fbea03", _LIGHT),
-    Skin("garnet", "石榴红雾粉桃", "#fdf8f8", "#ffffff", "#33191e", "#f1dddf",
-         "#e72d48", "#fbe4e7", "#f1dddf", _LIGHT),
+    # ② 的「极光紫」**当底**（2026-09-20 用户定的）：原先它是浅白底 + 紫当强调，
+    # 换到真页面上看，紫几乎只剩按钮和链接那几处，整页读起来还是白的。
+    # 底一紫，卡片和侧栏用近白把它托起来，紫这才成了这套的身份。
+    Skin("aurora", "极光紫蜜柚黄", "#ede8fc", "#faf9ff", "#2a2440", "#dcd5f2",
+         "#9f82fd", "#ded4ff", "#fbea03", _LIGHT),
+    # ③ 的雾粉桃**当底**（同一天同一条）：它原来只当了卡片底，页面底是近白。
+    # 粉桃铺满之后，卡片的 `second` 特例就失效了（见 `_derive` 里的说明）。
+    Skin("garnet", "石榴红雾粉桃", "#f1dddf", "#fdf7f7", "#33191e", "#e3cbce",
+         "#e72d48", "#fbe4e7", None, _LIGHT),
     Skin("neon", "极光紫荧光绿", "#241c3a", "#2e2549", "#efeafb", "#3e3462",
          "#bcfe1a", "#3a3457", "#9f82fd", _DARK),
     Skin("mono", "黑皮", "#16171b", "#1f2025", "#e9ebef", "#2e3037",
@@ -198,14 +203,11 @@ def _derive(skin: Skin) -> dict[str, str]:
         values["--scrim"] = _rgba(ink, .38)
         values["--terminal-void"] = mix(ink, "#000000", 0.22)
         values["--terminal-text"] = mix(ink, "#ffffff", 0.78)
-        if skin.id == "garnet":
-            # ③ 的粉桃**就是卡片底色本身**（用户 mockup 的原意）；
-            # 边框往墨推，别往白推——往白推出来 #f5e7e9 跟底色只差 4 个色阶。
-            values["--journal-soft"] = skin.second or mix(accent, surface, 0.92)
-            values["--journal-line"] = mix(values["--journal-soft"], ink, 0.14)
-        else:
-            values["--journal-soft"] = mix(accent, surface, 0.92)
-            values["--journal-line"] = mix(accent, surface, 0.72)
+        # 工作日志卡片一律比面**亮**一档，所以底色的粉桃铺到页面上之后，
+        # 卡片反而浮起来了。（③ 原来有一条「粉桃就是卡片底色本身」的特例，
+        # 粉桃改当页面底色之后那条自然作废——两者不可能同时是同一个颜色。）
+        values["--journal-soft"] = mix(accent, surface, 0.92)
+        values["--journal-line"] = mix(accent, surface, 0.72)
         values["--danger"] = "#8c3b3b"
         values["--danger-hover"] = "#a24646"
 
