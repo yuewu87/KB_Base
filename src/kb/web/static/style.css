@@ -8,24 +8,69 @@
    ========================================================================== */
 
 :root {
-  /* 纸与墨 */
-  --paper:       #fbfcfe;   /* 页面底：极淡的蓝白，不是纯白 */
-  --surface:     #ffffff;   /* 卡片面 */
-  --ink:         #1a2233;   /* 正文 */
-  --muted:       #5b6b7f;   /* 次要文字（对底色 5.9:1） */
-  --faint:       #8a97a8;   /* 辅助信息（对底色 4.6:1） */
-  --line:        #e4e9f0;
-  --line-soft:   #eff3f8;
+  /* ==========================================================================
+     皮肤变量
+     --------------------------------------------------------------------------
+     这一整块就是「现有蓝」。换肤 = 在 `<html data-skin>` 上换一套同名变量，
+     另外五套在文件末尾。**`:root` 留着现有的值，所以不写 `data-skin` 时
+     看到的就是它。**
 
-  /* 蓝：去饱和的藏蓝，不用亮蓝（用户要求「不要太亮」） */
-  --blue:        #2f5d8a;
-  --blue-mid:    #3d7ab8;
-  --blue-soft:   #eef4fb;   /* 整理日志卡片 */
-  --blue-tint:   #f7fafd;
+     下面这 32 行的取值由 `scripts/derive_skins.py` 生成，**不要手改**——
+     要调配色请改 `src/kb/web/skins.py` 里的规则或锚点，然后重跑那个脚本。
+     `tests/web/test_skins.py` 断言两边逐字相等，手改当场变红。
 
-  /* 粉：工作日志卡片 */
-  --pink-soft:   #fdf1f5;
-  --pink-line:   #f2dbe4;
+     变量按**角色**命名，不按颜色（`--accent` 而不是 `--blue`）：换一套皮肤，
+     粉色皮里的「蓝」就是个谎话。几组容易混的：
+
+       --ink / --muted / --faint / --ink-soft / --faint-dim
+                       正文的四档浓淡，从深到浅
+       --line / --line-soft / --line-strong
+                       分隔线的三档，soft 比 line 淡、strong 比 line 重
+       --divider       侧栏那根**深色**分隔线，不是 --line-strong（那是浅灰）
+       --accent        强调色：主按钮底、链接、选中项
+       --accent-ink    强调色**当文字用**时的那一档。② 的紫、⑥ 的蓝直接
+                       当文字只有 2.8 / 2.6:1，所以单独推出一档达标的；
+                       填充仍然用 --accent，调色板的样子不变
+       --on-accent     铺着强调色的按钮上写什么字（白或黑，按对比度选）
+       --journal-*     工作日志卡片（原来是 --pink-*，那是按颜色起的名）
+     ========================================================================== */
+
+  --paper: #fbfcfe;
+  --surface: #ffffff;
+  --ink: #1a2233;
+  --line: #e4e9f0;
+  --accent: #2f5d8a;
+  --accent-soft: #eef4fb;
+  --muted: #5b6b7f;
+  --faint: #8a97a8;
+  --ink-soft: #37445a;
+  --faint-dim: #b9c3d0;
+  --line-soft: #eff3f8;
+  --line-strong: #d3dce7;
+  --divider: #3d4753;
+  --accent-mid: #3d7ab8;
+  --accent-tint: #f7fafd;
+  --accent-line: #dbe7f4;
+  --accent-ring: rgba(61, 122, 184, .12);
+  --accent-ink: #2f5d8a;
+  --on-accent: #ffffff;
+  --on-danger: #ffffff;
+  --journal-soft: #fdf1f5;
+  --journal-line: #f2dbe4;
+  --terminal-void: #1b2430;
+  --terminal-text: #c9d4e0;
+  --scrim: rgba(26, 34, 51, .38);
+  --sweep-gold: #c9a86a;
+  --sweep-gold-deep: #b8934f;
+  --sweep-gold-wash: #fdf8ee;
+  --danger: #8c3b3b;
+  --danger-hover: #a24646;
+  --shadow: 0 1px 2px rgba(26, 34, 51, .04), 0 4px 12px rgba(26, 34, 51, .045);
+  --shadow-lift: 0 2px 6px rgba(26, 34, 51, .07), 0 12px 28px rgba(26, 34, 51, .07);
+
+  /* ==========================================================================
+     下面这些**不进皮肤**：换皮不改布局、字体、动效
+     ========================================================================== */
 
   --font: "Segoe UI", "Microsoft YaHei", system-ui, -apple-system, sans-serif;
   --mono: "Cascadia Mono", Consolas, "Courier New", monospace;
@@ -33,9 +78,6 @@
   --r-sm: 6px;
   --r-md: 10px;
   --r-lg: 14px;
-
-  --shadow:      0 1px 2px rgba(26, 34, 51, .04), 0 4px 12px rgba(26, 34, 51, .045);
-  --shadow-lift: 0 2px 6px rgba(26, 34, 51, .07), 0 12px 28px rgba(26, 34, 51, .07);
 
   --ease: cubic-bezier(.4, 0, .2, 1);
   --dur: 180ms;
@@ -61,12 +103,12 @@ body {
 
 h1, h2, h3 { line-height: 1.3; font-weight: 600; }
 
-a { color: var(--blue); text-decoration: none; }
+a { color: var(--accent); text-decoration: none; }
 a:hover { text-decoration: underline; }
 
 /* 键盘可见的焦点环——不能只靠鼠标 */
 :focus-visible {
-  outline: 2px solid var(--blue-mid);
+  outline: 2px solid var(--accent-mid);
   outline-offset: 2px;
   border-radius: 3px;
 }
@@ -117,8 +159,8 @@ body.collapsed .toggle { justify-content: center; padding-left: 0; padding-right
   width: 22px; height: 22px;
   flex-shrink: 0;
   border-radius: 6px;
-  background: var(--blue);
-  color: #fff;
+  background: var(--accent);
+  color: var(--on-accent);
   display: grid; place-items: center;
   font-size: 11px; font-weight: 700; letter-spacing: -.02em;
 }
@@ -157,11 +199,11 @@ body.collapsed .toggle { justify-content: center; padding-left: 0; padding-right
 .side-btn:hover { background: var(--line-soft); color: var(--ink); text-decoration: none; }
 
 .side-btn.active {
-  background: var(--blue-soft);
-  color: var(--blue);
+  background: var(--accent-soft);
+  color: var(--accent);
   font-weight: 600;
 }
-.side-btn.active .icon { color: var(--blue); }
+.side-btn.active .icon { color: var(--accent); }
 
 /* 「记一条」是**动作**，不是页面——用主蓝描边和数据区分开，
    免得看起来像第五个导航项 */
@@ -172,20 +214,20 @@ body.collapsed .toggle { justify-content: center; padding-left: 0; padding-right
   min-height: 38px;
   padding: 8px 10px;
   margin: 2px 0 10px;
-  border: 1px solid #cfdeee;
+  border: 1px solid var(--line-strong);
   border-radius: var(--r-sm);
-  background: var(--blue-tint);
-  color: var(--blue);
+  background: var(--accent-tint);
+  color: var(--accent);
   font-size: 13.5px;
   font-weight: 600;
   transition: background var(--dur) var(--ease), border-color var(--dur) var(--ease);
 }
 .side-action:hover {
-  background: var(--blue-soft);
-  border-color: var(--blue-mid);
+  background: var(--accent-soft);
+  border-color: var(--accent-mid);
   text-decoration: none;
 }
-.side-action .icon { color: var(--blue); }
+.side-action .icon { color: var(--accent); }
 
 body.collapsed .side-action {
   justify-content: center;
@@ -199,7 +241,7 @@ body.collapsed .side-action {
   color: var(--faint);
   transition: color var(--dur) var(--ease);
 }
-.side-btn:hover .icon { color: var(--blue); }
+.side-btn:hover .icon { color: var(--accent); }
 
 /* ---- 主区 ---- */
 
@@ -226,15 +268,15 @@ body.collapsed .side-action {
   background: var(--surface);
   transition: border-color var(--dur) var(--ease), box-shadow var(--dur) var(--ease);
 }
-.card:hover { border-color: #d3dce7; box-shadow: var(--shadow); }
+.card:hover { border-color: var(--line-strong); box-shadow: var(--shadow); }
 
 .card.journal {
-  background: var(--blue-soft);
-  border-color: #dbe7f4;
+  background: var(--accent-soft);
+  border-color: var(--accent-line);
 }
 .card.flow {
-  background: var(--pink-soft);
-  border-color: var(--pink-line);
+  background: var(--journal-soft);
+  border-color: var(--journal-line);
 }
 
 .card h3 {
@@ -245,7 +287,7 @@ body.collapsed .side-action {
 }
 
 .card ul { margin: 0; padding-left: 17px; }
-.card li { margin: 4px 0; font-size: 13px; color: #37445a; }
+.card li { margin: 4px 0; font-size: 13px; color: var(--ink-soft); }
 .card li::marker { color: var(--faint); }
 
 /* 卡片依次弹出——用户要求「打开时按顺序弹射出来」 */
@@ -285,8 +327,8 @@ body.collapsed .side-action {
 .searchbar input::placeholder { color: var(--faint); }
 .searchbar input:focus {
   outline: none;
-  border-color: var(--blue-mid);
-  box-shadow: 0 0 0 3px rgba(61, 122, 184, .12);
+  border-color: var(--accent-mid);
+  box-shadow: 0 0 0 3px var(--accent-ring);
 }
 
 .searchbar button {
@@ -294,15 +336,15 @@ body.collapsed .side-action {
   min-height: 44px;
   border: 0;
   border-radius: var(--r-md);
-  background: var(--blue);
-  color: #fff;
+  background: var(--accent);
+  color: var(--on-accent);
   font: inherit;
   font-size: 14px;
   font-weight: 500;
   cursor: pointer;
   transition: background var(--dur) var(--ease), transform var(--dur) var(--ease);
 }
-.searchbar button:hover { background: var(--blue-mid); }
+.searchbar button:hover { background: var(--accent-mid); }
 .searchbar button:active { transform: translateY(1px); }
 
 /* ==========================================================================
@@ -328,14 +370,14 @@ body.collapsed .side-action {
               background var(--dur) var(--ease);
 }
 .chip:hover {
-  border-color: var(--blue-mid);
-  color: var(--blue);
+  border-color: var(--accent-mid);
+  color: var(--accent);
   text-decoration: none;
 }
 .chip.active {
-  background: var(--blue);
-  border-color: var(--blue);
-  color: #fff;
+  background: var(--accent);
+  border-color: var(--accent);
+  color: var(--on-accent);
 }
 
 .compose textarea {
@@ -355,8 +397,8 @@ body.collapsed .side-action {
 .compose textarea::placeholder { color: var(--faint); }
 .compose textarea:focus {
   outline: none;
-  border-color: var(--blue-mid);
-  box-shadow: 0 0 0 3px rgba(61, 122, 184, .12);
+  border-color: var(--accent-mid);
+  box-shadow: 0 0 0 3px var(--accent-ring);
 }
 
 .compose-foot {
@@ -372,15 +414,15 @@ body.collapsed .side-action {
   min-height: 40px;
   border: 0;
   border-radius: var(--r-md);
-  background: var(--blue);
-  color: #fff;
+  background: var(--accent);
+  color: var(--on-accent);
   font: inherit;
   font-size: 14px;
   font-weight: 500;
   cursor: pointer;
   transition: background var(--dur) var(--ease), transform var(--dur) var(--ease);
 }
-.compose-foot button:hover { background: var(--blue-mid); }
+.compose-foot button:hover { background: var(--accent-mid); }
 .compose-foot button:active { transform: translateY(1px); }
 
 /* ==========================================================================
@@ -393,9 +435,9 @@ body.collapsed .side-action {
   display: inline-block;
   padding: 2px 9px;
   border-radius: 999px;
-  background: #e9f0f9;
-  border: 1px solid #dae6f3;
-  color: #3c5878;
+  background: var(--accent-soft);
+  border: 1px solid var(--accent-line);
+  color: var(--ink-soft);
   font-size: 11.5px;
   line-height: 1.7;
   white-space: nowrap;
@@ -409,8 +451,8 @@ body.collapsed .side-action {
   margin: 0;
   padding: 17px 19px;
   border-radius: var(--r-md);
-  background: #1b2430;
-  color: #c9d4e0;
+  background: var(--terminal-void);
+  color: var(--terminal-text);
   font-family: var(--mono);
   font-size: 12px;
   line-height: 1.75;
@@ -429,10 +471,10 @@ body.collapsed .side-action {
 code {
   padding: 1.5px 6px;
   border-radius: 4px;
-  background: #eef2f7;
+  background: var(--line-soft);
   font-family: var(--mono);
   font-size: 12px;
-  color: #3c5878;
+  color: var(--ink-soft);
 }
 
 /* ==========================================================================
@@ -467,15 +509,15 @@ code {
    它改的是整页的状态（`/?new=1`），**是个按钮，不是列表项**。
 
    2026-09-20 连着改了两轮，两轮都是「看着不像按钮」：
-   ① 先用次级按钮那套皮（`#cfdeee` 边框 + `--blue-tint` 底）——`--blue-tint`
-      是 #f7fafd，而页面底色 `--paper` 是 #fbfcfe，**差 4 个色阶，底看不出来**，
+   ① 先用次级按钮那套皮（`--line-strong` 边框 + `--accent-tint` 底）——
+      `--accent-tint` 与页面底色 `--paper` **差 4 个色阶，底看不出来**，
       画面上就是一行蓝字。用户：「加个框啊，它是个按钮」。
    ② 改成 `button.primary` 那套（实蓝边 + **白底** + 蓝字）——框有了，用户
       还是说「还是一个链接的样子」。
 
    结论：**这个应用里「像按钮」靠的是「有底色」，不是「有边框」。** 对照「记一条」
    和「发送」，能按的东西都铺着底；白底 + 一根细线，在近白的页面上就是读成
-   「描了个框的链接」。所以这里用 `--blue-soft` 铺底——它在 `--paper` 上看得出来，
+   「描了个框的链接」。所以这里用 `--accent-soft` 铺底——它在 `--paper` 上看得出来，
    又是全站按钮的底色（`button.primary:hover`、`.side-btn.active` 都是它）。 */
 .new-chat {
   display: flex;
@@ -484,17 +526,17 @@ code {
   gap: 6px;
   margin-bottom: 14px;
   padding: 9px 12px;
-  border: 1px solid var(--blue);
+  border: 1px solid var(--accent);
   border-radius: var(--r-sm);
-  background: var(--blue-soft);   /* ← 「是按钮」靠的是这一行，不是上面那行边框 */
-  color: var(--blue);
+  background: var(--accent-soft);   /* ← 「是按钮」靠的是这一行，不是上面那行边框 */
+  color: var(--accent);
   font-size: 13px;
   font-weight: 600;
   transition: background var(--dur) var(--ease), border-color var(--dur) var(--ease);
 }
 .new-chat:hover {
-  background: #dbe7f4;            /* 比 `--blue-soft` 再深一档，按下去有反馈 */
-  border-color: var(--blue-mid);
+  background: var(--accent-line);            /* 比 `--accent-soft` 再深一档，按下去有反馈 */
+  border-color: var(--accent-mid);
   text-decoration: none;
 }
 .new-chat .icon { width: 15px; height: 15px; color: currentColor; }
@@ -524,8 +566,8 @@ code {
 /* 用户靠右淡蓝、助手靠左白——谁说的要一眼分得清 */
 .bubble.user {
   align-self: flex-end;
-  background: var(--blue-soft);
-  border-color: #dbe7f4;
+  background: var(--accent-soft);
+  border-color: var(--accent-line);
 }
 
 .bubble.assistant { align-self: flex-start; }
@@ -556,8 +598,8 @@ code {
 .chat-item:hover { background: var(--line-soft); text-decoration: none; }
 
 .chat-item.active {
-  background: var(--blue-soft);
-  border-left-color: var(--blue);
+  background: var(--accent-soft);
+  border-left-color: var(--accent);
 }
 
 .chat-title {
@@ -568,7 +610,7 @@ code {
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-.chat-item.active .chat-title { color: var(--blue); font-weight: 600; }
+.chat-item.active .chat-title { color: var(--accent); font-weight: 600; }
 .chat-item .mono { display: block; }
 
 /* ---- 竖排流程链（工作日志页右侧）---- */
@@ -598,11 +640,11 @@ code {
 
 /* 走过的步骤主蓝、没走到的灰着——一眼看出这一批走到哪了。
    **状态色只在这里定**：原来 `.chain-step.todo` 的文件末尾还有一份
-   （`#b9c3d0`），后写的赢、这一条被静默盖掉。2026-09-17 收拢过来，
+   （`--faint-dim`），后写的赢、这一条被静默盖掉。2026-09-17 收拢过来，
    取值就是当时实际生效的那个（没走到 ≠ 跳过了，所以比 skipped 浅）。 */
-.chain-step.done    { color: var(--blue); font-weight: 600; }
+.chain-step.done    { color: var(--accent); font-weight: 600; }
 .chain-step.skipped { color: var(--faint); }
-.chain-step.todo    { color: #b9c3d0; }
+.chain-step.todo    { color: var(--faint-dim); }
 
 /* 那根竖线：居中挂在标记下面，把六步串成一条链 */
 .chain-line {
@@ -628,7 +670,7 @@ code {
   line-height: 1.6;
   background: var(--surface);
   border: 1px solid var(--line);
-  color: #37445a;
+  color: var(--ink-soft);
   word-break: break-word;
   /* **必须覆盖掉全局 `.bubble` 的 `pre-wrap`**：侧栏气泡的内容来自模板，
      标签前后的换行与缩进会被原样画出来——每个气泡凭空多一行空白。
@@ -637,9 +679,9 @@ code {
 }
 .chat-history .bubble.assistant {
   border-top-left-radius: 4px;          /* 左边一个小尾巴的圆角 */
-  background: #f6f8fb;
+  background: var(--line-soft);
 }
-.chat-history .bubble.user { background: var(--blue-soft); border-color: #dbe7f4; }
+.chat-history .bubble.user { background: var(--accent-soft); border-color: var(--accent-line); }
 
 /* 直接摆在面板里的气泡**要互相分开**。
 
@@ -669,10 +711,10 @@ code {
 .sweep-reply button,
 button.secondary {
   padding: 6px 13px;
-  border: 1px solid #cfdeee;
+  border: 1px solid var(--line-strong);
   border-radius: 999px;
-  background: var(--blue-tint);
-  color: var(--blue);
+  background: var(--accent-tint);
+  color: var(--accent);
   font: inherit;                 /* 按钮不继承字体，先继承回来… */
   font-size: 12.5px;             /* …再按这里的字号覆盖（`font` 会重置它） */
   font-weight: 600;
@@ -680,7 +722,7 @@ button.secondary {
   transition: background var(--dur) var(--ease), border-color var(--dur) var(--ease);
 }
 .sweep-reply button:hover,
-button.secondary:hover { background: var(--blue-soft); border-color: var(--blue-mid); }
+button.secondary:hover { background: var(--accent-soft); border-color: var(--accent-mid); }
 
 .bubble-at {
   display: block;
@@ -692,7 +734,7 @@ button.secondary:hover { background: var(--blue-soft); border-color: var(--blue-
 
 /* ---- 流程链的三个标记（状态色见上面 `.chain-step` 那一组）---- */
 .mark { width: 14px; height: 14px; flex-shrink: 0; }
-.chain-step.done    .mark { color: var(--blue); }
+.chain-step.done    .mark { color: var(--accent); }
 .chain-step.skipped .mark { color: var(--faint); }
 .chain-step.todo    .mark { color: var(--line); }
 
@@ -799,11 +841,11 @@ button.secondary:hover { background: var(--blue-soft); border-color: var(--blue-
 }
 
 .tab.active {
-  background: #fff;
+  background: var(--surface);
   color: var(--ink);
   font-weight: 600;
-  box-shadow: -1px 0 0 var(--blue) inset;
-  border-color: #b9c6d6;
+  box-shadow: -1px 0 0 var(--accent) inset;
+  border-color: var(--line-strong);
 }
 
 .pane { flex: 1; min-width: 0; }
@@ -832,37 +874,37 @@ button.secondary:hover { background: var(--blue-soft); border-color: var(--blue-
    报告的「金框」。**读过了也还显示**（只是不再高亮）——这一页就是它的家，
    跟侧栏时代那条「没读才冒出来」的逻辑不一样。 */
 .card.sweep {
-  border-color: #c9a86a;
-  background: #fdf8ee;
+  border-color: var(--sweep-gold);
+  background: var(--sweep-gold-wash);
 }
 
 .card.sweep.read {
   border-color: var(--line);
-  background: #fff;
+  background: var(--surface);
 }
 
 .card.sweep.read h3 { color: var(--faint); }
 
 /* `.card.sweep` 与 `.card:hover` 特异度相同，写在后面就把 hover 的金框变化
    整个盖掉。**显式写 hover**：金框卡加深金、已读卡回到普通卡那套。 */
-.card.sweep:hover { border-color: #b8934f; box-shadow: var(--shadow); }
-.card.sweep.read:hover { border-color: #d3dce7; box-shadow: var(--shadow); }
+.card.sweep:hover { border-color: var(--sweep-gold-deep); box-shadow: var(--shadow); }
+.card.sweep.read:hover { border-color: var(--line-strong); box-shadow: var(--shadow); }
 
 /* 「巡检一次」——这一页唯一的主按钮。
    **不要并进 `.sweep-reply button`**：那个是胶囊、淡蓝底；这个是方角、
    实边框，一眼能分出主次。 */
 button.primary {
   padding: 6px 14px;
-  border: 1px solid var(--blue);
+  border: 1px solid var(--accent);
   border-radius: 5px;
-  background: #fff;
-  color: var(--blue);
+  background: var(--surface);
+  color: var(--accent);
   font: inherit;
   font-weight: 600;
   cursor: pointer;
   transition: background var(--dur) var(--ease), border-color var(--dur) var(--ease);
 }
-button.primary:hover { background: var(--blue-soft); border-color: var(--blue-mid); }
+button.primary:hover { background: var(--accent-soft); border-color: var(--accent-mid); }
 
 /* 禁用态。**上面两条都把 `cursor: pointer` 写死了**，而设置窗里的
    「测试连接」「保存」在请求期间会 `btn.disabled = true`——不写这条，
@@ -880,7 +922,7 @@ button.secondary:disabled { opacity: .6; cursor: default; }
 /* ---- 侧栏的分隔线与退出 ---- */
 .side-sep {
   height: 1px;
-  background: #3d4753;
+  background: var(--divider);
   margin: 8px 6px;
   /* **必须写死。** 侧栏是 flex 纵列，这两条线是无内容的 div，
      `min-height: auto` 对它们解析成 0，于是窗口一矮，负自由空间**全被它们
@@ -895,10 +937,10 @@ button.secondary:disabled { opacity: .6; cursor: default; }
 
 /* 「退出」是**红底白字**——全站唯一一个红底，故意的。
    它跟别的入口不是一类东西：其余是「用功能」，这个是「关机」。
-   红用得比正红暗（#8c3b3b），与全站「不要太亮」的基调不冲突。 */
-.side-btn.quit { background: #8c3b3b; color: #fff; }
-.side-btn.quit:hover { background: #a24646; color: #fff; }
-body.collapsed .side-btn.quit { background: #8c3b3b; color: #fff; }
+   红用得比正红暗（`--danger`），与全站「不要太亮」的基调不冲突。 */
+.side-btn.quit { background: var(--danger); color: var(--on-danger); }
+.side-btn.quit:hover { background: var(--danger-hover); color: var(--on-danger); }
+body.collapsed .side-btn.quit { background: var(--danger); color: var(--on-danger); }
 
 /* ---- 模态 ---- */
 .overlay {
@@ -978,8 +1020,8 @@ body.collapsed .side-btn.quit { background: #8c3b3b; color: #fff; }
 }
 
 .settings-nav .nav-item.active {
-  background: var(--blue-soft);
-  color: var(--blue);
+  background: var(--accent-soft);
+  color: var(--accent);
   font-weight: 600;
 }
 
@@ -1014,8 +1056,8 @@ body.collapsed .side-btn.quit { background: #8c3b3b; color: #fff; }
 
 .settings-panes .hint { margin: 4px 0 0; color: var(--faint); font-size: 11.5px; }
 
-.settings-msg { margin: 12px 0 0; color: var(--blue); }
-.settings-msg.bad { color: #a33; }
+.settings-msg { margin: 12px 0 0; color: var(--accent); }
+.settings-msg.bad { color: var(--danger); }
 
 .settings-actions {
   display: flex;
