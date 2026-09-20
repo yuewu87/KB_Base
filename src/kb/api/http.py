@@ -380,6 +380,25 @@ def create_app(
     ))
     app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
 
+    @app.middleware("http")
+    async def _static_must_revalidate(request, call_next):
+        """静态资源一律回 `no-cache`。
+
+        Starlette 的 `StaticFiles` **只发 `etag` 和 `last-modified`，不发
+        `cache-control`**（2026-09-20 `curl -I` 核过）。浏览器对**没有
+        `Cache-Control` 的响应会启用「启发式缓存」**——按距 `Last-Modified`
+        的时长自己推算一个有效期，**中间不问服务端**。结果就是：改了
+        `style.css`、刷新页面，看到的还是旧的。
+
+        `no-cache` 不是「不缓存」，是「用之前先问一句」——本地服务，一个
+        304 不要钱，换来的是**改完刷一下就是新的**。这个坑对样式改动尤其
+        要命：样式错了页面上只会表现得像「功能没做」，而代码、文件、接口
+        全是对的，能白排查半天。 """
+        resp = await call_next(request)
+        if request.url.path.startswith("/static/"):
+            resp.headers["cache-control"] = "no-cache"
+        return resp
+
     @app.get("/health")
     def health() -> dict:
         return {"status": "ok"}

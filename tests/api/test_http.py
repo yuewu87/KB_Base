@@ -95,6 +95,19 @@ def test_health(client):
     assert client.get("/health").json() == {"status": "ok"}
 
 
+def test_static_says_no_cache(client):
+    """静态资源必须回 `cache-control: no-cache`。
+
+    Starlette 的 `StaticFiles` 只发 `etag` / `last-modified`，**不发 `cache-control`**；
+    浏览器对没有 `Cache-Control` 的响应会启用**启发式缓存**，中间不问服务端。
+    于是「改了 `style.css`、刷新页面还是旧的」——而代码、文件、接口全是对的，
+    页面上只表现得像「功能没做」（2026-09-20 真撞上）。
+    """
+    r = client.get("/static/style.css")
+    assert r.status_code == 200
+    assert r.headers["cache-control"] == "no-cache"
+
+
 def test_search_returns_the_body(client, vault):
     """检索结果要带正文（Q103）——只回路径的话，拿到手是个读不出内容的索引。"""
     write_note(

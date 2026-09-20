@@ -464,31 +464,36 @@ code {
 }
 
 /* 「开始新会话」——摆在右栏最顶上，比「会话历史」还高。
-   它改的是整页的状态（`/?new=1`），**是个按钮，不是列表项**，所以画得
-   和主按钮（`button.primary`）一样：**实蓝边框 + 白底 + 蓝字**。
+   它改的是整页的状态（`/?new=1`），**是个按钮，不是列表项**。
 
-   2026-09-20 改过一次：原来用的是次级按钮那套皮（`#cfdeee` 边框 +
-   `--blue-tint` 底），而页面底色是 `--paper: #fbfcfe`——**两者差 4 个色阶，
-   框根本看不见**，画面上就是一行蓝字，用户说「加个框啊，它是个按钮」。
-   `--blue-tint` / `#cfdeee` 这套只在**白底卡片里**才看得出来（设置窗、
-   巡检页），别往 `--paper` 上放。 */
+   2026-09-20 连着改了两轮，两轮都是「看着不像按钮」：
+   ① 先用次级按钮那套皮（`#cfdeee` 边框 + `--blue-tint` 底）——`--blue-tint`
+      是 #f7fafd，而页面底色 `--paper` 是 #fbfcfe，**差 4 个色阶，底看不出来**，
+      画面上就是一行蓝字。用户：「加个框啊，它是个按钮」。
+   ② 改成 `button.primary` 那套（实蓝边 + **白底** + 蓝字）——框有了，用户
+      还是说「还是一个链接的样子」。
+
+   结论：**这个应用里「像按钮」靠的是「有底色」，不是「有边框」。** 对照「记一条」
+   和「发送」，能按的东西都铺着底；白底 + 一根细线，在近白的页面上就是读成
+   「描了个框的链接」。所以这里用 `--blue-soft` 铺底——它在 `--paper` 上看得出来，
+   又是全站按钮的底色（`button.primary:hover`、`.side-btn.active` 都是它）。 */
 .new-chat {
   display: flex;
   align-items: center;
   justify-content: center;
   gap: 6px;
   margin-bottom: 14px;
-  padding: 8px 12px;
-  border: 1px solid var(--blue);        /* 实蓝边——这才是看得见的框 */
+  padding: 9px 12px;
+  border: 1px solid var(--blue);
   border-radius: var(--r-sm);
-  background: #fff;
+  background: var(--blue-soft);   /* ← 「是按钮」靠的是这一行，不是上面那行边框 */
   color: var(--blue);
-  font-size: 12.5px;
+  font-size: 13px;
   font-weight: 600;
   transition: background var(--dur) var(--ease), border-color var(--dur) var(--ease);
 }
 .new-chat:hover {
-  background: var(--blue-soft);
+  background: #dbe7f4;            /* 比 `--blue-soft` 再深一档，按下去有反馈 */
   border-color: var(--blue-mid);
   text-decoration: none;
 }
