@@ -464,8 +464,14 @@ code {
 }
 
 /* 「开始新会话」——摆在右栏最顶上，比「会话历史」还高。
-   它改的是整页的状态（`/?new=1`），所以长得像个动作而不是列表项：
-   实边框、居中、图标在左。 */
+   它改的是整页的状态（`/?new=1`），**是个按钮，不是列表项**，所以画得
+   和主按钮（`button.primary`）一样：**实蓝边框 + 白底 + 蓝字**。
+
+   2026-09-20 改过一次：原来用的是次级按钮那套皮（`#cfdeee` 边框 +
+   `--blue-tint` 底），而页面底色是 `--paper: #fbfcfe`——**两者差 4 个色阶，
+   框根本看不见**，画面上就是一行蓝字，用户说「加个框啊，它是个按钮」。
+   `--blue-tint` / `#cfdeee` 这套只在**白底卡片里**才看得出来（设置窗、
+   巡检页），别往 `--paper` 上放。 */
 .new-chat {
   display: flex;
   align-items: center;
@@ -473,9 +479,9 @@ code {
   gap: 6px;
   margin-bottom: 14px;
   padding: 8px 12px;
-  border: 1px solid #cfdeee;
+  border: 1px solid var(--blue);        /* 实蓝边——这才是看得见的框 */
   border-radius: var(--r-sm);
-  background: var(--blue-tint);
+  background: #fff;
   color: var(--blue);
   font-size: 12.5px;
   font-weight: 600;
