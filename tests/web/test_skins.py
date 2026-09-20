@@ -99,15 +99,19 @@ def test_unknown_skin_falls_back_to_archive():
     assert skins.derive("") == skins.derive("archive")
 
 
-def test_dark_skins_set_color_scheme():
-    """深色皮要带 `color-scheme: dark`。
+@pytest.mark.parametrize("skin", skins.SKINS, ids=lambda s: s.id)
+def test_color_scheme_follows_the_skin_tone(skin):
+    """深色皮要带 `color-scheme: dark`，浅色皮带 `light`。
 
     否则滚动条、`<select>` 下拉、`readonly` 输入框这些**浏览器原生画的**
-    东西还是亮的，深色皮边上会漏出一圈白。
+    东西会跟皮肤对不上，深色皮边上漏出一圈白。
+
+    **按每套自己的 `tone` 断言，不写死 id**——哪个 id 属于哪一档是数据，
+    不是常量（② 就从浅色改成了深色）。
     """
-    assert skins.render_block("dark-pink").startswith('[data-skin="dark-pink"]')
-    assert "color-scheme: dark" in skins.render_block("dark-pink")
-    assert "color-scheme: light" in skins.render_block("aurora")
+    block = skins.render_block(skin.id)
+    assert block.startswith(f'[data-skin="{skin.id}"]')
+    assert f"color-scheme: {'dark' if skin.dark else 'light'}" in block
 
 
 def test_archive_is_verbatim_todays_values():

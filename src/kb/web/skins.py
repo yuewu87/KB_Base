@@ -118,65 +118,22 @@ def _to_contrast(accent: str, paper: str, target: float, toward: str) -> str:
     return toward
 
 
-# --------------------------------------------------------------- ②③ 的底色
-#
-# 用户给的参考图里**只有那两个色**（左半右半各铺一块，另一色当字色），没有任何
-# 第三个「底」。所以底色不能自己配一个看着顺眼的——**必须从这两个色里调和出来**，
-# 落在它们连成的那条线上。2026-09-20 用户的原话：「我的意思是调和其他俩个配色的
-# 那种，而且你这个颜色色号不对吧」——我一开始配的那个亮薰衣草不在线上，是凭空
-# 配的，所以「色号不对」。
-#
-# 规则（`_HARMONY` 是唯一的旋钮）：
-#
-#     调和色 = mix(主色, 另一个色, _HARMONY)     # 以谁为主，看这套该走哪个色
-#     --paper       = 调和色往白提亮 .50          # 提到能当整页底
-#     --surface     = 调和色往白提亮 .78          # 卡片再亮一档
-#     --line        = --paper 掺 .10 的墨
-#     --accent-soft = 强调色往 surface 提亮 .92   # 与其它浅色皮同一条规则
-#
-# **改比例只改 `_HARMONY` 一个数**，别去手改下面那两行色号——那样又回到
-# 「凭手感配一个」，下次换配色还得再猜一遍。
-_HARMONY = 0.20
-
-
-def _harmonized(main: str, other: str, ink: str, accent: str) -> dict[str, str]:
-    """按上面那条规则算出 ②③ 底色的四个锚点。
-
-    **刻意让代码算，而不是把结果抄成字面量**——抄一遍就多出一个「改比例时
-    要跟着手改」的地方，而那种地方漏一个，色号就悄悄偏一两个数位（实测过：
-    手抄的四行里有三行和规则差 1，肉眼看不出来）。
-    """
-    blend = mix(main, other, _HARMONY)
-    paper = mix(blend, "#ffffff", 0.50)
-    surface = mix(blend, "#ffffff", 0.78)
-    return {
-        "paper": paper,
-        "surface": surface,
-        "line": mix(paper, ink, 0.10),
-        "accent_soft": mix(accent, surface, 0.92),
-    }
-
-
-# ②③ 的底色锚点 = 调和规则算出来的；它们的强调色仍是用户定稿值
-_AURORA = _harmonized("#9f82fd", "#fbea03", "#2a2440", "#9f82fd")
-_GARNET = _harmonized("#f1dddf", "#e72d48", "#33191e", "#e72d48")
-
-
-# 六个锚点：①④⑤⑥ 由用户定稿（`.superpowers/brainstorm/.../palettes.html`），
-# ②③ 的底色按上面那条规则调和（其余四个色仍是定稿值）。
+# 六个锚点由用户定稿（`.superpowers/brainstorm/.../palettes.html`）。
+# **②③ 是例外**：它们的角色分工由用户 2026-09-20 当场定死，见各自上面的注释。
 SKINS: tuple[Skin, ...] = (
     Skin("archive", "现有蓝", "#fbfcfe", "#ffffff", "#1a2233", "#e4e9f0",
          "#2f5d8a", "#eef4fb", None, _LIGHT),
     Skin("dark-pink", "炭黑甜酷粉", "#1a1a1d", "#242429", "#f0f0f3", "#35353d",
          "#e6397c", "#3b1b2b", None, _DARK),
-    # ②③ 的底色是**两个色调和出来的**，四个锚点由 `_harmonized` 算，别手改。
-    # ② 以极光紫为主掺蜜柚黄；③ 以雾粉桃为主掺石榴红。
-    Skin("aurora", "极光紫蜜柚黄", _AURORA["paper"], _AURORA["surface"],
-         "#2a2440", _AURORA["line"], "#9f82fd", _AURORA["accent_soft"],
-         "#fbea03", _LIGHT),
-    Skin("garnet", "石榴红雾粉桃", _GARNET["paper"], _GARNET["surface"],
-         "#33191e", _GARNET["line"], "#e72d48", _GARNET["accent_soft"],
-         None, _LIGHT),
+    # ② 就是 ④ 换一个点缀色：底、面、墨、线、选中底**逐字照搬 ④**，
+    # 只把强调色从荧光绿 `#bcfe1a` 换成蜜柚黄 `#fbea03`。
+    # 用户原话：「跟极光紫荧光绿页面**仅仅是绿和黄的区别**」。
+    Skin("aurora", "极光紫蜜柚黄", "#241c3a", "#2e2549", "#efeafb", "#3e3462",
+         "#fbea03", "#3a3457", "#9f82fd", _DARK),
+    # ③ **以红为底、粉为点缀**：底按 ④ 压极光紫的同一个深度压石榴红
+    # （相对亮度都落在 0.014 上下），这样它和 ②④ 是同一套做法——深底 + 亮点缀。
+    Skin("garnet", "石榴红雾粉桃", "#410d14", "#4f0f19", "#fbe9ea", "#681420",
+         "#f1dddf", "#5a3339", None, _DARK),
     Skin("neon", "极光紫荧光绿", "#241c3a", "#2e2549", "#efeafb", "#3e3462",
          "#bcfe1a", "#3a3457", "#9f82fd", _DARK),
     Skin("mono", "黑皮", "#16171b", "#1f2025", "#e9ebef", "#2e3037",
@@ -256,11 +213,9 @@ def _derive(skin: Skin) -> dict[str, str]:
         values["--danger-hover"] = "#a24646"
 
     # 巡检金：撞色的第二个颜色优先（② 的黄、④ 的紫），否则由强调色与现有金混出来
-    if skin.id == "aurora":
-        gold = "#fbea03"
-        deep = mix(gold, "#000000", 0.18)
-    elif skin.id == "neon":
-        gold = "#9f82fd"
+    if dark and skin.second:
+        # 深色皮带了第二色的（②④，都是极光紫当点缀）：巡检金就用它
+        gold = skin.second
         deep = mix(gold, "#ffffff", 0.10)
     elif dark:
         gold = accent
