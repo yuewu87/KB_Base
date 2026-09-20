@@ -1,0 +1,165 @@
+{
+  "schemaVersion": 2,
+  "generatedAt": "2026-09-20T10:05:00+08:00",
+  "title": "Design System: KN_Base",
+  "extensions": {
+    "colorMeta": {
+      "archive-blue": {
+        "role": "primary",
+        "displayName": "档案蓝",
+        "canonical": "#2f5d8a",
+        "tonalRamp": ["#132639", "#20405f", "#2f5c89", "#3e7bb7", "#679acb", "#94b8db", "#c2d6ea", "#ecf2f9"]
+      },
+      "paper": {
+        "role": "neutral",
+        "displayName": "纸",
+        "canonical": "#fbfcfe",
+        "tonalRamp": ["#0f1f3d", "#193366", "#254993", "#3162c4", "#5c85d6", "#8da9e2", "#beceef", "#ebf0fa"]
+      },
+      "ink": {
+        "role": "neutral",
+        "displayName": "墨",
+        "canonical": "#1a2233",
+        "tonalRamp": ["#1a2233", "#2b3854", "#3e517a", "#536ca2", "#788dba", "#a0afcf", "#c9d1e3", "#eef1f6"]
+      },
+      "sweep-gold": {
+        "role": "tertiary",
+        "displayName": "巡检金",
+        "canonical": "#c9a86a",
+        "tonalRamp": ["#382c14", "#5e4922", "#876931", "#b48c41", "#c9a869", "#d9c296", "#e9dcc3", "#f8f4ec"]
+      },
+      "quit-red": {
+        "role": "tertiary",
+        "displayName": "退出红",
+        "canonical": "#8c3b3b",
+        "tonalRamp": ["#8c3b3b", "#a24646", "#b85858", "#c97474", "#d89494", "#e5b4b4", "#f0d4d4", "#f9efef"]
+      }
+    },
+    "typographyMeta": {
+      "display": { "displayName": "页面标题", "purpose": "一页只有一个，21px。" },
+      "title": { "displayName": "卡片标题", "purpose": "比正文还小。层级靠字重和位置给，不靠字号堆叠。" },
+      "body": { "displayName": "正文", "purpose": "全局 14px/1.65。" },
+      "label": { "displayName": "栏目标签", "purpose": "只用于右侧栏小标题：大写 + 0.08em 字距。" },
+      "mono": { "displayName": "等宽", "purpose": "时间戳、会话 id、终端输出、行内 code。" }
+    },
+    "shadows": [
+      { "name": "ambient", "value": "0 1px 2px rgba(26,34,51,.04), 0 4px 12px rgba(26,34,51,.045)", "purpose": "卡片 hover 时。极淡，只让卡片看起来更「近」一点。" },
+      { "name": "lift", "value": "0 2px 6px rgba(26,34,51,.07), 0 12px 28px rgba(26,34,51,.07)", "purpose": "模态窗与窄屏侧栏抽屉。唯一一次真的把东西抬起来。" }
+    ],
+    "motion": [
+      { "name": "ease-standard", "value": "cubic-bezier(.4, 0, .2, 1)", "purpose": "全站唯一的缓动曲线，所有状态过渡都用它。" },
+      { "name": "dur-standard", "value": "180ms", "purpose": "全站唯一的过渡时长。" },
+      { "name": "card-in", "value": "260ms cubic-bezier(.4,0,.2,1) both, 每个子项错开 40ms", "purpose": "卡片入场：opacity 0→1 与 translateY(6px)→0。第 6 个之后统一 200ms 延迟。" },
+      { "name": "thinking-pulse", "value": "1.4s ease-in-out infinite", "purpose": "「思考中」气泡：opacity 1 → .55 呼吸。" }
+    ],
+    "breakpoints": [
+      { "name": "collapse-rail", "value": "900px", "purpose": "右栏收进主区，取消 sticky。" },
+      { "name": "drawer-sidebar", "value": "720px", "purpose": "侧栏变 fixed 抽屉。保底，不是目标——产品只面向桌面。" }
+    ]
+  },
+  "components": [
+    {
+      "name": "主按钮",
+      "kind": "button",
+      "refersTo": "button-primary",
+      "description": "方角 + 1px 实边框 + 白底。用于「保存」「巡检一次」「我知道了」。",
+      "html": "<button class=\"ds-btn-primary\">保存</button>",
+      "css": ".ds-btn-primary { padding: 6px 14px; border: 1px solid var(--blue, #2f5d8a); border-radius: 5px; background: var(--surface, #fff); color: var(--blue, #2f5d8a); font: inherit; font-size: 13px; font-weight: 600; cursor: pointer; transition: background 180ms cubic-bezier(.4,0,.2,1), border-color 180ms cubic-bezier(.4,0,.2,1); } .ds-btn-primary:hover { background: var(--blue-soft, #eef4fb); border-color: var(--blue-mid, #3d7ab8); } .ds-btn-primary:focus-visible { outline: 2px solid var(--blue-mid, #3d7ab8); outline-offset: 2px; border-radius: 3px; } .ds-btn-primary:disabled { opacity: .6; cursor: default; }"
+    },
+    {
+      "name": "次级按钮",
+      "kind": "button",
+      "refersTo": "button-secondary",
+      "description": "胶囊 + 淡底。用于附随动作：「测试连接」「我知道了」。跟主按钮一眼分得出主次。",
+      "html": "<button class=\"ds-btn-secondary\">测试连接</button>",
+      "css": ".ds-btn-secondary { padding: 6px 13px; border: 1px solid var(--rule-strong, #cfdeee); border-radius: 999px; background: var(--blue-tint, #f7fafd); color: var(--blue, #2f5d8a); font: inherit; font-size: 12.5px; font-weight: 600; cursor: pointer; transition: background 180ms cubic-bezier(.4,0,.2,1), border-color 180ms cubic-bezier(.4,0,.2,1); } .ds-btn-secondary:hover { background: var(--blue-soft, #eef4fb); border-color: var(--blue-mid, #3d7ab8); } .ds-btn-secondary:focus-visible { outline: 2px solid var(--blue-mid, #3d7ab8); outline-offset: 2px; border-radius: 3px; }"
+    },
+    {
+      "name": "侧栏导航项",
+      "kind": "nav",
+      "refersTo": "nav-item-active",
+      "description": "38px 高，6px 圆角。当前项用「洗」色铺底 + 主色字 + 600 字重——这是全站「被选中」的统一表达。",
+      "html": "<div class=\"ds-nav\"><a class=\"ds-nav-item is-active\">整理日志</a><a class=\"ds-nav-item\">工作日志</a><a class=\"ds-nav-item\">运行日志</a></div>",
+      "css": ".ds-nav { display: flex; flex-direction: column; gap: 4px; width: 200px; padding: 12px; background: var(--surface, #fff); border-right: 1px solid var(--line, #e4e9f0); } .ds-nav-item { display: flex; align-items: center; min-height: 38px; padding: 8px 10px; border-radius: 6px; color: var(--muted, #5b6b7f); font-size: 13.5px; text-decoration: none; cursor: pointer; transition: background 180ms cubic-bezier(.4,0,.2,1), color 180ms cubic-bezier(.4,0,.2,1); } .ds-nav-item:hover { background: var(--line-soft, #eff3f8); color: var(--ink, #1a2233); } .ds-nav-item.is-active { background: var(--blue-soft, #eef4fb); color: var(--blue, #2f5d8a); font-weight: 600; }"
+    },
+    {
+      "name": "卡片",
+      "kind": "card",
+      "refersTo": "card",
+      "description": "白纸 + 1px 线 + 10px 圆角，静止时无阴影。分类色只染特定页面：整理日志用「洗」蓝、工作日志用粉。",
+      "html": "<div class=\"ds-cards\"><article class=\"ds-card\"><h3>今日结论</h3><ul><li>投递的草稿已经整理完，进了 vault。</li><li>新增两个标签。</li></ul></article><article class=\"ds-card ds-card-journal\"><h3>整理日志</h3><ul><li>这一页的卡片铺「洗」蓝。</li></ul></article></div>",
+      "css": ".ds-cards { display: flex; flex-direction: column; gap: 11px; width: 100%; max-width: 420px; } .ds-card { border: 1px solid var(--line, #e4e9f0); border-radius: 10px; padding: 15px 17px; background: var(--surface, #fff); transition: border-color 180ms cubic-bezier(.4,0,.2,1), box-shadow 180ms cubic-bezier(.4,0,.2,1); animation: ds-card-in 260ms cubic-bezier(.4,0,.2,1) both; } .ds-card:hover { border-color: #d3dce7; box-shadow: 0 1px 2px rgba(26,34,51,.04), 0 4px 12px rgba(26,34,51,.045); } .ds-card h3 { margin: 0 0 10px; font-size: 13.5px; font-weight: 600; color: var(--ink, #1a2233); } .ds-card ul { margin: 0; padding-left: 17px; } .ds-card li { margin: 4px 0; font-size: 13px; color: #37445a; } .ds-card-journal { background: var(--blue-soft, #eef4fb); border-color: #dbe7f4; } @keyframes ds-card-in { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: none; } }"
+    },
+    {
+      "name": "搜索栏",
+      "kind": "input",
+      "refersTo": "input-search",
+      "description": "输入框 10px 圆角；聚焦时边框转亮 + 一圈极淡蓝光晕——这是全站唯一用 box-shadow 表达焦点的地方。右侧是实心主色按钮。",
+      "html": "<form class=\"ds-search\"><input class=\"ds-search-input\" placeholder=\"搜一条结论…\"><button class=\"ds-search-btn\" type=\"button\">搜索</button></form>",
+      "css": ".ds-search { display: flex; gap: 9px; width: 100%; max-width: 420px; } .ds-search-input { flex: 1; min-width: 0; padding: 11px 15px; border: 1px solid var(--line, #e4e9f0); border-radius: 10px; background: var(--surface, #fff); font: inherit; font-size: 14px; color: var(--ink, #1a2233); transition: border-color 180ms cubic-bezier(.4,0,.2,1), box-shadow 180ms cubic-bezier(.4,0,.2,1); } .ds-search-input::placeholder { color: var(--faint, #8a97a8); } .ds-search-input:focus { outline: none; border-color: var(--blue-mid, #3d7ab8); box-shadow: 0 0 0 3px rgba(61,122,184,.12); } .ds-search-btn { padding: 0 22px; min-height: 44px; border: 0; border-radius: 10px; background: var(--blue, #2f5d8a); color: #fff; font: inherit; font-size: 14px; font-weight: 500; cursor: pointer; transition: background 180ms cubic-bezier(.4,0,.2,1); } .ds-search-btn:hover { background: var(--blue-mid, #3d7ab8); }"
+    },
+    {
+      "name": "标签与选择芯片",
+      "kind": "chip",
+      "refersTo": "chip-active",
+      "description": "标签只读（浅蓝底），芯片可点（白底细边框）。芯片选中时整个翻转成主色底白字。",
+      "html": "<div class=\"ds-chips\"><a class=\"ds-chip is-active\">结论</a><a class=\"ds-chip\">踩坑</a><a class=\"ds-chip\">待办</a><span class=\"ds-tag\">浏览器自动化</span><span class=\"ds-tag\">坐标换算</span></div>",
+      "css": ".ds-chips { display: flex; flex-wrap: wrap; gap: 7px; max-width: 420px; } .ds-chip { padding: 5px 13px; border: 1px solid var(--line, #e4e9f0); border-radius: 999px; background: var(--surface, #fff); color: var(--muted, #5b6b7f); font-size: 12.5px; line-height: 1.6; text-decoration: none; cursor: pointer; transition: border-color 180ms cubic-bezier(.4,0,.2,1), color 180ms cubic-bezier(.4,0,.2,1), background 180ms cubic-bezier(.4,0,.2,1); } .ds-chip:hover { border-color: var(--blue-mid, #3d7ab8); color: var(--blue, #2f5d8a); } .ds-chip.is-active { background: var(--blue, #2f5d8a); border-color: var(--blue, #2f5d8a); color: #fff; } .ds-tag { display: inline-block; padding: 2px 9px; border-radius: 999px; background: #e9f0f9; border: 1px solid #dae6f3; color: #3c5878; font-size: 11.5px; line-height: 1.7; }"
+    },
+    {
+      "name": "竖排页签",
+      "kind": "custom",
+      "refersTo": "tab-vertical",
+      "description": "日志页右栏的两个页签。只有左侧有圆角（与面板相接的那侧无边），贴栏边向外伸。选中时白底 + 左侧 2px 主色内阴影。",
+      "html": "<div class=\"ds-tabbed\"><div class=\"ds-tabs\"><button class=\"ds-tab is-active\">报告</button><button class=\"ds-tab\">历史</button></div><div class=\"ds-pane\"><p>最近一次整理</p></div></div>",
+      "css": ".ds-tabbed { display: flex; gap: 0; max-width: 320px; } .ds-tabs { display: flex; flex-direction: column; justify-content: flex-start; gap: 4px; flex: 0 0 22px; } .ds-tab { writing-mode: vertical-rl; text-orientation: upright; letter-spacing: 2px; padding: 9px 3px; border: 1px solid var(--line, #e4e9f0); border-right: none; border-radius: 5px 0 0 5px; background: var(--line-soft, #eff3f8); color: var(--faint, #8a97a8); font: inherit; font-size: 12px; cursor: pointer; } .ds-tab.is-active { background: #fff; color: var(--ink, #1a2233); font-weight: 600; box-shadow: -1px 0 0 var(--blue, #2f5d8a) inset; border-color: #b9c6d6; } .ds-pane { flex: 1; min-width: 0; padding: 0 0 0 14px; font-size: 13px; color: var(--muted, #5b6b7f); }"
+    },
+    {
+      "name": "对话气泡",
+      "kind": "custom",
+      "refersTo": "bubble-user",
+      "description": "用户靠右铺「洗」蓝，助手靠左铺极浅灰蓝、左上角 4px 做出小尾巴。侧栏气泡的 white-space 必须是 normal。",
+      "html": "<div class=\"ds-thread\"><div class=\"ds-bubble ds-bubble-user\">查一下缩放</div><div class=\"ds-bubble ds-bubble-assistant\">库里记过这条：IE 缩放会让点击坐标算歪。</div></div>",
+      "css": ".ds-thread { display: flex; flex-direction: column; gap: 8px; width: 100%; max-width: 340px; } .ds-bubble { max-width: 78%; padding: 9px 12px; border: 1px solid var(--line, #e4e9f0); border-radius: 12px; background: var(--surface, #fff); font-size: 12.5px; line-height: 1.6; color: #37445a; word-break: break-word; } .ds-bubble-user { align-self: flex-end; background: var(--blue-soft, #eef4fb); border-color: #dbe7f4; } .ds-bubble-assistant { align-self: flex-start; border-top-left-radius: 4px; background: #f6f8fb; }"
+    }
+  ],
+  "narrative": {
+    "northStar": "安静的工作台",
+    "overview": "这是一张每天开着的操作台，不是一件展示品。整个界面按瑞士/国际主义的底子建：严格的网格、大量留白、零装饰、颜色只用来承担信息。界面本身没有存在感——它退到内容后面，让人看见的是自己存下的那些结论。\n\n材质上它模仿纸与墨：页面底不是纯白，而是极淡的蓝白（#fbfcfe），卡片是白纸，正文是墨色（#1a2233），分隔是极浅的灰蓝线。整个系统不用纯黑、不用纯灰——所有中性色都带一点蓝的色相。\n\n注：这个北极星是 AI 起的描述性标签，不是用户定的。用户被问到时答「不知道，只是想做得有设计感些，很酷的那种」——所以它描述的是现状，不是目标。",
+    "keyCharacteristics": [
+      "瑞士/编辑式极简：网格 + 留白 + 零装饰",
+      "纸墨质感：页面底是淡蓝白不是纯白；中性色全部带蓝色相，没有纯灰",
+      "颜色承担信息：蓝=可操作/当前，粉=工作日志，金=巡检报告，红=关机",
+      "阴影只做环境暗示，从不用来「抬起来」",
+      "反馈极轻：状态变化靠底色和边框微移，不靠位移、缩放或跳动"
+    ],
+    "rules": [
+      { "name": "The One Accent Rule", "body": "主色只有档案蓝一个。除它之外的颜色都在表达分类（这一页是什么日志），不表达强调。想强调某样东西时，先问：是不是该换层级，而不是换颜色？", "section": "colors" },
+      { "name": "The No-Pure-Gray Rule", "body": "中性色一律带蓝色相。#808080 这种纯灰在这个系统里不存在。", "section": "colors" },
+      { "name": "The 4.5 Floor", "body": "文字色对底色不得低于 4.5:1。--faint（#8a97a8）就是下限，不要再往下调。", "section": "colors" },
+      { "name": "The System-Stack Rule", "body": "不引外链字体。要加字形个性就得自托管一个字体文件，不允许 CDN——这是离线工具的硬约束。", "section": "typography" },
+      { "name": "The Small-Title Rule", "body": "卡片标题（13.5px）比正文（14px）小。层级由字重、颜色、和它周围的空间给，不由字号给。不要为了「看起来更重要」把标题调大。", "section": "typography" },
+      { "name": "The Flat-By-Default Rule", "body": "表面静止时是平的。阴影只作为状态的回应出现（hover、模态、抽屉），从不作为默认外观。", "section": "elevation" },
+      { "name": "The Two-Layer Rule", "body": "阴影一律两层。改阴影时两层一起改。", "section": "elevation" },
+      { "name": "The Semantic Radius Rule", "body": "胶囊 = 次级动作，方角 = 主要动作。不要因为「好看」把主按钮改成胶囊。", "section": "layout" }
+    ],
+    "dos": [
+      "Do 用 var(--token)。全站颜色、圆角、时长都过变量；写死十六进制是这套系统最大的债（目前 :root 之外还有 40 处写死的色值）。",
+      "Do 保持 1px 线宽。要更重的线，用颜色而不是宽度。",
+      "Do 让文字对比度守 4.5:1。--faint 就是下限。",
+      "Do 焦点环用 :focus-visible，2px 档案蓝·亮，offset 2px。",
+      "Do 阴影用双层。",
+      "Do 关掉动效时真的关掉——prefers-reduced-motion 那条规则要覆盖全部动画和过渡。"
+    ],
+    "donts": [
+      "Don't 用纯黑、纯白、纯灰。中性色一律带蓝的色相。",
+      "Don't 把主色晾成亮蓝。档案蓝是去饱和的藏蓝，这是用户明确要求过的。",
+      "Don't 为了强调换颜色。先考虑换层级或换空间。",
+      "Don't 给静止的表面加阴影。",
+      "Don't 把卡片标题调大。它比正文小是故意的。",
+      "Don't 让主按钮变胶囊，或让次级按钮变方角。",
+      "Don't 在同一个选择器上写两份规则。这个文件里已经栽过三次（.chain-step.todo、.day、.sweep-reply button / button.secondary）——特异度相同、后写的赢，改先写的那份完全没反应。",
+      "Don't 让 .overlay 忘了写 [hidden] { display: none }。作者规则的 display: flex 稳压浏览器默认，遮罩层会把整页盖死。"
+    ]
+  }
+}

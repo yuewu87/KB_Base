@@ -75,3 +75,49 @@ Thumbs.db
 
 # 可视化脑暴会话（superpowers）
 .superpowers/
+
+# ---- Claude Code 本机配置 ----
+#
+# `.claude/settings.local.json` 是**本机**的 hook / 权限配置——装 impeccable 时
+# 写进去的，里面的路径是本机绝对路径，换台机器就不对。仓库是 public 的，
+# 这种机器相关的东西不入库。
+#
+# 只点名这一个文件、**不整棵排除 `.claude/`**：以后要真想往仓库里放项目级
+# skill 或共享的 settings.json，那是有意为之，不该被一条通配挡住。
+.claude/settings.local.json
+
+# ---- impeccable 的运行时产物 ----
+#
+# impeccable 在项目根目录建 `.impeccable/`：截图、缓存、live 模式的会话状态。
+# 绝大多数是易失的，不该进 git；少数是**共享的项目产物**（config.json、
+# design.json、surfaces/*.md、critique/*.md），官方要求留在库里——
+# 所以下面逐个点名，不整棵排除。
+#
+# 下面这一块来自官方 README 的「Keeping `.impeccable` out of git」，
+# 连 start/end 标记一起原样抄：它是给 impeccable 自己认的，用来在版本升级后
+# 刷新这段规则。改它之前先确认标记还在。
+#
+# impeccable-ignore-start
+# Ephemeral output, runtime state, and per-dev overrides.
+# Unanchored: .impeccable may sit at the repo root or under a nested
+# workspace (apps/web/.impeccable/...); anchored patterns would miss it.
+# Shared artifacts stay tracked: config.json, live/config.json,
+# design.json, surfaces/*.md, critique/*.md.
+.impeccable/config.local.json
+.impeccable/hook.cache.json
+.impeccable/hook.pending.json
+.impeccable/*.png
+.impeccable/review/
+.impeccable/questions/
+.impeccable/live/server.json
+.impeccable/live/sessions/
+.impeccable/live/previews/
+.impeccable/live/annotations/
+.impeccable/live/cache/
+.impeccable/live/manual-edit-apply-transaction.json
+.impeccable/live/manual-edit-events.jsonl
+.impeccable/live/manual-edit-evidence/
+.impeccable/live/pending-manual-edits.json
+.impeccable/live/deferred-svelte-component-accepts.json
+.impeccable/live/*.png
+# impeccable-ignore-end
