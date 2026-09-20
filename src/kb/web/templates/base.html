@@ -85,6 +85,20 @@
 
       <div class="side-sep push"></div>
 
+      {# 「外观」不像其余入口那样跳页——它弹一个小面板。位置在「退出」上面，
+         与「设置」分开：那两个是「改配置 / 关机」，这个是「换个样子」。 #}
+      <button type="button" class="side-btn" id="skin-btn"
+              aria-haspopup="true" aria-expanded="false" aria-controls="skin-menu"
+              onclick="toggleSkins()">
+        <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+             stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+          <path d="M12 3a9 9 0 1 0 0 18h1.5a2.5 2.5 0 0 0 0-5H13a2 2 0 0 1 0-4h5a3 3 0 0 0 3-3 6 6 0 0 0-9-6z"/>
+          <circle cx="7.5" cy="11.5" r="1"/><circle cx="12" cy="7.5" r="1"/>
+          <circle cx="16.5" cy="11.5" r="1"/>
+        </svg>
+        <span class="side-label">外观</span>
+      </button>
+
       <button type="button" class="side-btn quit" onclick="quitService()">
         <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor"
              stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
@@ -304,6 +318,86 @@
       closeSettings();
       document.getElementById('quit-notice').hidden = false;
     }
+
+    // ---- 外观面板 ----
+    //
+    // 面板不在 `.sidebar` 里面（侧栏 `overflow-y: auto` 会把横向伸出去的浮层
+    // 裁掉，见 base.html 里那段注释），所以在 body 下 `position: fixed`，
+    // 位置按按钮的 rect 现算。
+    //
+    // **先改 DOM 再发请求**：`data-skin` 一改，CSS 变量当场整套换掉，页面立刻
+    // 变色，不用等网络回来；请求失败只影响「下次打开是不是这套」，界面不会
+    // 卡一下。失败了**必须出声**——不然用户以为存上了。
+
+    function _skinParts() {
+      return {
+        btn: document.getElementById('skin-btn'),
+        menu: document.getElementById('skin-menu'),
+      };
+    }
+
+    function closeSkins() {
+      const { btn, menu } = _skinParts();
+      if (!btn || !menu) return;
+      menu.hidden = true;
+      btn.setAttribute('aria-expanded', 'false');
+    }
+
+    function toggleSkins() {
+      const { btn, menu } = _skinParts();
+      if (!btn || !menu) return;
+      if (!menu.hidden) { closeSkins(); return; }
+      // 贴着按钮右边、底边对齐。侧栏折叠成 60px 时按钮还在，所以照样能开。
+      const r = btn.getBoundingClientRect();
+      menu.style.left = (r.right + 8) + 'px';
+      menu.style.bottom = Math.max(8, window.innerHeight - r.bottom) + 'px';
+      menu.hidden = false;
+      btn.setAttribute('aria-expanded', 'true');
+      const on = menu.querySelector('.skin-item.on');
+      if (on) on.focus();
+    }
+
+    function pickSkin(id) {
+      document.documentElement.dataset.skin = id;   // 当场变色
+
+      const menu = document.getElementById('skin-menu');
+      menu.querySelectorAll('.skin-item').forEach(function (el) {
+        const mine = el.dataset.skinId === id;
+        el.classList.toggle('on', mine);
+        el.setAttribute('aria-checked', mine ? 'true' : 'false');
+      });
+      closeSkins();
+
+      fetch('/settings', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({values: {KB_SKIN: id}}),
+      }).then(function (r) {
+        // **`fetch` 只在网络层失败时 reject**，4xx/5xx 都是「成功」的响应
+        if (!r.ok) throw new Error('HTTP ' + r.status);
+      }).catch(function (e) {
+        // 界面已经变了，所以这里只影响「下次打开是不是这套」——但**不能一声
+        // 不吭**，否则用户以为存上了。把面板重新打开，顺手把 aria 摆正。
+        const msg = document.getElementById('skin-msg');
+        msg.textContent = '皮肤没存上：' + e;
+        msg.hidden = false;
+        menu.hidden = false;
+        document.getElementById('skin-btn').setAttribute('aria-expanded', 'true');
+      });
+    }
+
+    // 点面板外面、按 Esc 都关。窗口尺寸一变也关——位置是算出来的，
+    // 一变就对不准了，不如关掉重开。
+    document.addEventListener('click', function (e) {
+      const { btn, menu } = _skinParts();
+      if (!menu || menu.hidden) return;
+      if (btn.contains(e.target) || menu.contains(e.target)) return;
+      closeSkins();
+    });
+    document.addEventListener('keydown', function (e) {
+      if (e.key === 'Escape') closeSkins();
+    });
+    window.addEventListener('resize', closeSkins);
   </script>
 </body>
 </html>

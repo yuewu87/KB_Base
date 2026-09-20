@@ -875,6 +875,33 @@ def test_skin_menu_marks_the_current_one(client):
     assert marked(client.get("/").text) == "garnet"
 
 
+def test_skin_button_is_in_the_sidebar_bottom(client):
+    """入口在左栏底部、**「退出」的上面**——不是藏在设置窗里。
+
+    断的是位置关系而不是「有这个 id」：挪到设置窗里、或挪到侧栏顶上去，
+    这个 id 照样在，但那已经不是「左栏底部那个入口」了。
+    """
+    body = client.get("/").text
+    assert 'id="skin-btn"' in body
+    assert body.index('id="skin-btn"') > body.index("side-sep push")
+    assert body.index('id="skin-btn"') < body.index('class="side-btn quit"')
+
+
+def test_skin_menu_starts_hidden(client):
+    """面板默认不展开——展开状态由 JS 管，不是服务端渲染出来的。"""
+    body = client.get("/").text
+    assert 'id="skin-menu"' in body
+    assert 'aria-expanded="false"' in body
+
+
+def test_skin_button_has_an_icon_not_an_emoji(client):
+    """按钮上的图标是内联 SVG（全站规矩，见 flow 页那条测试）。"""
+    import re
+
+    tag = re.search(r'<button[^>]*id="skin-btn".*?</button>', client.get("/").text, re.S)
+    assert tag and "<svg" in tag.group(0)
+
+
 def test_settings_offers_the_same_choice(client):
     """设置窗里的「外观」组说的是同一件事——两个入口不许分叉。"""
     body = client.get("/settings").text
