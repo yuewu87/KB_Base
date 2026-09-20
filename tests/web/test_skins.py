@@ -3,12 +3,37 @@
 import re
 from pathlib import Path
 
+import pytest
+
+from kb.web import skins
+
 STYLE_CSS = (
     Path(__file__).resolve().parents[2] / "src" / "kb" / "web" / "static" / "style.css"
 )
 
 HEX = re.compile(r"#[0-9a-fA-F]{3,8}\b")
 
+# 每套皮肤该有的 32 个变量。顺序与 `skins.ORDER` 一致。
+ALL_VARS = (
+    "--paper", "--surface", "--ink", "--line", "--accent", "--accent-soft",
+    "--muted", "--faint", "--ink-soft", "--faint-dim",
+    "--line-soft", "--line-strong", "--divider",
+    "--accent-mid", "--accent-tint", "--accent-line", "--accent-ring",
+    "--accent-ink", "--on-accent", "--on-danger",
+    "--journal-soft", "--journal-line",
+    "--terminal-void", "--terminal-text", "--scrim",
+    "--sweep-gold", "--sweep-gold-deep", "--sweep-gold-wash",
+    "--danger", "--danger-hover",
+    "--shadow", "--shadow-lift",
+)
+
+# 这俩**不是颜色**，是一整条 `0 1px 2px rgba(...), 0 4px 12px rgba(...)`。
+COLOR_VARS = tuple(v for v in ALL_VARS if v not in ("--shadow", "--shadow-lift"))
+
+HEX_OR_RGBA = re.compile(r"^(#[0-9a-fA-F]{3,8}|rgba?\([\d\s,.]+\))$")
+
+
+# ------------------------------------------------------------ 防回潮
 
 def test_no_hardcoded_hex_outside_variable_blocks():
     """变量定义之外不许出现十六进制色值。
@@ -25,3 +50,71 @@ def test_no_hardcoded_hex_outside_variable_blocks():
         if not line.strip().startswith("--") and HEX.search(line)
     ]
     assert leftovers == [], "变量定义之外还有写死的色值：\n" + "\n".join(leftovers)
+
+
+# ------------------------------------------------------------ 取值
+
+def test_every_skin_defines_every_variable():
+    """六套皮肤，每套 32 个变量一个不少，且都长得像颜色。"""
+    for skin in skins.SKINS:
+        values = skins.derive(skin.id)
+        assert set(values) == set(ALL_VARS), (
+            f"{skin.id} 缺或多：{set(ALL_VARS) ^ set(values)}"
+        )
+        for key in COLOR_VARS:
+            assert HEX_OR_RGBA.match(values[key]), (
+                f"{skin.id} 的 {key} 不是颜色字面量：{values[key]!r}"
+            )
+        for key in ("--shadow", "--shadow-lift"):
+            assert "rgba(" in values[key], f"{skin.id} 的 {key} 不像一条阴影"
+
+
+def test_unknown_skin_falls_back_to_archive():
+    """认不出的 id 一律当现有蓝——`kb.config._skin()` 与这里用的是同一份语义。"""
+    assert skins.derive("purple") == skins.derive("archive")
+    assert skins.derive("") == skins.derive("archive")
+
+
+def test_dark_skins_set_color_scheme():
+    """深色皮要带 `color-scheme: dark`。
+
+    否则滚动条、`<select>` 下拉、`readonly` 输入框这些**浏览器原生画的**
+    东西还是亮的，深色皮边上会漏出一圈白。
+    """
+    assert skins.render_block("dark-pink").startswith('[data-skin="dark-pink"]')
+    assert "color-scheme: dark" in skins.render_block("dark-pink")
+    assert "color-scheme: light" in skins.render_block("aurora")
+
+
+def test_archive_is_verbatim_todays_values():
+    """现有蓝是「原样保留」，几个关键值钉死——推导规则以后怎么改都不许波及它。"""
+    values = skins.derive("archive")
+    assert values["--paper"] == "#fbfcfe"
+    assert values["--accent"] == "#2f5d8a"
+    assert values["--journal-soft"] == "#fdf1f5"
+    assert values["--sweep-gold"] == "#c9a86a"
+
+
+@pytest.mark.parametrize("skin_id", [s.id for s in skins.SKINS])
+def test_text_is_readable(skin_id):
+    """正文与「强调色当文字」都要到 4.5:1。
+
+    `--accent-ink` 这一档存在的全部理由就是这条：② 的紫、⑥ 的蓝直接当
+    文字只有 2.85 / 2.60:1。这条测试是它的看门人——**推导规则改动、
+    或将来有人换了锚点，可读性掉了当场变红**，不用等谁肉眼发现。
+    """
+    values = skins.derive(skin_id)
+    assert skins.contrast(values["--ink"], values["--paper"]) >= 4.5
+    assert skins.contrast(values["--accent-ink"], values["--paper"]) >= 4.5
+
+
+@pytest.mark.parametrize("skin_id", [s.id for s in skins.SKINS])
+def test_button_text_sits_readably_on_its_background(skin_id):
+    """铺着色的按钮/标签上，字要是看得清的。
+
+    `--on-accent` 是白或黑二选一。**这里不写死「白字」**——粉、紫、红、
+    荧光绿上白字都不达标，规则是自动取高的那个。
+    """
+    values = skins.derive(skin_id)
+    assert skins.contrast(values["--on-accent"], values["--accent"]) >= 4.5
+    assert skins.contrast(values["--on-danger"], values["--danger"]) >= 4.5
