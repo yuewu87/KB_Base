@@ -266,6 +266,32 @@ def test_drop_takes_several_ids_at_once(fake_server, capsys):
     assert list_drafts(fake_server.vault_path) == []
 
 
+def test_search_prints_the_body(fake_server, capsys):
+    """`kb search` 的输出是会话层唯一的检索入口——正文不在里面，
+    它就只能转头跟用户说「我拿不到具体条目」（Q103）。
+    """
+    from kb.core.vault import write_note
+
+    write_note(
+        fake_server.vault_path / "计算机" / "并发写锁.md",
+        {"类型": "概念", "主题": ["计算机"]},
+        "# 并发写锁\n\n并发写入会锁表。",
+    )
+
+    code = cli.main(["search", "锁表"])
+
+    out = capsys.readouterr().out
+    assert code == 0
+    assert "并发写锁" in out
+    assert "并发写入会锁表。" in out
+
+
+def test_search_says_so_when_nothing_matches(fake_server, capsys):
+    code = cli.main(["search", "查无此物"])
+    assert code == 0
+    assert "没找到" in capsys.readouterr().out
+
+
 def test_drop_missing_id_reports_to_stderr_and_exits_one(fake_server, capsys):
     """删不掉的要说清楚是「没这条」，别假装删成功了。"""
     code = cli.main(["drop", "20260101-dead"])

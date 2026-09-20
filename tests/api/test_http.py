@@ -8,7 +8,7 @@ from fastapi.testclient import TestClient
 import kb.api.http as http_mod
 from kb.api.http import create_app
 from kb.config import Config
-from kb.core.vault import INBOX, list_drafts, read_draft
+from kb.core.vault import INBOX, list_drafts, read_draft, write_note
 from kb.llm.base import FakeLLM
 
 
@@ -93,6 +93,29 @@ def client(vault: Path) -> TestClient:
 
 def test_health(client):
     assert client.get("/health").json() == {"status": "ok"}
+
+
+def test_search_returns_the_body(client, vault):
+    """检索结果要带正文（Q103）——只回路径的话，拿到手是个读不出内容的索引。"""
+    write_note(
+        vault / "计算机" / "并发写锁.md",
+        {"类型": "概念", "主题": ["计算机"]},
+        "# 并发写锁\n\n并发写入会锁表。",
+    )
+    data = client.get("/search", params={"q": "锁表"}).json()
+    assert data["count"] == 1
+    item = data["items"][0]
+    assert item["path"] == "计算机/并发写锁.md"
+    assert item["title"] == "并发写锁"
+    assert item["tags"] == ["计算机"]
+    assert "并发写入会锁表。" in item["body"]
+
+
+def test_search_without_hits_is_empty(client):
+    assert client.get("/search", params={"q": "查无此物"}).json() == {
+        "count": 0,
+        "items": [],
+    }
 
 
 # ---------- 投递 ----------

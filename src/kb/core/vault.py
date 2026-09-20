@@ -170,6 +170,27 @@ def write_note(path: Path, metadata: dict, body: str) -> None:
     atomic_write(path, frontmatter.dumps(post, allow_unicode=True))
 
 
+def first_heading(body: str) -> str:
+    """取正文第一个 `# ` 标题；没有就用首个非空行。
+
+    笔记的「一句话结论」就写在第一个标题里——**这才是它的标题**，
+    文件名只是它的退化形式。候选召回（查重）和检索（显示）都要它，
+    所以放在这里而不是各自的模块里。
+    """
+    for line in body.splitlines():
+        if line.strip().startswith("# "):
+            return line.strip()[2:].strip()
+    for line in body.splitlines():
+        if line.strip():
+            return line.strip()
+    return ""
+
+
+def note_title(path: Path, body: str) -> str:
+    """笔记对外显示的标题：正文里的一级标题，没有就退回文件名。"""
+    return first_heading(body) or path.stem
+
+
 def list_notes(vault_root: Path) -> list[Path]:
     """列出正式笔记（各领域下的全部 *.md）。
 

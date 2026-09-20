@@ -160,6 +160,11 @@ def cmd_search(args) -> int:
         tags = "、".join(item["tags"]) or "无"
         print(f"  {item['path']}")
         print(f"    {item['title']}｜标签：{tags}")
+        # 正文直接印出来（Q103）：这个输出是会话层能拿到的全部，
+        # 正文不在这儿，它就只剩「我拿不到里面的具体条目」这一条路可走。
+        print()
+        print(item["body"].strip())
+        print()
     return 0
 
 

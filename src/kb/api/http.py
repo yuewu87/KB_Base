@@ -36,7 +36,6 @@ from kb.core.vault import (
     list_drafts,
     new_draft_id,
     read_draft,
-    read_note,
     remove_draft,
     write_draft,
 )
@@ -465,12 +464,14 @@ def create_app(
     def search(q: str = "") -> dict:
         hits = search_notes(get_cfg().vault_path, q)
         items = []
-        for path in hits:
-            meta, _ = read_note(path)
+        for hit in hits:
             items.append({
-                "path": path.relative_to(get_cfg().vault_path).as_posix(),
-                "title": path.stem,
-                "tags": meta.get("主题") or [],
+                "path": hit.path.relative_to(get_cfg().vault_path).as_posix(),
+                "title": hit.title,
+                "tags": hit.tags,
+                # 正文跟着结果一起回去（Q103）。只回索引的话，拿到手的东西
+                # 读不出内容，调用方只能再说一句「要我调出来读给你听吗」。
+                "body": hit.body,
             })
         return {"count": len(items), "items": items}
 

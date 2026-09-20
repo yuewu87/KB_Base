@@ -11,7 +11,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from kb.core.models import K_TOPIC
-from kb.core.vault import list_notes, read_note
+from kb.core.vault import list_notes, note_title, read_note
 
 DEFAULT_LIMIT = 8
 
@@ -45,23 +45,9 @@ def similarity(a: str, b: str) -> float:
     return len(ga & gb) / len(ga | gb)
 
 
-def first_heading(body: str) -> str:
-    """取正文第一个 `# ` 标题；没有就用首个非空行。
-
-    笔记的「一句话结论」就写在第一个标题里，这是喂给 LLM 判定查重的主信号。
-    """
-    for line in body.splitlines():
-        if line.strip().startswith("# "):
-            return line.strip()[2:].strip()
-    for line in body.splitlines():
-        if line.strip():
-            return line.strip()
-    return ""
-
-
 def note_title_and_tags(path: Path) -> tuple[str, list[str]]:
     meta, body = read_note(path)
-    title = first_heading(body) or path.stem
+    title = note_title(path, body)
     tags = meta.get(K_TOPIC) or []
     if isinstance(tags, str):
         tags = [tags]

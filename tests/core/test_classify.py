@@ -3,11 +3,12 @@ from pathlib import Path
 from kb.core.classify import (
     bigrams,
     find_candidates,
-    first_heading,
     note_title_and_tags,
     similarity,
 )
-from kb.core.vault import write_note
+
+# `first_heading` 2026-09-18 搬到了 vault（检索也要用它，见 Q103）。
+from kb.core.vault import first_heading, write_note
 
 
 def _note(root: Path, rel: str, body: str, tags: list[str] | None = None) -> Path:

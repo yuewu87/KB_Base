@@ -13,7 +13,6 @@ from __future__ import annotations
 from pathlib import Path
 
 from kb.core.search import search_notes
-from kb.core.vault import read_note
 
 ACTIONS: dict[str, dict] = {
     "search": {
@@ -63,13 +62,15 @@ def run_action(
         hits = search_notes(vault_root, params["query"])
         if not hits:
             return f"没找到关于「{params['query']}」的内容。"
-        lines = [f"找到 {len(hits)} 篇："]
-        for path in hits:
-            meta, _ = read_note(path)
-            tags = meta.get("主题") or []
-            rel = path.relative_to(vault_root).as_posix()
-            lines.append(f"- {path.stem}（{rel}）标签：{'、'.join(map(str, tags)) or '无'}")
-        return "\n".join(lines)
+        blocks = [f"找到 {len(hits)} 篇："]
+        for hit in hits:
+            rel = hit.path.relative_to(vault_root).as_posix()
+            tags = "、".join(hit.tags) or "无"
+            # **正文必须在这里。** 这段文本是模型能看到的全部——它的返回值
+            # 直接进了对话上下文，而 search 是它唯一的查库动作。只给标题，
+            # 它就只能在「我不知道」和编内容之间选（Q103）。
+            blocks.append(f"## {hit.title}（{rel}）标签：{tags}\n\n{hit.body.strip()}")
+        return "\n\n".join(blocks)
 
     if name == "push":
         if organize_fn is None:
