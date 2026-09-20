@@ -147,6 +147,10 @@ def test_manifest_snapshot():
             ("KB_SWEEP_INTERVAL", "int", "6", ()),
             ("KB_LOG_KEEP_DAYS", "int", "90", ()),
         ]),
+        ("外观", [
+            ("KB_SKIN", "choice", "archive",
+             ("archive", "dark-pink", "aurora", "garnet", "neon", "mono")),
+        ]),
     ]
 
 
@@ -158,16 +162,59 @@ def test_readonly_fields_are_not_editable():
     assert "KB_LLM_MODEL" in keys
 
 
-def test_the_three_env_groups():
-    """`.env` 里的三组。
+def test_the_env_groups():
+    """`.env` 里的四组。
 
     **「关于」不在这里**——它显示的是运行时的东西（服务状态、版本），
     不是 `.env` 里的键，由 `router.settings_context()` 拼出来。
+
+    「外观」这一组是给皮肤的：入口虽然也在左栏底部，配置项仍然摆在这一页
+    ——这里是「所有能改的配置」的清单，藏起来会让人找不到。
     """
-    assert [g.name for g in GROUPS] == ["模型配置", "知识库", "服务"]
+    assert [g.name for g in GROUPS] == ["模型配置", "知识库", "服务", "外观"]
 
 
 # ---------- 校验 ----------
+
+def test_skin_is_a_choice_field():
+    from kb.core.settings import find_field
+
+    field = find_field("KB_SKIN")
+    assert field is not None
+    assert field.kind == "choice"
+    assert field.default == "archive"
+
+
+def test_skin_choices_do_not_drift_from_the_web_layer():
+    """选项表与 `kb.web.skins` 是**两份**（config/settings 不该依赖 web 层）。
+
+    漂了就是这个症状：下拉框里有一套皮肤，模板渲染出来的是另一套，
+    选中任何一个都对不上。
+    """
+    from kb.core.settings import find_field
+    from kb.web.skins import SKIN_IDS
+
+    assert tuple(find_field("KB_SKIN").choices) == tuple(SKIN_IDS)
+
+
+def test_skin_rejects_unknown_value():
+    with pytest.raises(SettingsError, match="皮肤"):
+        validate({"KB_SKIN": "purple"})
+
+
+@pytest.mark.parametrize("skin_id", ["archive", "dark-pink", "aurora", "garnet", "neon", "mono"])
+def test_skin_accepts_every_known_value(skin_id):
+    assert validate({"KB_SKIN": skin_id}) == {"KB_SKIN": skin_id}
+
+
+def test_skin_help_does_not_promise_a_restart():
+    """它是**当场生效**的那一类（`get_cfg()` 每请求现读）——别抄成「下次启动」。"""
+    from kb.core.settings import find_field
+
+    help_text = find_field("KB_SKIN").help
+    assert "立刻生效" in help_text
+    assert "下次启动" not in help_text
+
 
 def test_validate_rejects_bad_log_level():
     with pytest.raises(SettingsError, match="日志级别"):

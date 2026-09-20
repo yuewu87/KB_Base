@@ -1,5 +1,5 @@
 <!doctype html>
-<html lang="zh-CN">
+<html lang="zh-CN" data-skin="{{ skin }}">
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
@@ -99,6 +99,27 @@
       {% block content %}{% endblock %}
     </main>
 
+  </div>
+
+  {# 外观面板。**不能放在 .sidebar 里面**：侧栏是 `overflow-y: auto`，
+     而 `overflow-y` 一设，`overflow-x` 的计算值就跟着变成 `auto`，
+     横向伸出去的浮层会被裁掉。所以挂在 body 下用 `position: fixed`，
+     位置由 JS 按按钮的 rect 现算。 #}
+  <div class="skin-menu" id="skin-menu" role="menu" aria-label="界面皮肤" hidden>
+    {% for item in skins %}
+    <button type="button" class="skin-item{{ ' on' if item.id == skin }}"
+            role="menuitemradio" aria-checked="{{ 'true' if item.id == skin else 'false' }}"
+            data-skin-id="{{ item.id }}" onclick="pickSkin('{{ item.id }}')">
+      <span class="skin-dot" style="--dot: {{ item.dot }}" aria-hidden="true"></span>
+      <span class="skin-name">{{ item.name }}</span>
+      {# 勾用内联 SVG，**不用 ✓ 这个字符**：全站规矩是「界面里不出现 emoji /
+         类 emoji 符号，标记一律内联 SVG」，有测试守着（`.flow` 页那条）。 #}
+      <svg class="skin-tick" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+           stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"
+           aria-hidden="true"><path d="M4 12.5l5.5 5.5L20 6.5"/></svg>
+    </button>
+    {% endfor %}
+    <p class="skin-msg" id="skin-msg" hidden></p>
   </div>
 
   <script>

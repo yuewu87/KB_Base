@@ -18,6 +18,7 @@ def _clean_env(monkeypatch):
         "KB_LOG_LEVEL",
         "KB_SWEEP_INTERVAL",
         "KB_LOG_KEEP_DAYS",
+        "KB_SKIN",
     ):
         monkeypatch.delenv(key, raising=False)
 
@@ -116,6 +117,47 @@ def test_bad_log_level_in_env_falls_back_to_info(tmp_path):
         encoding="utf-8",
     )
     assert load_config(env).log_level == "INFO"
+
+
+# ---------- 皮肤 ----------
+
+def test_skin_defaults_to_archive(tmp_path):
+    assert load_config(_write_env(tmp_path, VALID)).skin == "archive"
+
+
+@pytest.mark.parametrize("skin", ["archive", "dark-pink", "aurora", "garnet", "neon", "mono"])
+def test_skin_is_read(tmp_path, skin):
+    """六套都读得出来，且**大小写不敏感**（和 `_log_level` 一致）。
+
+    一条测试只 `load_config` 一次：`load_dotenv` 是 override=False 的，
+    同一个测试里换一份 `.env` 再读，读到的还是上一次的值。
+    """
+    env = _write_env(tmp_path, VALID + f"KB_SKIN={skin.upper()}\n")
+    assert load_config(env).skin == skin
+
+
+@pytest.mark.parametrize("bad", ["purple", "  ", "dark_pink", "炭黑"])
+def test_bad_skin_in_env_falls_back_to_archive(tmp_path, bad):
+    """手改 `.env` 写错皮肤名不能让服务崩。
+
+    回落默认值跑着，设置窗里显示的就是默认值——人一看就知道不对。
+    和 `_log_level` 是同一条理由：抛出去就是「文件改了、内存没换、
+    客户端拿 500」的怪状态。
+    """
+    env = _write_env(tmp_path, VALID + f"KB_SKIN={bad}\n")
+    assert load_config(env).skin == "archive"
+
+
+def test_the_copied_skin_list_does_not_drift():
+    """`_VALID_SKINS` 是**故意抄的一份**（config 不该依赖 web 层）——抄漏了要有人喊。
+
+    漂了就两头不对：`config._skin()` 会把一套合法皮肤判成非法、静默回落，
+    而界面上一切正常，只是「选哪套都变回现有蓝」。
+    """
+    from kb.config import _VALID_SKINS
+    from kb.web.skins import SKIN_IDS
+
+    assert set(_VALID_SKINS) == set(SKIN_IDS)
 
 
 def test_reload_config_sees_the_new_value(tmp_path):

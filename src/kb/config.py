@@ -39,10 +39,13 @@ class Config:
     llm_model: str
     vault_path: Path
     port: int | None
-    # 下面三个有默认值——老 `.env` 不改也能跑起来（它们以前是硬编码常量）
+    # 下面这些有默认值——老 `.env` 不改也能跑起来（它们以前是硬编码常量）
     log_level: str = "INFO"
     sweep_interval_days: int = 6
     keep_days: int = 90
+    # 界面皮肤。取值清单在 `kb.web.skins`，这里只做容错回落——
+    # 不 import skins，免得 config 反过来依赖 web 层
+    skin: str = "archive"
 
 
 # 日志级别只认这两个。写别的（手改 `.env`）会在 `logging.setLevel` 上抛
@@ -56,6 +59,23 @@ def _log_level(values: Mapping) -> str:
     """
     raw = str(values.get("KB_LOG_LEVEL") or "").strip().upper()
     return raw if raw in _VALID_LOG_LEVELS else "INFO"
+
+
+# 皮肤名的合法清单。**故意在这里抄一份而不是 import `kb.web.skins`**：
+# `config` 是被所有东西依赖的最底层，不该反过来依赖 web 层。
+# 抄漏了有测试守着（`tests/test_config.py` 对着 `skins.SKIN_IDS` 核）。
+_VALID_SKINS = ("archive", "dark-pink", "aurora", "garnet", "neon", "mono")
+
+
+def _skin(values: Mapping) -> str:
+    """皮肤名只认清单里的——手改 `.env` 写错不能让服务崩，
+    回落 `archive` 跑着，界面上显示默认值，人一看就知道不对。
+
+    和 `_log_level` 是同一条理由：`reload_config` 里那个「文件改了、内存没换」
+    的怪状态，比一份不完整的配置难查得多。
+    """
+    raw = str(values.get("KB_SKIN") or "").strip().lower()
+    return raw if raw in _VALID_SKINS else "archive"
 
 
 def _int_or(values: Mapping, key: str, default: int) -> int:
@@ -99,6 +119,7 @@ def _build(get: Mapping, *, strict: bool = True) -> Config:
         log_level=_log_level(get),
         sweep_interval_days=_int_or(get, "KB_SWEEP_INTERVAL", 6),
         keep_days=_int_or(get, "KB_LOG_KEEP_DAYS", 90),
+        skin=_skin(get),
     )
 
 

@@ -813,6 +813,76 @@ def test_test_connection_uses_form_values_not_saved_ones(tmp_path):
     assert seen == ["typed-model"]
 
 
+# ---------- 皮肤 ----------
+
+PAGES = ("/", "/new", "/journal", "/flow", "/runtime", "/sweep")
+
+
+def test_every_page_carries_the_configured_skin(client):
+    """六个页面的 `<html>` 都带对了 `data-skin`。
+
+    **一处漏了就是「切了皮肤这一页没变」**——而这一页恰好是你没点开的那页。
+    """
+    for path in PAGES:
+        body = client.get(path).text
+        assert 'data-skin="archive"' in body, f"{path} 没带 data-skin"
+
+
+def test_skin_change_shows_up_on_next_request(client):
+    """存了 `KB_SKIN` 之后，**不重启**，下一个请求就是新皮肤。
+
+    靠的是 `_ctx` 里的 `get_cfg()` 每请求现读——把 `cfg` 当值收下来的话，
+    这条会红。
+    """
+    assert client.post("/settings", json={"values": {"KB_SKIN": "neon"}}).status_code == 200
+    assert 'data-skin="neon"' in client.get("/").text
+    assert 'data-skin="archive"' not in client.get("/").text
+
+
+def test_skin_menu_lists_all_six(client):
+    """面板里六行都在——少一行就是「有一套皮肤选不了」。"""
+    body = client.get("/").text
+    for skin_id in ("archive", "dark-pink", "aurora", "garnet", "neon", "mono"):
+        assert f'data-skin-id="{skin_id}"' in body
+
+
+def test_every_page_carries_the_skin_menu(client):
+    """面板挂在 base.html 里，所以**每一页**都带着它。
+
+    只在某一页加的话，从别的页面就切不了皮肤——而侧栏看起来哪页都一样。
+    """
+    for path in PAGES:
+        assert 'id="skin-menu"' in client.get(path).text, f"{path} 没有外观面板"
+
+
+def test_skin_menu_marks_the_current_one(client):
+    """当前那行要标出来，否则打开面板看不出「现在是哪套」。
+
+    **恰有一行**是选中的：一个都没有 = 看不出现在哪套，两个 = 用户不知道该信谁。
+    """
+    import re
+
+    def marked(body: str) -> str:
+        tags = [
+            t for t in re.findall(r"<button[^>]*>", body, re.S)
+            if "skin-item" in t and 'aria-checked="true"' in t
+        ]
+        assert len(tags) == 1, f"选中的那行有 {len(tags)} 个（应当恰好 1 个）"
+        return re.search(r'data-skin-id="([\w-]+)"', tags[0]).group(1)
+
+    assert marked(client.get("/").text) == "archive"
+    client.post("/settings", json={"values": {"KB_SKIN": "garnet"}})
+    assert marked(client.get("/").text) == "garnet"
+
+
+def test_settings_offers_the_same_choice(client):
+    """设置窗里的「外观」组说的是同一件事——两个入口不许分叉。"""
+    body = client.get("/settings").text
+    assert "外观" in body
+    assert '<option value="neon"' in body
+    assert 'data-init="archive"' in body
+
+
 def test_test_connection_reports_failure(tmp_path):
     """连不上要报原因，别只说「失败」。"""
     class _Boom:

@@ -31,6 +31,7 @@ from kb.core.flow import list_days as flow_days
 from kb.core.flow import read_day as read_flow_day
 from kb.llm.base import LLM, LLMError
 from kb.logging_setup import LOG_DIR
+from kb.web import skins
 from kb.web.data import (
     box_label,
     group_flow,
@@ -81,11 +82,12 @@ def settings_context(env_path: Path, cfg: Config) -> dict:
         可改字段反过来，**必须**是 `.env` 的字面值：留空 = 不改是它们的语义
         （密钥尤其），显示生效值就等于让人一保存把 key 覆盖成掩码。
 
-        **`choice` 是唯一的例外：先 `upper()` 再显示。** 与 `config._log_level`
-        的 `upper()` 口径一致——`.env` 里手写小写 `debug` 时，大写选项列表里
-        匹配不上，下拉框会**落到第一个 option**（画面上是 INFO），而 `data-init`
-        还是 `debug`：用户「什么都不改点保存」，`debug` 就被静默写成 `INFO`。
-        归一之后，显示的就是**实际生效**的那个值，`data-init` 也跟着对得上。
+        **`choice` 是唯一的例外：先对回选项列表里的那一个。** 与
+        `config._log_level` 的 `upper()` 同一条理由——`.env` 里手写小写
+        `debug` 时，选项表里匹配不上，下拉框会**落到第一个 option**
+        （画面上是 INFO），而 `data-init` 还是 `debug`：用户「什么都不改点
+        保存」，那个 `debug` 就被静默写成 `INFO`。归一之后，显示的就是
+        **实际生效**的那个值，`data-init` 也跟着对得上。
         """
         if f.kind == "readonly":
             if f.key == "KB_VAULT_PATH":
@@ -94,7 +96,7 @@ def settings_context(env_path: Path, cfg: Config) -> dict:
                 return str(cfg.port) if cfg.port else "自动"
         raw = values.get(f.key, f.default)
         if f.kind == "choice":
-            raw = raw.upper()
+            raw = _normalize_choice(raw, f.choices)
         return _display(f, raw)
 
     groups = [
@@ -156,6 +158,24 @@ def _service_status() -> str:
     return text
 
 
+def _normalize_choice(raw: str, choices: tuple[str, ...]) -> str:
+    """把 `.env` 里手写的值对到选项列表里的那一个——**不区分大小写**。
+
+    **不能一律 `upper()`。** 那是为 `INFO` / `DEBUG` 那种全大写选项写的，
+    而皮肤名是小写带连字符的（`neon`、`dark-pink`）：`upper()` 成 `NEON`
+    之后**谁都匹配不上**，`<option>` 一个都不 `selected`，浏览器静默落到
+    第一项——画面上写着「现有蓝」，实际存的是 neon。这类「显示的和生效的
+    不是一回事」正是这个模块上面那段注释要拦的东西。
+
+    对不上就原样返回：下拉框照样落到第一项，但 `data-init` 是真值，
+    `saveSettings` 不会把它当「没动过」而漏掉。
+    """
+    for choice in choices:
+        if choice.lower() == raw.lower():
+            return choice
+    return raw
+
+
 def _display(field, value: str) -> str:
     """密钥只给掩码——**原文一个字都不进 HTML**。"""
     if field.kind != "secret" or not value:
@@ -188,7 +208,17 @@ def build_router(
     router = APIRouter()
 
     def _ctx(name: str, **extra) -> dict:
-        return {"active": name, "vault": str(get_cfg().vault_path), **extra}
+        # `get_cfg()` 每请求现读，所以换皮肤**下一个请求就生效**，不用重启。
+        # **皮肤只在这一处注入**：六个页面 + 设置片段都走这个函数，
+        # 每个端点各传一次迟早漏一个——而漏掉的那页正是「切了皮肤没反应」
+        # 的那一页，而且多半是你没点开的那页。
+        return {
+            "active": name,
+            "vault": str(get_cfg().vault_path),
+            "skin": get_cfg().skin,
+            "skins": skins.options(),
+            **extra,
+        }
 
     def _pick_day(d: str, days: list[str]) -> str:
         """选哪一天：`d` 在列表里就用它，否则落到**最新一天**。

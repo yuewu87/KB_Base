@@ -74,6 +74,15 @@ GROUPS: tuple[Group, ...] = (
         Field("KB_LOG_KEEP_DAYS", "服务侧日志保留（天）", "int", default="90",
               help="更早的启动时清掉。下次启动服务时生效"),
     )),
+    Group("外观", (
+        # 名字与顺序要和 `kb.web.skins` 对得上（有测试对着它核）。
+        # **入口虽然也在左栏底部，配置项仍然摆在这儿**——这一页是「所有能改的
+        # 配置」的清单，皮肤藏在别处会让人找不到。
+        Field("KB_SKIN", "皮肤", "choice",
+              choices=("archive", "dark-pink", "aurora", "garnet", "neon", "mono"),
+              default="archive",
+              help="改完立刻生效，不用重启。左栏底部的「外观」也能切"),
+    )),
 )
 
 _BY_KEY = {f.key: f for g in GROUPS for f in g.fields}
