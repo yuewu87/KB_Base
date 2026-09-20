@@ -105,6 +105,29 @@ def test_chat_page_shows_history(client, vault):
     assert "我答了一句" in body
 
 
+def test_new_chat_button_starts_a_blank_thread(client, vault):
+    """「开始新会话」点完要给一个**空白**会话——**不回落**到最近那次。
+
+    不回落是重点。不带参数进 `/` 是「接着上次说」（侧栏那个「ai对话」就靠它），
+    而点了「开始新会话」的人要的正是**不要**那一次。
+    """
+    from kb.core.chat_store import append_message
+
+    append_message(vault, "20260917-aaaa", "user", "上次说的那句")
+    append_message(vault, "20260917-aaaa", "assistant", "上次答的那句")
+
+    # 不带参数：接着上次说，没有「新会话」那句提示
+    assert "新会话。试试" not in client.get("/").text
+
+    body = client.get("/?new=1").text
+    assert "新会话。试试" in body      # 空白会话
+    assert "开始新会话" in body        # 按钮就在这一页上
+
+    # 手改的坏值不该看到错误页（同 `_pick_day` 那条口径）——**当「要新会话」处理**。
+    # `new` 写成 `int` 的话这里会是 422。
+    assert client.get("/?new=abc").status_code == 200
+
+
 def test_chat_post_redirects_back(client, vault):
     # 表单 POST 落在 `/`：`/chat` 是服务端的 JSON 端点，两者同名会互相遮蔽
     resp = client.post("/", data={"message": "记一下 X"}, follow_redirects=False)

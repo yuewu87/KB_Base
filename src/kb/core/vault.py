@@ -13,6 +13,7 @@ from pathlib import Path
 
 import frontmatter
 
+from kb import proc
 from kb.core.models import (
     K_ID,
     K_PROJECT,
@@ -260,7 +261,9 @@ def project_name_from_cwd(cwd: Path) -> str | None:
     那样 basename 会取到 `core`。非 git 仓库回退到 cwd 的 basename。
     """
     try:
-        proc = subprocess.run(
+        # 返回值不能叫 `proc`——那会遮住上面 import 进来的 `kb.proc`
+        # （`creationflags=proc.NO_CONSOLE` 当场 UnboundLocalError）。
+        done = subprocess.run(
             ["git", "rev-parse", "--show-toplevel"],
             cwd=cwd,
             capture_output=True,
@@ -268,9 +271,10 @@ def project_name_from_cwd(cwd: Path) -> str | None:
             encoding="utf-8",
             errors="replace",
             timeout=5,
+            creationflags=proc.NO_CONSOLE,  # 服务没有控制台，别给它闪一个（kb.proc）
         )
-        if proc.returncode == 0 and proc.stdout.strip():
-            return Path(proc.stdout.strip()).name
+        if done.returncode == 0 and done.stdout.strip():
+            return Path(done.stdout.strip()).name
     except (OSError, subprocess.SubprocessError):
         pass
     return cwd.name or None

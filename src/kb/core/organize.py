@@ -15,6 +15,7 @@ import time
 from datetime import datetime
 from pathlib import Path
 
+from kb import proc
 from kb.core import flow, planning, review
 from kb.core.classify import find_candidates
 from kb.core.journal import append_results
@@ -410,6 +411,10 @@ def git_run(vault_root: Path, *args: str) -> subprocess.CompletedProcess:
     **必须显式指定 utf-8 与 errors="replace"。** Windows 下 `text=True` 会按
     本地编码（GBK）解码，而 git 输出（中文 commit message、路径）是 UTF-8——
     解码异常抛在子进程的读取线程里，主流程只看到 `stdout=None`，极难排查。
+
+    **`creationflags` 是为了别闪窗口**：服务没有控制台，Windows 会给这种
+    子进程新开一个。一次整理要跑好几次 git，网页上就是连闪好几个黑框。
+    见 `kb.proc`。
     """
     return subprocess.run(
         ["git", *args],
@@ -418,6 +423,7 @@ def git_run(vault_root: Path, *args: str) -> subprocess.CompletedProcess:
         text=True,
         encoding="utf-8",
         errors="replace",
+        creationflags=proc.NO_CONSOLE,
     )
 
 
@@ -464,12 +470,16 @@ def commit_changes(
 
     message = build_commit_message(results, when)
     git_run(vault_root, "add", "--", *rels)
-    proc = git_run(
+    # 返回值不能叫 `proc`——那会遮住模块级 import 进来的 `kb.proc`。
+    # 在这个函数里暂时没事（函数内没再用 `proc.NO_CONSOLE`），但下一个
+    # 在这儿加 subprocess 的人伸手就会写 `proc.NO_CONSOLE`，然后 UnboundLocalError。
+    # `vault.project_name_from_cwd` 已经这样炸过一次了。
+    done = git_run(
         vault_root,
         "-c", f"user.name={SERVICE_AUTHOR_NAME}",
         "-c", f"user.email={SERVICE_AUTHOR_EMAIL}",
         "commit", "-m", message,
     )
-    if proc.returncode == 0:
+    if done.returncode == 0:
         flow.emit("提交", f"提交了一个 commit：「{message.splitlines()[0]}」")
-    return proc.returncode == 0
+    return done.returncode == 0

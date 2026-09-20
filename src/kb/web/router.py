@@ -199,10 +199,19 @@ def build_router(
         return d if d in days else (days[0] if days else "")
 
     @router.get("/", response_class=HTMLResponse)
-    def chat_page(request: Request, cid: str = ""):
-        """对话页。不带 `cid` 就落到最近一次会话。"""
+    def chat_page(request: Request, cid: str = "", new: str = ""):
+        """对话页。不带 `cid` 就落到最近一次会话——**除非点了「开始新会话」**。
+
+        `new=1` 是「就是不要那一次」：没有它的话，空白会话没法表达（`cid` 空
+        和不传长得一样，都会回落到最近一次），点了按钮的人会发现自己又回到
+        上一轮对话里。
+
+        **`new` 收字符串不收 `int`**，理由同 `_pick_day`：`?new=abc` 该当成
+        「要新会话」而不是 422——手改 URL 不该看到错误页。写了 `int` 的话，
+        `?new=abc` 会被 FastAPI 直接拒掉。
+        """
         chats = list_chats(data_dir)
-        if not cid and chats:
+        if not cid and not new and chats:
             cid = chats[0]["id"]
         current = load_chat(data_dir, cid) if cid else None
         return templates.TemplateResponse(

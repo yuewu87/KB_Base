@@ -18,6 +18,7 @@ import sys
 import time
 from pathlib import Path
 
+from kb import proc
 from kb.config import PROJECT_ROOT, Config
 
 RUNTIME_DIR = PROJECT_ROOT / "data" / "runtime"
@@ -156,7 +157,11 @@ def stop_service() -> bool:
     if isinstance(pid, int):
         if sys.platform == "win32":
             # 不用 text=True——taskkill 输出是 GBK，解码会在读取线程里炸
-            subprocess.run(["taskkill", "/PID", str(pid), "/F"], capture_output=True)
+            subprocess.run(
+                ["taskkill", "/PID", str(pid), "/F"],
+                capture_output=True,
+                creationflags=proc.NO_CONSOLE,
+            )
         else:
             try:
                 os.kill(pid, signal.SIGTERM)

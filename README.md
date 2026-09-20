@@ -73,7 +73,47 @@ conda activate kn_base
 pip install -r requirements.txt
 ```
 
-再照下面的「配置」填一份 `.env`。
+### 第一次用：两件事必须先定
+
+刚克隆下来**跑不起来、或者跑起来写进了别人的库**，都是因为下面这两件没定。先花两分钟填 `.env`：
+
+```bash
+cp .env.example .env        # Windows cmd: copy .env.example .env
+```
+
+**① API key——必填，没有默认值。**
+
+```
+KB_LLM_API_KEY=sk-...
+KB_LLM_BASE_URL=https://api.deepseek.com
+KB_LLM_MODEL=deepseek-flash
+```
+
+空着不会静默降级——**除了 `kb stop`，每条 `kb` 命令都会当场停下**，报
+`配置错误：缺少必填配置 KB_LLM_API_KEY。请复制 .env.example 为 .env 并填写。`
+（双击 `web.bat` 的话这个错会停在窗口里等你按一下，不会一闪而过。）
+
+后两项 `.env.example` 里已经给了能用的值，换供应商才需要改。填完可以在网页的**设置**窗里点 **[测试连接]** 先验一次——**先测再存**，不用为了试一下就把坏配置写进去。
+
+**② 知识库目录——默认值是 `E:\KB_Library`，这是作者本机的路径，你那儿多半没有。**
+
+```
+KB_VAULT_PATH=E:\KB_Library
+```
+
+它指的是 **vault**：知识本体存的地方，一个独立于本仓库的 Obsidian vault（见下面的工程结构）。两种选法：
+
+| | |
+|---|---|
+| **照默认来** | 直接 `python scripts/init_vault.py` ——它把 `E:\KB_Library` 的骨架建出来（收件箱、索引、附件、三个内置领域），并初始化一个 git 仓库。幂等，重跑不破坏已有内容 |
+| **放别处** | 先改 `KB_VAULT_PATH`，再 `python scripts/init_vault.py <你的路径>` |
+
+**这个脚本是 vault 结构的唯一真源**——想调目录就改它重跑，别手工建。
+
+> vault 是**另一个 git 仓库，刻意不配远端**：里头是你的私人笔记，别顺手推到 GitHub。
+> （本仓库的 `data/` 同理，整棵不进 git。）
+
+填完这两项就齐了，起服务吧。
 
 ### 起服务 / 开网页
 
@@ -129,14 +169,14 @@ kb drop 20260918-9e4f                     # 投错了就撤（可给多个 id）
 
 ## 四、配置
 
-配置放工程根目录的 `.env`（**不入库**），照 `.env.example` 填一份。
+配置放工程根目录的 `.env`（**不入库**），照 `.env.example` 填一份。**第一次用先看上面的「第一次用」一节**——key 和 vault 目录是必填的。
 
 | 键 | 必填 | 说明 |
 |---|---|---|
-| `KB_LLM_API_KEY` | ✅ | LLM 的 API key |
+| `KB_LLM_API_KEY` | ✅ | LLM 的 API key。**没有默认值**，空着服务起不来 |
 | `KB_LLM_BASE_URL` | ✅ | API 地址 |
 | `KB_LLM_MODEL` | ✅ | 模型名 |
-| `KB_VAULT_PATH` | | vault 路径，默认 `E:\KB_Library` |
+| `KB_VAULT_PATH` | | vault 路径，默认 `E:\KB_Library`（**作者本机的路径**，自己用得改成自己的，或照上面那把骨架建出来） |
 | `KB_PORT` | | 网页端口。**建议钉死**——留空的话每次重启换一个，收藏的网页地址就废了 |
 | `KB_LOG_LEVEL` | | `INFO`（默认）/ `DEBUG`（排查时用） |
 | `KB_SWEEP_INTERVAL` | | 距上次巡检超过几天自动跑一次，默认 `6` |

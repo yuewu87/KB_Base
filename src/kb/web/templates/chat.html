@@ -27,7 +27,50 @@
     </form>
   </section>
 
+  <script>
+    // 点发送之后**先显示出来**：你自己那句话 + 一条「思考中」。
+    //
+    // 一轮对话是**同步**跑的（要调模型，里面还可能真的去投递、整理），
+    // 这段时间页面上什么都不动——点完发送像是没反应，人会再点一次，
+    // 于是同一条消息被投两遍。
+    //
+    // 不用 fetch 改成异步：整页 POST 的路子更简单，而且失败时浏览器
+    // 自带的错误页比手写的「网络错误」更说得清。这里只需要把等待画出来。
+    document.querySelector('.chat-main form').addEventListener('submit', function (e) {
+      const form = e.currentTarget;
+      const thread = form.closest('.chat-main').querySelector('.thread');
+      const text = form.querySelector('input[name="message"]').value.trim();
+      // 空消息别画——服务端会拒掉它，画出来反而像发出去了
+      if (!text) return;
+
+      const empty = thread.querySelector('.empty');
+      if (empty) empty.remove();
+
+      const mine = document.createElement('div');
+      mine.className = 'bubble user';
+      mine.textContent = text;
+      thread.appendChild(mine);
+
+      const waiting = document.createElement('div');
+      waiting.className = 'bubble assistant thinking';
+      waiting.textContent = '思考中…';
+      thread.appendChild(waiting);
+      waiting.scrollIntoView({block: 'nearest'});
+
+      const btn = form.querySelector('button[type="submit"]');
+      btn.disabled = true;
+      btn.textContent = '思考中…';
+    });
+  </script>
+
   <aside class="chat-history">
+    <a class="new-chat" href="/?new=1">
+      <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+           stroke-width="1.8" stroke-linecap="round" aria-hidden="true">
+        <path d="M12 5v14M5 12h14"/>
+      </svg>
+      开始新会话
+    </a>
     <h2>会话历史</h2>
     {% if not chats %}<p class="muted">还没有会话。</p>{% endif %}
     {% for c in chats %}

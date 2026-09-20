@@ -463,6 +463,31 @@ code {
   color: var(--faint);
 }
 
+/* 「开始新会话」——摆在右栏最顶上，比「会话历史」还高。
+   它改的是整页的状态（`/?new=1`），所以长得像个动作而不是列表项：
+   实边框、居中、图标在左。 */
+.new-chat {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  margin-bottom: 14px;
+  padding: 8px 12px;
+  border: 1px solid #cfdeee;
+  border-radius: var(--r-sm);
+  background: var(--blue-tint);
+  color: var(--blue);
+  font-size: 12.5px;
+  font-weight: 600;
+  transition: background var(--dur) var(--ease), border-color var(--dur) var(--ease);
+}
+.new-chat:hover {
+  background: var(--blue-soft);
+  border-color: var(--blue-mid);
+  text-decoration: none;
+}
+.new-chat .icon { width: 15px; height: 15px; color: currentColor; }
+
 /* ---- 消息流 ---- */
 
 .thread {
@@ -493,6 +518,18 @@ code {
 }
 
 .bubble.assistant { align-self: flex-start; }
+
+/* 「思考中…」——只在 JS 画出来的那一瞬间存在，整页 POST 回来就没了。
+   它要像一条**还没到**的话：颜色淡下去、轻轻呼吸，别让人以为这就是回答。
+   （`prefers-reduced-motion` 由文件末尾那条统一关掉。） */
+.bubble.thinking {
+  color: var(--faint);
+  animation: thinking-pulse 1.4s ease-in-out infinite;
+}
+@keyframes thinking-pulse {
+  0%, 100% { opacity: 1; }
+  50%      { opacity: .55; }
+}
 
 /* ---- 会话历史项 ---- */
 

@@ -22,4 +22,22 @@
     <button type="submit">投递</button>
   </div>
 </form>
+
+<script>
+  // 投递是**同步**的：服务要调模型判断放哪、写文件、还要打个 git commit。
+  // 这一整段页面都不动，点完像是没反应——人就会再点一次，投出两条草稿。
+  //
+  // 所以点下去先把话说清楚：正在整理，不是卡住了。
+  document.querySelector('.compose').addEventListener('submit', function (e) {
+    const form = e.currentTarget;
+    if (!form.querySelector('textarea[name="content"]').value.trim()) return;
+
+    const hint = form.querySelector('.muted');
+    hint.textContent = '整理中…正在判断放哪、写进库。';
+
+    const btn = form.querySelector('button[type="submit"]');
+    btn.disabled = true;
+    btn.textContent = '整理中…';
+  });
+</script>
 {% endblock %}
