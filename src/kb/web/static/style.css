@@ -641,6 +641,13 @@ code {
 }
 .chat-history .bubble.user { background: var(--blue-soft); border-color: #dbe7f4; }
 
+/* 直接摆在面板里的气泡**要互相分开**。
+
+   `ai对话` 页那串气泡外面套着 `.thread`，间距是它的 `gap: 8px` 给的；而
+   `整理日志` 的「报告」面板是模板直接 `{% for %}` 循环出来的，**没有那个容器**
+   ——两条相邻气泡于是**一条贴着一条**，看着像一个被切开的方块。 */
+.chat-history .pane .bubble + .bubble { margin-top: 8px; }
+
 /* ---- 「次级按钮」这一套样式（胶囊、淡蓝底）----
 
    两处在用，**共用这一条规则**（两个选择器写在一起，不是各写一份值——
@@ -754,7 +761,13 @@ button.secondary:hover { background: var(--blue-soft); border-color: var(--blue-
 /* ---- 竖排页签 ----
 
    贴着侧栏的**左边缘**向外伸，点哪个哪个高亮。窄栏里横排挤不下，
-   所以用 writing-mode 竖着写。 */
+   所以用 writing-mode 竖着写。
+
+   **页签钉在顶上（`flex-start`），不居中。** 原来写的是 `justify-content: center`，
+   而 `.tabs` 是弹性列、高度跟着**当前显示的那个面板**走——**切页签 = 换面板 =
+   换高度**，居中的东西于是跟着上下跳。2026-09-20 实测：报告面板 498px、
+   历史面板 240px，两个页签整体上移约 129px，用户拿两张截图问「位置会变化」。
+   钉住之后位置与面板多高无关。 */
 
 .chat-history.tabbed {
   display: flex;
@@ -765,7 +778,7 @@ button.secondary:hover { background: var(--blue-soft); border-color: var(--blue-
 .tabs {
   display: flex;
   flex-direction: column;
-  justify-content: center;
+  justify-content: flex-start;   /* ← 钉顶。居中会让它跟着面板高度跳，见上 */
   gap: 4px;
   flex: 0 0 22px;
 }
