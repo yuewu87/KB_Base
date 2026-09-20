@@ -39,7 +39,9 @@
                 <svg class="mark" viewBox="0 0 16 16" role="img">
                   <title>{{ step }}：走过</title>
                   <circle cx="8" cy="8" r="7" fill="currentColor"/>
-                  <path d="M4.8 8.3l2.1 2.1 4.3-4.5" fill="none" stroke="#fff"
+                  {# 勾是画在 `--accent` 实心圆上的，所以跟 `--on-accent` 走——
+                     写死白色的话，④ 荧光绿上就是白勾压荧光绿，≈1.2:1，看不见。 #}
+                  <path d="M4.8 8.3l2.1 2.1 4.3-4.5" fill="none" stroke="var(--on-accent)"
                         stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/>
                 </svg>
               {% else %}

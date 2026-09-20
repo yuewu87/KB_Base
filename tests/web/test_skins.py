@@ -52,6 +52,30 @@ def test_no_hardcoded_hex_outside_variable_blocks():
     assert leftovers == [], "变量定义之外还有写死的色值：\n" + "\n".join(leftovers)
 
 
+def test_no_hardcoded_hex_in_templates():
+    """模板里也不许写死颜色。
+
+    **上面那条防不住这里，而且真漏过。** `flow.html` 的流程链勾写死过
+    `stroke="#fff"`：它是画在 `fill="currentColor"`（= `--accent`）的实心圆
+    上的，所以皮肤一切到 ④ 荧光绿，就成了白勾压荧光绿，≈1.2:1，看不见。
+    扫 `style.css` 怎么扫都扫不到它。
+
+    揪出它的办法记在这儿：拿无头浏览器把**每个元素的最终计算色**报出来，
+    逐条核对是不是那 32 个变量解释得了的。六套 × 六页跑一遍，剩下的
+    全是干净的就说明没漏。手改模板的人不会想到要跑那个，所以钉成测试。
+
+    `style="--dot: {{ ... }}"` 那种把颜色**当数据传**的写法不受影响
+    （模板源码里是 Jinja 表达式，不是字面量）。
+    """
+    bad = [
+        f"{path.name}:{n}: {line.strip()}"
+        for path in sorted((STYLE_CSS.parents[1] / "templates").glob("*.html"))
+        for n, line in enumerate(path.read_text(encoding="utf-8").splitlines(), 1)
+        if HEX.search(line)
+    ]
+    assert bad == [], "模板里有写死的色值（换皮肤会漏出上一套的颜色）：\n" + "\n".join(bad)
+
+
 # ------------------------------------------------------------ 取值
 
 def test_every_skin_defines_every_variable():
@@ -118,3 +142,37 @@ def test_button_text_sits_readably_on_its_background(skin_id):
     values = skins.derive(skin_id)
     assert skins.contrast(values["--on-accent"], values["--accent"]) >= 4.5
     assert skins.contrast(values["--on-danger"], values["--danger"]) >= 4.5
+
+
+# ------------------------------------------------------------ CSS 落地
+
+# 生成块的首尾标记。测试靠它把「生成的」和「手写的」分开。
+BEGIN = "/* ===== 皮肤：由 scripts/derive_skins.py 生成，不要手改 ===== */"
+END = "/* ===== 皮肤块结束 ===== */"
+
+
+def test_root_matches_generated_archive():
+    """`:root` 里那 32 行必须逐字等于 `derive("archive")` 的渲染结果。
+
+    现有蓝是「原样保留」，手改一下就会漂——而且漂了看不出来。
+    """
+    text = STYLE_CSS.read_text(encoding="utf-8")
+    assert skins.render_vars("archive") in text, ":root 与 skins.derive('archive') 对不上"
+
+
+def test_style_css_contains_generated_blocks():
+    """另外五块逐字等于 `render_block()` 的输出。"""
+    text = STYLE_CSS.read_text(encoding="utf-8")
+    for skin_id in skins.SKIN_IDS:
+        if skin_id == skins.DEFAULT_SKIN:
+            continue
+        assert skins.render_block(skin_id) in text, (
+            f"style.css 里没有 {skin_id} 的块，或与生成结果不一致"
+        )
+
+
+def test_generated_region_is_delimited():
+    """生成区有首尾标记——没有的话下一次 `--write` 会找不到地方插。"""
+    text = STYLE_CSS.read_text(encoding="utf-8")
+    assert BEGIN in text and END in text
+    assert text.index(BEGIN) < text.index(END)
