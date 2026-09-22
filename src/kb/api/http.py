@@ -94,8 +94,8 @@ def vault_guard(get_cfg: Callable[[], Config]) -> Callable[[], Path]:
     return guard
 
 
-def busy_guard(busy: Busy) -> Callable[[], AbstractContextManager[None]]:
-    """造一个「整理期间占住 `busy`；拿不到就当场 409」的上下文管理器。
+def busy_guard(busy: Busy, what: str = "organize") -> Callable[[], AbstractContextManager[None]]:
+    """造一个「占住 `busy`；拿不到就当场 409」的上下文管理器。
 
     **`api/http.py` 与 `web/router.py` 共用这一份。** 逐字抄两遍的话，
     改 409 文案、加 `Retry-After`、改状态码都得记得改两处——迟早漏一处，
@@ -104,10 +104,15 @@ def busy_guard(busy: Busy) -> Callable[[], AbstractContextManager[None]]:
 
     **不是 `with busy` 那种阻塞式**——拿不到锁要立刻回 409，
     而不是让请求排在这儿等一个可能几分钟的整理跑完。
+
+    `what` 是**自己**要占的名目（`"organize"` / `"migrate"` / `"remove"`，
+    三条都在 `_BUSY_LABELS` 里）；`busy.label` 给的是**别人**正在干的事，
+    那句 409 要说的是后者。默认值让两个老调用点
+    （`api/http.py:352`、`web/router.py:221`）**一个字都不用改**。
     """
     @contextmanager
     def organizing():
-        if not busy.acquire("organize"):
+        if not busy.acquire(what):
             raise HTTPException(
                 status_code=409, detail=f"正在{busy.label}，等它跑完再试"
             )
@@ -402,6 +407,20 @@ def create_app(
         cache["llm"] = None                                  # 模型三件套可能变了
         return changed
 
+    def unbind_vault() -> None:
+        """把 `KB_VAULT_PATH` 写空并重载。**移除专用，不走 `settings.validate`。**
+
+        那条「空值 = 400」的校验管的是**设置窗**：留着笔记和日志却显示成
+        「还没有知识库」，正是本设计要消灭的状态。移除不一样——它是
+        **先删干净、再解绑**，所以这里直接写文件。
+
+        必填项那条复查也不做：移除只动 `KB_VAULT_PATH` 一个键，
+        模型三件套一个字都没碰。
+        """
+        settings.write_env(env_path, {"KB_VAULT_PATH": ""})
+        state["cfg"] = reload_config(env_path)
+        cache["llm"] = None
+
     def _chat_organize_fn(kind: str, content: str, target: str | None) -> str:
         """对话层能调的动作——**只有服务已有的能力**，不新增判断。
 
@@ -449,6 +468,7 @@ def create_app(
         get_cfg, data_dir, _chat_organize_fn, get_llm,
         apply_settings, quit_fn or _default_quit, env_path, make_llm,
         busy=busy,
+        unbind_vault=unbind_vault,
     ))
     app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
 
