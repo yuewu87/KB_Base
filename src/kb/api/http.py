@@ -24,7 +24,15 @@ from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
 
 from kb.api import runtime
-from kb.config import DATA_DIR, PROJECT_ROOT, Config, load_config, reload_config
+from kb.config import (
+    DATA_DIR,
+    PROJECT_ROOT,
+    Config,
+    ConfigError,
+    load_config,
+    reload_config,
+    require_vault,
+)
 from kb.core import flow, organize, settings, sweep, sweep_state
 from kb.core.chat import handle
 from kb.core.chat_store import list_chats, load_chat
@@ -65,6 +73,23 @@ class DropRequest(BaseModel):
 class ChatRequest(BaseModel):
     message: str
     chat_id: str | None = None
+
+
+def vault_guard(get_cfg: Callable[[], Config]) -> Callable[[], Path]:
+    """造一个「取 vault 路径；没配就 409」的函数。
+
+    **端点必须自己拦，不能只靠界面置灰**：`kb.bat push` 走 CLI、接入指南里的
+    会话层 AI 走 `/push`，它们都绕过界面。
+
+    用 409 不用 400：请求本身没写错，是**服务端现在没有可写的东西**——
+    跟「资源冲突」是同一类，什么时候能重试取决于用户去建库。
+    """
+    def guard() -> Path:
+        try:
+            return require_vault(get_cfg())
+        except ConfigError as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
+    return guard
 
 
 def build_llm(cfg: Config) -> LLM:
@@ -116,7 +141,7 @@ def push_draft(
             revise_target=revise_target,
         )
         try:
-            write_draft(cfg.vault_path, draft)
+            write_draft(require_vault(cfg), draft)
         except FileExistsError:
             continue
         logging.getLogger("kb.push").info(
@@ -148,6 +173,8 @@ def push_and_organize(
     会话层那条（`kb push` + 事后 `kb organize`）仍保留缓冲：
     agent 干活时投的东西要攒着，由会话 AI 判断时机（Q62）。
     """
+    vault = require_vault(cfg)      # 没配就当场抛，别等写了一半才发现
+
     # 先开一个 run——这样这次「投递」和紧接着的整理是同一个 run，
     # 工作日志页上它们才会画进同一条流程链。
     run = flow.new_run_id()
@@ -160,8 +187,8 @@ def push_and_organize(
         return text
 
     results = organize.organize_selected(
-        cfg.vault_path,
-        [p for p in [find_draft(cfg.vault_path, draft_id)] if p],
+        vault,
+        [p for p in [find_draft(vault, draft_id)] if p],
         llm,
         run_id=run,
     )
@@ -295,6 +322,8 @@ def create_app(
     def get_cfg() -> Config:
         return state["cfg"]
 
+    vault = vault_guard(get_cfg)
+
     def get_llm() -> LLM:
         if cache["llm"] is None:
             cache["llm"] = make_llm(get_cfg())
@@ -410,6 +439,7 @@ def create_app(
         if not body:
             raise HTTPException(status_code=400, detail="正文不能为空")
 
+        vault()     # 没库就 409——`kb push` 与会话层 AI 都走这条，绕过界面
         # 同上：入口处重置 run，否则会继承这个线程上一次请求的
         flow.set_run(flow.new_run_id())
         _, draft_id = push_draft(
@@ -444,8 +474,9 @@ def create_app(
 
         dropped: list[str] = []
         missing: list[str] = []
+        vault_path = vault()            # 没库就 409，别在循环里才发现
         for draft_id in ids:
-            path = find_draft(get_cfg().vault_path, draft_id)
+            path = find_draft(vault_path, draft_id)
             if path is None:
                 missing.append(draft_id)
                 continue
@@ -454,13 +485,14 @@ def create_app(
         return {
             "dropped": dropped,
             "missing": missing,
-            "remaining": len(list_drafts(get_cfg().vault_path)),
+            "remaining": len(list_drafts(vault_path)),
         }
 
     @app.get("/inbox")
     def inbox() -> dict:
+        vault_path = vault()
         items = []
-        for path in list_drafts(get_cfg().vault_path):
+        for path in list_drafts(vault_path):
             draft = read_draft(path)
             lines = draft.body.strip().splitlines()
             # 预览是**给人扫一眼**的，markdown 记号在这里只会碍事：
@@ -481,11 +513,12 @@ def create_app(
 
     @app.get("/search")
     def search(q: str = "") -> dict:
-        hits = search_notes(get_cfg().vault_path, q)
+        vault_path = vault()
+        hits = search_notes(vault_path, q)
         items = []
         for hit in hits:
             items.append({
-                "path": hit.path.relative_to(get_cfg().vault_path).as_posix(),
+                "path": hit.path.relative_to(vault_path).as_posix(),
                 "title": hit.title,
                 "tags": hit.tags,
                 # 正文跟着结果一起回去（Q103）。只回索引的话，拿到手的东西
@@ -497,21 +530,22 @@ def create_app(
     @app.post("/organize")
     def run_organize(req: OrganizeRequest) -> dict:
         """整理草稿。不传 draft_id 就整理全部（Q38）。"""
+        vault_path = vault()
         if req.draft_id:
-            path = find_draft(get_cfg().vault_path, req.draft_id)
+            path = find_draft(vault_path, req.draft_id)
             if path is None:
                 raise HTTPException(
                     status_code=404, detail=f"找不到草稿 {req.draft_id}"
                 )
             paths = [path]
         else:
-            paths = list_drafts(get_cfg().vault_path)
+            paths = list_drafts(vault_path)
 
         # run 与「开始整理」那句都由 `organize_selected` 自己记
         # （入口有三个，在端点里记会漏掉另两条）
         log = logging.getLogger("kb.organize")
         log.info("开始整理 %d 条草稿", len(paths))
-        results = organize.organize_selected(get_cfg().vault_path, paths, get_llm())
+        results = organize.organize_selected(vault_path, paths, get_llm())
         for r in results:
             if r.error:
                 log.warning("草稿 %s → %s：%s", r.draft_id, r.kind.value, r.error)
@@ -528,9 +562,10 @@ def create_app(
         """一轮对话。会话历史落服务侧，不入库（Q83）。"""
         if req.chat_id and load_chat(data_dir, req.chat_id) is None:
             raise HTTPException(status_code=404, detail=f"找不到会话 {req.chat_id}")
+        vault_path = vault()
         chat_id, reply = handle(
             data_dir,
-            get_cfg().vault_path,
+            vault_path,
             req.chat_id,
             req.message,
             get_llm(),
@@ -555,7 +590,7 @@ def create_app(
         **同步跑**——巡检是低频动作，等一会儿可以接受；跑完直接拿报告。
         """
         try:
-            return run_sweep(get_cfg().vault_path, data_dir, get_llm())
+            return run_sweep(vault(), data_dir, get_llm())
         except sweep.SweepError as exc:
             # 模型输出坏了、计划不合规——原因要说给人听，CLI 是拿它调试的
             raise HTTPException(status_code=500, detail=str(exc)) from exc
@@ -616,7 +651,11 @@ def main() -> None:
     # 还会拿默认的 `data/` 当落点写状态（跑一次 pytest 就写进一份假报告，
     # 顺带把 `last_sweep` 顶掉——真服务在配置的间隔内都不会再自动跑）。
     # 服务进程只有这一条入口（`runtime.spawn_service` 也是 `-m kb.api.http`）。
-    if sweep_state.due(DATA_DIR, interval_days=cfg.sweep_interval_days):
+    # **没有知识库就没有可巡检的东西。** 不挡的话 `run_sweep(None, ...)`
+    # 会当场炸在后台线程里——那儿的异常没人接，只会静默消失。
+    if cfg.vault_path and sweep_state.due(
+        DATA_DIR, interval_days=cfg.sweep_interval_days
+    ):
         threading.Thread(
             target=_sweep_in_background,
             args=(cfg.vault_path, DATA_DIR, build_llm(cfg)),

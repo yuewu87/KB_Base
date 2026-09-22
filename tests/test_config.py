@@ -3,7 +3,14 @@ from pathlib import Path
 
 import pytest
 
-from kb.config import ConfigError, load_config, reload_config
+from kb.config import (
+    NO_VAULT_MESSAGE,
+    Config,
+    ConfigError,
+    load_config,
+    reload_config,
+    require_vault,
+)
 
 
 @pytest.fixture(autouse=True)
@@ -45,9 +52,32 @@ def test_missing_required_raises_with_key_name(tmp_path):
         load_config(env)
 
 
-def test_vault_path_defaults_when_absent(tmp_path):
+def test_vault_path_is_none_when_absent(tmp_path):
+    """**空值表示「没有」，不表示「回落到作者本机那个」。**
+
+    这条是防雷测试。原先这里回落 `E:\\KB_Library`——别人的服务会安安静静地
+    写进作者的库，而且看起来一切正常。
+    """
     cfg = load_config(_write_env(tmp_path, VALID))
-    assert cfg.vault_path == Path(r"E:\KB_Library")
+    assert cfg.vault_path is None
+
+
+def test_no_hardcoded_vault_path_constant():
+    """连名字都不许留——留着就会被下一个人接回去。"""
+    import kb.config as config
+
+    assert not hasattr(config, "DEFAULT_VAULT_PATH")
+
+
+def test_require_vault_message_spells_out_both_steps():
+    """没库时那句文案**必须说全两步**。
+
+    `scripts/init_vault.py` 只建目录，**它不写 `.env`**（写配置一直是服务的活）。
+    只说「跑这个脚本」会把人引到一个半截状态：库建好了、服务还是不知道该看哪儿。
+    """
+    with pytest.raises(ConfigError, match="初始化知识库"):
+        require_vault(Config("k", "u", "m", None, None))
+    assert "scripts/init_vault.py" in NO_VAULT_MESSAGE
 
 
 def test_port_parsed_and_optional(tmp_path):

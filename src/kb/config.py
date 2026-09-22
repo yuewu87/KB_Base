@@ -24,8 +24,6 @@ PROJECT_ROOT = Path(__file__).resolve().parents[2]
 # 有测试守着这条（tests/test_architecture.py）。
 DATA_DIR = PROJECT_ROOT / "data"
 
-DEFAULT_VAULT_PATH = Path(r"E:\KB_Library")
-
 
 class ConfigError(RuntimeError):
     """配置缺失或非法。"""
@@ -37,7 +35,9 @@ class Config:
     llm_api_key: str = field(repr=False)
     llm_base_url: str
     llm_model: str
-    vault_path: Path
+    # **`None` 表示「还没有知识库」**，不是「用默认的」。回落到一个写死的
+    # 路径就是「别人的服务写进作者的库」，见 `require_vault`。
+    vault_path: Path | None
     port: int | None
     # 下面这些有默认值——老 `.env` 不改也能跑起来（它们以前是硬编码常量）
     log_level: str = "INFO"
@@ -46,6 +46,30 @@ class Config:
     # 界面皮肤。取值清单在 `kb.web.skins`，这里只做容错回落——
     # 不 import skins，免得 config 反过来依赖 web 层
     skin: str = "archive"
+
+
+# 没有知识库时，每条路都用这一句。**说全两步**——`scripts/init_vault.py`
+# 只建目录，**它不写 `.env`**（写配置一直是服务的活）。只说「跑这个脚本」
+# 会把人引到一个半截状态：库建好了、服务还是不知道该看哪儿。
+# 文案必须 GBK 可编码：中文 Windows 的控制台与管道都是 GBK，编不出来的字符
+# 会抛 UnicodeEncodeError（`tests/test_architecture.py` 守着这条）。
+NO_VAULT_MESSAGE = (
+    "还没有知识库。请在网页上点「初始化知识库」，"
+    "或手工把 .env 的 KB_VAULT_PATH 填好、再跑 python scripts/init_vault.py"
+)
+
+
+def require_vault(cfg: Config) -> Path:
+    """拿生效的 vault 路径。没配就抛 `ConfigError`。
+
+    **空值表示「没有」，不表示「用作者本机那个」。** 原来这里回落到一个写死的
+    `E:\\KB_Library`——别人的服务会安安静静地写进作者的库，而且看起来一切正常
+    （`list_drafts` / `list_domains` 在目录不存在时都静默返回 `[]`）。
+    这是设计里点名要先拆的雷，见 spec 第三节。
+    """
+    if cfg.vault_path is None:
+        raise ConfigError(NO_VAULT_MESSAGE)
+    return cfg.vault_path
 
 
 # 日志级别只认这两个。写别的（手改 `.env`）会在 `logging.setLevel` 上抛
@@ -114,7 +138,7 @@ def _build(get: Mapping, *, strict: bool = True) -> Config:
         llm_api_key=required("KB_LLM_API_KEY"),
         llm_base_url=required("KB_LLM_BASE_URL"),
         llm_model=required("KB_LLM_MODEL"),
-        vault_path=Path(vault_raw) if vault_raw else DEFAULT_VAULT_PATH,
+        vault_path=Path(vault_raw) if vault_raw else None,
         port=int(port_raw) if port_raw.isdigit() else None,
         log_level=_log_level(get),
         sweep_interval_days=_int_or(get, "KB_SWEEP_INTERVAL", 6),

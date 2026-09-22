@@ -195,7 +195,7 @@ def cmd_status(args) -> int:
             # 编不出来的字符会抛 UnicodeEncodeError。这里两个字就能说明白。
             print("警告：它比磁盘上的代码旧——仍在跑改动前的逻辑。")
             print("    跑 `kb stop` 停掉，下次调用会自动用当前代码拉起。")
-    print(f"vault: {cfg.vault_path}")
+    print(f"vault: {cfg.vault_path or '（还没有知识库，去网页上点「初始化知识库」）'}")
     return 0
 
 
@@ -275,6 +275,18 @@ def main(argv: list[str] | None = None) -> int:
     except ConfigError as exc:
         print(f"配置错误：{exc}", file=sys.stderr)
         return 2
+    except httpx.HTTPStatusError as exc:
+        # 4xx 的 `detail` 就是给人看的那句话（409 时是「还没有知识库。……」）。
+        #
+        # **必须排在 `httpx.HTTPError` 前面**——它是前者的子类，放后面永远
+        # 轮不到，用户看到的会是 `Client error '409 Conflict' for url ...`，
+        # 一句英文，完全看不出该干什么。
+        try:
+            detail = exc.response.json().get("detail")
+        except ValueError:
+            detail = None
+        print(detail or f"服务返回 {exc.response.status_code}", file=sys.stderr)
+        return 1
     except httpx.HTTPError as exc:
         print(f"与服务通信失败：{exc}", file=sys.stderr)
         return 1

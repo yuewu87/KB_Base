@@ -21,8 +21,8 @@ from fastapi.templating import Jinja2Templates
 from pydantic import BaseModel
 
 from kb.api import runtime
-from kb.api.http import push_and_organize, run_sweep
-from kb.config import Config
+from kb.api.http import push_and_organize, run_sweep, vault_guard
+from kb.config import NO_VAULT_MESSAGE, Config
 from kb.core import settings, sweep, sweep_state
 from kb.core.chat import handle
 from kb.core.chat_store import list_chats, load_chat
@@ -207,14 +207,19 @@ def build_router(
     """
     router = APIRouter()
 
+    vault = vault_guard(get_cfg)
+
     def _ctx(name: str, **extra) -> dict:
         # `get_cfg()` 每请求现读，所以换皮肤**下一个请求就生效**，不用重启。
         # **皮肤只在这一处注入**：六个页面 + 设置片段都走这个函数，
         # 每个端点各传一次迟早漏一个——而漏掉的那页正是「切了皮肤没反应」
         # 的那一页，而且多半是你没点开的那页。
+        vault_path = get_cfg().vault_path
         return {
             "active": name,
-            "vault": str(get_cfg().vault_path),
+            # 未初始化时是空串，不是 `None`——侧栏要显示的是「没有」，
+            # 不是一个 Python 字面量。
+            "vault": str(vault_path) if vault_path else "",
             "skin": get_cfg().skin,
             "skins": skins.options(),
             **extra,
@@ -257,7 +262,7 @@ def build_router(
     def chat_post(message: str = Form(...), cid: str = Form("")):
         chat_id, _ = handle(
             data_dir,
-            get_cfg().vault_path,
+            vault(),
             cid or None,
             message,
             get_llm(),
@@ -281,12 +286,16 @@ def build_router(
         """只填正文（Q87）——`source` 记成 Web，项目留空，其余归整理。"""
         if not content.strip():
             raise HTTPException(status_code=400, detail="正文不能为空")
+        vault()                     # 没库就 409，别等写了一半才发现
         push_and_organize(get_cfg(), content, get_llm(), source="Web")
         return RedirectResponse("/journal", status_code=303)
 
     @router.get("/journal", response_class=HTMLResponse)
     def journal(request: Request, d: str = ""):
-        days = journal_days(get_cfg().vault_path)
+        # **未初始化时这一页照样打得开**，只是空的。首屏那张引导卡得有个
+        # 落脚的地方——页面上甩一坨 409 JSON 不成样子。
+        vault_path = get_cfg().vault_path
+        days = journal_days(vault_path) if vault_path else []
         day = _pick_day(d, days)
         return templates.TemplateResponse(
             request,
@@ -295,7 +304,10 @@ def build_router(
                 "journal",
                 days=days,
                 day=day,
-                sections=read_journal(get_cfg().vault_path, day) if day else [],
+                sections=(
+                    read_journal(vault_path, day)
+                    if (vault_path and day) else []
+                ),
                 latest=latest_run_rows(data_dir),
             ),
         )
@@ -321,10 +333,23 @@ def build_router(
         """跑一次巡检，失败就落一份没读的报告——**人在这儿等着，不能甩 500**。
 
         写成报告的语义和后台那条失败路径一致（`_sweep_in_background` 也这么落），
-        巡检页上看得见原因。
+        巡检页上看得见原因。**没有知识库也走这条路**：`/sweep` 是个页面表单，
+        回 409 JSON 很难看，而且用户看不出下一步该干什么。
         """
+        vault_path = get_cfg().vault_path
+        if vault_path is None:
+            sweep_state.save_report(
+                data_dir,
+                {
+                    "summary": f"这次巡检没跑成：{NO_VAULT_MESSAGE}",
+                    "tag_merges": [],
+                    "dir_merges": [],
+                },
+            )
+            return RedirectResponse("/sweep", status_code=303)
+
         try:
-            run_sweep(get_cfg().vault_path, data_dir, get_llm())
+            run_sweep(vault_path, data_dir, get_llm())
         except sweep.SweepError as exc:
             sweep_state.save_report(
                 data_dir,
