@@ -328,9 +328,17 @@ def test_system_prompt_states_tag_rule():
 
 
 def test_system_prompt_states_reuse_classification_rule():
-    """能复用已有分类就复用（Q77）。"""
+    """分类：近义的不许另起，该分的也要分（Q77）。
+
+    **两半都得钉住。** 早先只钉了「能复用就复用」那半句，提示词就只剩刹车
+    没有油门——2026-09-22 头一回投真内容，34 篇里 27 篇平铺在领域根下，
+    只剩 4 个分类目录、7 篇笔记，而且哪一篇「开」出分类基本是随机的。
+    只写「别新开」，最省力的合规路径就是全放领域根。
+    """
     prompt = build_system_prompt()
-    assert "能用已有的就用已有的" in prompt
+    assert "不许另起近义名" in prompt        # 刹车：近义的复用
+    assert "还会有新的进来吗" in prompt       # 油门：该分就分
+    assert "平铺不是省事的默认值" in prompt    # 堵掉「全放根下」那条捷径
 
 
 def test_system_prompt_demands_a_reason_for_every_link():
