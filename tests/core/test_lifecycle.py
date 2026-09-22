@@ -47,6 +47,41 @@ def test_label_is_chinese():
     assert busy.label == "迁移"
 
 
+def test_acquiring_an_unknown_name_is_an_error():
+    """**没配中文标签的名目要当场炸，不能静默回落成英文。**
+
+    `_BUSY_LABELS` 缺键时 `label` 走的是 `.get(what, what or "")`——直接
+    把键名吐出来，于是文案变成中英夹杂的「正在reindex，等它跑完再试」。
+    `sweep` 就是这么漏的（Task 10 才补上），而且**它不报错、测试全绿**，
+    只能等用户来问。
+
+    CLAUDE.md：「**机械约束归代码，判断题归模型。** 写一条规则之前先问：
+    这条能不能落成一行 `if`？」——能，所以这条不靠 docstring 里那句
+    「每加一个名目就要补一条」的承诺守着。
+    """
+    busy = Busy()
+    with pytest.raises(ValueError, match="reindex"):
+        busy.acquire("reindex")
+    assert busy.what is None          # 炸了就不许占住
+
+
+def test_refusal_survives_the_holder_releasing():
+    """**拿不到锁之后持锁方才释放**，不能生成半截句子。
+
+    走到「拒绝」这条分支的前提就是别人正持锁；而 `busy.what` 是在
+    `acquire` 返回 `False` **之后**才读的，那中间持锁方可能已经
+    `release()` 了。原先 `.get(None, None or "")` 会得到空串，409 的 detail
+    和巡检页那份报告就会一起显示「正在，等它跑完再试」——照着这句话去等
+    一个不存在的动作。
+    """
+    busy = Busy()
+    assert busy.acquire("organize") is True
+    busy.release()
+
+    assert busy.refusal != "正在，等它跑完再试"
+    assert "正在，" not in busy.refusal
+
+
 def _make_vault(root):
     """一个有三篇笔记、两个领域的真库。"""
     (root / ".git").mkdir(parents=True)

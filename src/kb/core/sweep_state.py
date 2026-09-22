@@ -9,10 +9,24 @@
 from __future__ import annotations
 
 import json
+import threading
 from datetime import datetime, timedelta
 from pathlib import Path
 
 from kb.core.vault import atomic_write
+
+# 把「读 → 改 → 写」串起来的一把锁。
+#
+# **`atomic_write` 防的是读到半截 JSON，防不了丢更新。** 后台巡检线程和 Web
+# 请求会同时碰这个文件：一个写 `last_sweep`、一个标「已读」，而**被挡住那条
+# 路也写**——`/sweep/run` 拿不到 `Busy` 时要落一份「这次巡检没跑成」的报告，
+# 而走到那一步的前提**就是**别人正持锁、正对着同一个文件做同样的读-改-写。
+# 没有这把锁的话，请求线程读到旧快照、后台线程这时写进一份**真**报告，
+# 请求线程再把旧快照盖回去：那份合并清单只剩 commit message 里有，页面上
+# 再也看不到。
+#
+# 粒度是「整个进程一把」——这几个函数都只碰一个几十字节的文件，不值得更细。
+_LOCK = threading.Lock()
 
 # 距上次超过这个间隔就该跑。**默认值**——真值来自配置（`KB_SWEEP_INTERVAL`），
 # 由调用方传进来。用户原话是「一次（6 天），超过才跑」，但 6 这个数是拍的。
@@ -70,12 +84,13 @@ def due(
 
 
 def save_report(data_dir: Path, report: dict, when: datetime | None = None) -> None:
-    """记下「跑过了」并留一份**未读**报告。"""
+    """记下「跑过了」并留一份**未读**报告。**读-改-写走 `_LOCK`。**"""
     when = when or datetime.now()
-    state = load_state(data_dir)
-    state["last_sweep"] = f"{when:{_FMT}}"
-    state["report"] = {**report, "at": f"{when:{_FMT}}", "read": False}
-    _write(data_dir, state)
+    with _LOCK:
+        state = load_state(data_dir)
+        state["last_sweep"] = f"{when:{_FMT}}"
+        state["report"] = {**report, "at": f"{when:{_FMT}}", "read": False}
+        _write(data_dir, state)
 
 
 def mark_run(data_dir: Path, when: datetime | None = None) -> None:
@@ -87,13 +102,15 @@ def mark_run(data_dir: Path, when: datetime | None = None) -> None:
     被杀的话它会一直留着。
     """
     when = when or datetime.now()
-    state = load_state(data_dir)
-    state["last_sweep"] = f"{when:{_FMT}}"
-    _write(data_dir, state)
+    with _LOCK:
+        state = load_state(data_dir)
+        state["last_sweep"] = f"{when:{_FMT}}"
+        _write(data_dir, state)
 
 
 def mark_read(data_dir: Path) -> None:
-    state = load_state(data_dir)
-    if "report" in state:
-        state["report"]["read"] = True
-        _write(data_dir, state)
+    with _LOCK:
+        state = load_state(data_dir)
+        if "report" in state:
+            state["report"]["read"] = True
+            _write(data_dir, state)

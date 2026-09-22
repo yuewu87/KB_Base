@@ -36,6 +36,17 @@ class Busy:
         self._what: str | None = None
 
     def acquire(self, what: str) -> bool:
+        # **名目必须配了中文标签。** 漏配时 `label` 走的是
+        # `.get(what, what or "")` 那条兜底——直接把键名吐进文案，变成
+        # 「正在reindex，等它跑完再试」这种中英夹杂。而它**不报错、测试全绿**
+        # （`sweep` 就是这么漏的，Task 10 才补上），只能等用户来问。
+        # CLAUDE.md：机械约束归代码——这条能落成一行 `if`，就不该靠
+        # docstring 里「每加一个名目就要补一条」那句承诺守着。
+        if what not in _BUSY_LABELS:
+            raise ValueError(
+                f"没给 {what!r} 配中文标签：去 `_BUSY_LABELS` 里补一条，"
+                f"否则文案会变成「正在{what}，等它跑完再试」"
+            )
         with self._lock:
             if self._what is not None:
                 return False
@@ -68,7 +79,13 @@ class Busy:
         409 那条路（`busy_guard`）和巡检页那份报告都要说同一句话；两边各写
         一遍的话，改了「整理」忘了「巡检」——用户看到两种说法，还得自己猜
         是不是两回事。
+
+        ⚠️ **这句话是在「拿不到锁」之后才生成的**，而持锁方可能就在那中间
+        `release()` 了（`self.what` 变回 `None`）。照名目硬拼的话就是
+        「正在，等它跑完再试」——让人去等一个不存在的动作。空名目走另一句。
         """
+        if self.what is None:
+            return "服务器正忙，等一会儿再试"
         return f"正在{self.label}，等它跑完再试"
 
 

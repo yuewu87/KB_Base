@@ -37,7 +37,7 @@ from kb.config import (
 from kb.core import flow, organize, settings, sweep, sweep_state
 from kb.core.chat import handle
 from kb.core.chat_store import list_chats, load_chat
-from kb.core.lifecycle import Busy
+from kb.core.lifecycle import Busy, vault_path_problem, vault_ready
 from kb.core.models import Draft, OrganizeResult
 from kb.core.search import search_notes
 from kb.core.vault import (
@@ -105,8 +105,9 @@ def busy_guard(busy: Busy, what: str = "organize") -> Callable[[], AbstractConte
     **不是 `with busy` 那种阻塞式**——拿不到锁要立刻回 409，
     而不是让请求排在这儿等一个可能几分钟的整理跑完。
 
-    `what` 是**自己**要占的名目（`"organize"` / `"migrate"` / `"remove"`，
-    三条都在 `_BUSY_LABELS` 里）；`busy.label` 给的是**别人**正在干的事，
+    `what` 是**自己**要占的名目（`"organize"` / `"migrate"` / `"remove"` /
+    `"sweep"`，四条都在 `_BUSY_LABELS` 里，漏一条 `acquire` 会当场抛）；
+    `busy.label` 给的是**别人**正在干的事，
     那句 409 要说的是后者。默认值让两个老调用点
     （`api/http.py:352`、`web/router.py:221`）**一个字都不用改**。
     """
@@ -278,6 +279,20 @@ def run_sweep(vault_root: Path, data_dir: Path, llm: LLM) -> dict:
 
     **它走的是和整理草稿同一条链**，只是输入换成了整个库的标签与目录。
     """
+    # **巡检也得自验这个路径是不是库。** 它是这一串操作里最会毁东西的一个：
+    # 把文件从一个分类 `replace()` 到另一个、`rmdir` 掉空目录，再在库里
+    # `git add` / `commit`。`.env` 里手打成 `KB_VAULT_PATH=.` 时
+    # （`config._build` 只做 `Path(vault_raw)`，不 resolve、不校验，而服务
+    # 进程的 cwd 是 `PROJECT_ROOT`），它会**对着 KN_Base 仓库自己**跑一整轮：
+    # 模型给出 `{"from": "tests", "to": "src"}` 这种合并，`validate` 照样通过。
+    #
+    # 闸设在**这一层**：三个入口（`main()` 的后台线程、`POST /sweep`、
+    # `/sweep/run`）谁都绕不过去。端点各补一次的话，漏掉的正是没人点开的
+    # 那条——`POST /sweep` 就这么漏过一轮。
+    problem = vault_path_problem(vault_root)
+    if problem:
+        raise sweep.SweepError(problem)
+
     # **一开始就开自己的 run**，别等到真的有事要做才开。
     # ContextVar 是 per-thread 的，而 uvicorn 的线程池会复用线程——
     # 不在入口处重置，这次的流程记录会落进上一个请求的 run 里
@@ -336,12 +351,34 @@ def _sweep_in_background(
         # ⚠️ **必须在锁内。** 留在锁外的话，拿不到锁反而先把「这次算跑过了」
         # 的坑占上，于是要再等一个 `KB_SWEEP_INTERVAL` 才会重试——等于白丢
         # 一次巡检，而拿不到锁恰恰是最不该占坑的那种情况。
-        sweep_state.mark_run(data_dir)
+        try:
+            sweep_state.mark_run(data_dir)
+        except Exception:      # noqa: BLE001
+            # **写状态本身也会失败**（盘满、目录被设成只读——`atomic_write`
+            # 全程没有 try）。它原先在一个只有 `finally`、没有 `except` 的
+            # 外层 try 里，抛出去就逃出这个 daemon 线程；而
+            # `spawn_service` 传的是 `stderr=subprocess.DEVNULL`（`runtime.py`），
+            # 运行日志里一个字都没有：这一轮既没跑、也没留下「没跑成」的报告，
+            # 巡检页上是一片空白，看起来一切正常。**「绝不抛异常」就得真的
+            # 一句都不抛。**
+            logging.getLogger("kb.sweep").exception("巡检状态写不进去")
+            return
         try:
             run_sweep(vault_root, data_dir, llm)
         except Exception:      # noqa: BLE001
             logging.getLogger("kb.sweep").exception("巡检失败")
-            sweep_state.save_report(data_dir, {"summary": "这次巡检没跑成，看运行日志"})
+            try:
+                sweep_state.save_report(data_dir, {
+                    # 形状和别的失败报告**逐键对齐**：模板虽然用 `or []`
+                    # 兜住了缺键，但那是 Jinja 的 Undefined 在救场，
+                    # 不是这里可以少写两个键的理由。
+                    "summary": "这次巡检没跑成，看运行日志",
+                    "tag_merges": [],
+                    "dir_merges": [],
+                })
+            except Exception:  # noqa: BLE001
+                # 报告也写不进去（多半是同一个盘的同一个问题）。照样不抛。
+                logging.getLogger("kb.sweep").exception("巡检失败的报告也写不进去")
     finally:
         busy.release()
 
@@ -670,15 +707,27 @@ def create_app(
 
     @app.post("/sweep")
     def sweep_now() -> dict:
-        """手动跑一次巡检（`kb sweep` 与网页「巡检一次」走这里）。
+        """手动跑一次巡检。**`kb sweep` 走这里。**
+
+        ⚠️ **网页的「巡检一次」不走这里**，走 `web/router.py` 的
+        `POST /sweep/run`（`templates/sweep.html` 里那个 `<form>` 的 action）。
+        这句原先写的是「`kb sweep` 与网页「巡检一次」走这里」，**是错的**——
+        而且正是那句错话让人以为这个端点在锁外只有 CLI 用，于是 Task 10
+        给后台线程和 `/sweep/run` 都挂了锁、**偏偏漏了它**。
 
         **同步跑**——巡检是低频动作，等一会儿可以接受；跑完直接拿报告。
         """
-        try:
-            return run_sweep(vault(), data_dir, get_llm())
-        except sweep.SweepError as exc:
-            # 模型输出坏了、计划不合规——原因要说给人听，CLI 是拿它调试的
-            raise HTTPException(status_code=500, detail=str(exc)) from exc
+        # 和别的写入口同一把锁。`kb sweep` 在终端里执行时，服务正在整理或
+        # 迁移是常事——两轮巡检（或一轮巡检叠一轮整理）会各自重命名同一批
+        # 标签目录、各自 git commit，正是这把锁要防的那个形状。
+        with busy_guard(busy, "sweep")():
+            try:
+                return run_sweep(vault(), data_dir, get_llm())
+            except sweep.SweepError as exc:
+                # 模型输出坏了、计划不合规——原因要说给人听，CLI 是拿它调试的。
+                # （「这个路径不是库」现在也走这里；CLI 那边 `kb sweep` 会把
+                # 500 的 detail 印出来，能照着查。）
+                raise HTTPException(status_code=500, detail=str(exc)) from exc
 
     # 这里**不**放 `/sweep/reply`。它是网页那个表单在用（`web/router.py`
     # 里的 Form 版），而 `include_router` 先于 app 级路由注册——
@@ -738,7 +787,12 @@ def main() -> None:
     # 服务进程只有这一条入口（`runtime.spawn_service` 也是 `-m kb.api.http`）。
     # **没有知识库就没有可巡检的东西。** 不挡的话 `run_sweep(None, ...)`
     # 会当场炸在后台线程里——那儿的异常没人接，只会静默消失。
-    if cfg.vault_path and sweep_state.due(
+    #
+    # **判据用 `vault_ready`，不是「路径非空」。** 只判真假的话，
+    # `.env` 里打成 `KB_VAULT_PATH=.` 时（不 resolve，服务 cwd 是
+    # `PROJECT_ROOT`）服务一启动就在后台对着 **KN_Base 仓库自己**跑一整轮
+    # 巡检：搬目录、落 commit。`run_sweep` 里也有一道，这里先挡住省得白起线程。
+    if vault_ready(cfg.vault_path) and sweep_state.due(
         DATA_DIR, interval_days=cfg.sweep_interval_days
     ):
         threading.Thread(

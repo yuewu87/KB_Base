@@ -121,6 +121,29 @@ def test_reads_are_not_blocked_by_busy(client, path, data):
         busy.release()
 
 
+@pytest.mark.parametrize("what,label", [("organize", "整理"), ("migrate", "迁移")])
+def test_sweep_endpoint_is_rejected_while_something_else_runs(client, what, label):
+    """**`POST /sweep` 也要挂锁——它就是 `kb sweep` 走的那条路。**
+
+    Task 10 给后台线程和网页那条 `/sweep/run` 都挂了锁，**偏偏漏了这个真正
+    叫 `/sweep` 的端点**：`kb sweep`（`api/cli.py`）走的就是它，而终端里执行
+    `kb sweep` 时正好服务在整理/迁移是常事。漏掉之后两轮巡检（或一轮巡检
+    叠一轮整理）会各自重命名同一批标签目录、各自 git commit——正是这次要堵的
+    「一半旧库一半新库、看起来一切正常」。
+
+    根因是它那句 docstring 写着「`kb sweep` 与网页「巡检一次」走这里」，
+    而网页其实走 `/sweep/run`——**那句错话**让人以为这个端点在锁外只有 CLI 用。
+    """
+    busy = client.app.state.busy
+    assert busy.acquire(what) is True
+    try:
+        resp = client.post("/sweep")
+        assert resp.status_code == 409
+        assert label in resp.json()["detail"]
+    finally:
+        busy.release()
+
+
 def test_a_background_sweep_stands_down_while_something_else_runs(tmp_path):
     """后台巡检**要占住锁**，占不到就不跑、也不占坑。
 
@@ -146,3 +169,31 @@ def test_a_background_sweep_stands_down_while_something_else_runs(tmp_path):
     state = sweep_state.load_state(data)
     assert state.get("last_sweep") is None
     assert "report" not in state
+
+
+def test_a_background_sweep_never_raises(tmp_path, monkeypatch):
+    """**「绝不抛异常」是它 docstring 里的承诺**——后台线程里抛了没人接。
+
+    `mark_run` / `save_report` 都要写 `data/state.json`，而 `atomic_write`
+    全程没有 try。盘写满、目录被设成只读时它们抛的 `OSError` 会直接逃出这个
+    daemon 线程；`spawn_service` 传的是 `stderr=subprocess.DEVNULL`，于是运行
+    日志里一个字都没有——那一轮巡检既没跑、也没留下「没跑成」的报告，
+    巡检页上是一片空白，看起来一切正常。
+    """
+    from kb.api.http import _sweep_in_background
+    from kb.core import sweep_state
+
+    data = tmp_path / "data"
+    data.mkdir()
+    vault = tmp_path / "库"
+    (vault / ".git").mkdir(parents=True)
+
+    def boom(*_a, **_k):
+        raise OSError(28, "No space left on device")
+
+    monkeypatch.setattr(sweep_state, "mark_run", boom)
+    busy = Busy()
+
+    _sweep_in_background(vault, data, FakeLLM([]), busy)      # 不许抛
+
+    assert busy.what is None                                   # 锁也得还回来
