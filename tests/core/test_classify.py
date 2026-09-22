@@ -74,6 +74,35 @@ def test_find_candidates_ranks_similar_first(tmp_path):
     assert got[0].title == "并发写入会锁表"
 
 
+def test_find_candidates_scores_body_against_body(tmp_path):
+    """**打分的两侧要同量级。** 拿「草稿正文」对「标题 + 标签」的话，Jaccard
+    的并集被正文撑满，分数全挤在 0.04–0.11，排序不带信息。
+
+    这条钉的是「正文是打分的依据」：三篇笔记里，只有目标那篇的**正文**跟
+    查询重合，标题一个是「甲」一个是「乙」——旧算法会随机挑一个，
+    新算法必须把目标排第一。
+    """
+    _note(tmp_path, "计算机/甲.md", "队列串行化解决并发写锁表\n")
+    _note(tmp_path, "计算机/乙.md", "完全不搭界的一段话\n")
+    target = _note(tmp_path, "计算机/目标.md", "并发写锁表最后用队列串行化解决\n")
+
+    got = find_candidates(tmp_path, "并发写锁表最后用队列串行化解决", limit=3)
+
+    assert got[0].path == target
+
+
+def test_find_candidates_falls_back_to_title_for_an_empty_body(tmp_path):
+    """正文空的笔记退回用标题打分——否则那条恒得 0 分、永远垫底，
+    而它可能正是要 fold 进去的那一篇。"""
+    empty = tmp_path / "计算机" / "空笔记.md"
+    empty.parent.mkdir(parents=True, exist_ok=True)
+    empty.write_text("---\n类型: 概念\n---\n", encoding="utf-8")
+
+    got = find_candidates(tmp_path, "空笔记", limit=1)
+
+    assert got[0].path == empty
+
+
 def test_find_candidates_respects_limit(tmp_path):
     for i in range(5):
         _note(tmp_path, f"计算机/后端/n{i}.md", f"# 并发写入会锁表 {i}\n")

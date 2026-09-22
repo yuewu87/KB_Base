@@ -1,10 +1,21 @@
 import socket
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
 from kb.api import runtime
 from kb.config import Config
+
+
+def _ok():
+    """`taskkill` 成功了的样子（`_kill_pid` 看的是返回码）。"""
+    return SimpleNamespace(returncode=0)
+
+
+def _failed():
+    """对着一个已经没了的 pid——`taskkill` 会失败。"""
+    return SimpleNamespace(returncode=1)
 
 
 @pytest.fixture(autouse=True)
@@ -159,22 +170,61 @@ def test_source_mtime_sees_repo_files():
 # ---------- 停服务 ----------
 
 def test_stop_service_when_not_running(monkeypatch):
-    monkeypatch.setattr(runtime, "running_port", lambda: None)
     assert runtime.stop_service() is False
 
 
 def test_stop_service_kills_and_clears(monkeypatch):
     runtime.write_service_info(1234, pid=999999)
-    monkeypatch.setattr(runtime, "running_port", lambda: 1234)
 
     killed = []
     monkeypatch.setattr(
-        runtime.subprocess, "run", lambda args, **kw: killed.append(args)
+        runtime.subprocess, "run",
+        lambda args, **kw: killed.append(args) or _ok(),
     )
 
     assert runtime.stop_service() is True
     assert killed, "没有真的去停进程"
     assert runtime.read_service_info() is None
+
+
+def test_stop_service_still_kills_when_the_port_does_not_answer(monkeypatch):
+    """**端口探不通也要按 pid 停——那正是「孤儿服务」的形状。**
+
+    `running_port()` 要「文件里有端口 **且** 端口真通」。探不通有两种情况：
+    服务真没在跑，或者它只是这一瞬间没应答（0.5 秒超时、正在启动、机器卡了
+    一下）。原先这里一律 `clear_service_info()`——**把仅有的 pid 线索一起
+    删掉**，而进程还活着：此后 `kb stop` 永远报「本来就没在运行」，
+    `ensure_service` 又照样把旧端口还给你，那个进程再也停不掉。
+
+    实测撞上过（`04_踩坑与经验.md` 第 21 条）：一个旧进程占着端口、我在那
+    之后改了 `router.py`，于是一整轮验证都在打旧代码——**看着像功能坏了**。
+    """
+    runtime.write_service_info(1234, pid=999999)
+    monkeypatch.setattr(runtime, "running_port", lambda: None)   # 探不通
+
+    killed = []
+    monkeypatch.setattr(
+        runtime.subprocess, "run",
+        lambda args, **kw: killed.append(args) or _ok(),
+    )
+
+    assert runtime.stop_service() is True
+    assert killed, "端口不通就放弃了——那正是孤儿服务的成因"
+    assert runtime.read_service_info() is None
+
+
+def test_stop_service_reports_failure_when_the_pid_is_gone(monkeypatch):
+    """陈记录（进程早没了）如实说「没停成」，别报「服务已停止」。
+
+    分辨靠 `taskkill` 的返回码——对着一个不存在的 pid 它是失败的。
+    """
+    runtime.write_service_info(1234, pid=999999)
+    monkeypatch.setattr(
+        runtime.subprocess, "run", lambda args, **kw: _failed()
+    )
+
+    assert runtime.stop_service() is False
+    assert runtime.read_service_info() is None      # 陈记录照样清掉
 
 
 def test_ensure_service_times_out(monkeypatch):

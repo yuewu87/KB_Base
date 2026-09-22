@@ -142,34 +142,59 @@ def spawn_service(port: int) -> subprocess.Popen:
     )
 
 
+def _kill_pid(pid: int) -> bool:
+    """按 pid 停进程。返回是否**真的**停掉了。
+
+    Windows 上 `taskkill` 对着一个已经没了的 pid 会失败（返回码非 0），
+    正好用来分辨「真的停了一个」和「那条记录是陈的」。
+    """
+    if sys.platform == "win32":
+        # 不用 text=True——taskkill 输出是 GBK，解码会在读取线程里炸
+        result = subprocess.run(
+            ["taskkill", "/PID", str(pid), "/F"],
+            capture_output=True,
+            creationflags=proc.NO_CONSOLE,
+        )
+        return result.returncode == 0
+    try:
+        os.kill(pid, signal.SIGTERM)
+    except OSError:
+        return False
+    return True
+
+
 def stop_service() -> bool:
     """停掉在跑的服务，返回是否真的停了一个。
 
     改了 `src/kb/` 下的代码之后要调它——否则旧进程会一直占着端口，
     后续调用继续用旧逻辑（见 `is_stale`）。
+
+    **判据不看端口通不通，看文件里记没记 pid。** `running_port()` 要「文件里
+    有端口 **且** 端口真通」两条都成立，而探不通有两种情况：服务真没在跑，
+    或者它只是这一瞬间没应答（0.5 秒的连接超时、正在启动、机器卡了一下）。
+    原先这里把两者当成同一件事，动作是 `clear_service_info()`——**把仅有的
+    pid 线索一起删掉**，而进程还活着。之后 `kb stop` 永远报「本来就没在运行」
+    （还顺手再删一次），`ensure_service` 又照样把旧端口还给你：那个进程
+    **再也停不掉**，而它的症状是「测试全绿、开发机上的服务失控」
+    （`04_踩坑与经验.md` 第 21 条）。
+
+    ⚠️ **代价说清楚**：按 pid 停意味着「文件里那个 pid 此刻属于谁」这件事
+    我们不再交叉验证。pid 被系统回收、派给了一个不相干的进程时，这条会把
+    它误伤——窗口很窄（原进程早退出 + pid 被复用 + 文件还留着），而换来的是
+    「孤儿服务不再无解」。`kb stop` 本来就是用户明确说「停掉它」。
+
+    文件里连 pid 都没有（空的或坏的）时才只清文件——那种情况就算端口通也
+    停不了，因为不知道该停谁。
     """
-    if running_port() is None:
+    info = read_service_info() or {}
+    pid = info.get("pid")
+    if not isinstance(pid, int):
         clear_service_info()
         return False
 
-    info = read_service_info() or {}
-    pid = info.get("pid")
-    if isinstance(pid, int):
-        if sys.platform == "win32":
-            # 不用 text=True——taskkill 输出是 GBK，解码会在读取线程里炸
-            subprocess.run(
-                ["taskkill", "/PID", str(pid), "/F"],
-                capture_output=True,
-                creationflags=proc.NO_CONSOLE,
-            )
-        else:
-            try:
-                os.kill(pid, signal.SIGTERM)
-            except OSError:
-                pass
-
+    stopped = _kill_pid(pid)
     clear_service_info()
-    return True
+    return stopped
 
 
 def ensure_service(cfg: Config) -> int:

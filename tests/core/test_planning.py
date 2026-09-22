@@ -4,7 +4,7 @@ from pathlib import Path
 import pytest
 
 from kb.core import planning
-from kb.core.classify import find_candidates
+from kb.core.classify import Candidate, find_candidates
 from kb.core.models import K_PROJECT, K_TOPIC, K_TYPE, Draft, NoteType, Outcome
 from kb.core.planning import (
     PlanError,
@@ -108,6 +108,79 @@ def test_parse_plan_tolerates_absent_optional_fields():
 
 
 # ---------- 校验：pending ----------
+
+def test_build_messages_lists_the_sections_a_note_already_has(vault):
+    """候选清单要带上**已有章节名**。
+
+    「这条洞见属于哪一篇」和「这篇里已经写过没有」是两个问题，而原先的清单
+    （标题、标签、路径）只够回答第一个。2026-09-18 实测：把「文本模式写 bat
+    换行是 LF」fold 进 `Windows 批处理文件必须用 GBK 编码`，模型新加了一节
+    ——**而那一篇里本来就有同一段内容**，于是同一篇里说了两遍。Q101 解决的
+    是「同一洞见摊成多篇」，篇内的重复它管不着。
+    """
+    write_note(
+        vault / "计算机" / "编码.md",
+        {"类型": "概念", "主题": ["计算机"]},
+        "# Windows 批处理文件必须用 GBK 编码\n\n## 为什么\n\n## 换行符\n\n",
+    )
+    candidate = Candidate(
+        path=vault / "计算机" / "编码.md", title="Windows 批处理文件必须用 GBK 编码",
+        tags=["计算机"], score=1.0,
+    )
+
+    msgs = build_messages(DRAFT, [candidate], ["计算机"], vault)
+    text = "\n".join(m["content"] for m in msgs)
+
+    assert "已有章节" in text
+    assert "换行符" in text          # 就是这一节该让模型看见的
+    assert "为什么" in text
+
+
+def test_validate_rejects_a_related_link_without_a_reason(vault):
+    """`## 相关` 里的链接**必须用 `——` 说一句共性**（规则 4）。
+
+    这条原先只写在提示词里。实测同一批次（vault `52dfb88`）：`import 期求值`
+    3 条链接全带理由、`Path 不展开环境变量` 3 条全裸——**同一份提示词，一次
+    做到一次没做到**。而「有没有理由」是机械的、能写成 `if`：列在 `## 相关`
+    一节里的链接，后面跟没跟 `——` 一眼可判。
+
+    **正文句子里的链接不算**——那句话本身就是理由（提示词里也是这么分的）。
+    """
+    content = (
+        "# 并发写锁\n\n"
+        "同属「设了却不生效」这类坑，见 [[队列串行化]]。\n\n"
+        "## 相关\n"
+        "- [[队列串行化]]\n"
+    )
+    plan = parse_plan(DRAFT.id, _plan_json(content=content))
+
+    with pytest.raises(PlanError, match="共性"):
+        validate_plan(plan, vault)
+
+
+def test_validate_accepts_a_related_link_with_a_reason(vault):
+    """写了理由就放行——正文句子里的链接本来就不用再写一遍。"""
+    content = (
+        "# 并发写锁\n\n"
+        "同属「设了却不生效」这类坑，见 [[队列串行化]]。\n\n"
+        "## 相关\n"
+        "- [[队列串行化]]——同属并发写入这类坑\n"
+    )
+
+    validate_plan(parse_plan(DRAFT.id, _plan_json(content=content)), vault)
+
+
+def test_validate_ignores_bare_links_outside_the_related_section(vault):
+    """别把检查扩到整篇正文——`## 相关` 之外的裸链接是有意允许的。
+
+    （规则 4 只对「列在 `## 相关` 一节里的」提这个要求。放开了查全篇的话，
+    正文里那些挂在句子上的链接会被一条条打回，而那正是提示词推荐的第一种
+    写法。）
+    """
+    content = "# 并发写锁\n\n见 [[队列串行化]]，两者都是设了却不生效。\n"
+
+    validate_plan(parse_plan(DRAFT.id, _plan_json(content=content)), vault)
+
 
 def test_validate_pending_requires_reason(vault):
     plan = parse_plan(DRAFT.id, json.dumps({"outcome": "pending"}))

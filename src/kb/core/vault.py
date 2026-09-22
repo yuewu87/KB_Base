@@ -184,6 +184,19 @@ def first_heading(body: str) -> str:
     return ""
 
 
+def section_headings(body: str) -> list[str]:
+    """正文里 `## ` 一级的章节名（不含开头那个 `# ` 大标题）。
+
+    给提示词用：候选清单要能回答「这一篇里已经写过没有」，光有标题、标签、
+    路径不够（见 `planning._sections_suffix`）。
+    """
+    return [
+        line.strip()[3:].strip()
+        for line in body.splitlines()
+        if line.strip().startswith("## ")
+    ]
+
+
 def note_title(path: Path, body: str) -> str:
     """笔记对外显示的标题：正文里的一级标题，没有就退回文件名。"""
     return first_heading(body) or path.stem

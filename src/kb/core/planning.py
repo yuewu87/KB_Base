@@ -29,11 +29,45 @@ from kb.core.vault import (
     list_classifications,
     list_domains,
     list_notes,
+    read_note,
+    section_headings,
 )
 
 TEMPLATES_DIR = PROJECT_ROOT / "templates" / "笔记"
 
 _LINK_RE = re.compile(r"\[\[([^\]]+)\]\]")
+_RELATED_HEADING_RE = re.compile(r"^##\s*相关\s*$", re.MULTILINE)
+_ANY_HEADING_RE = re.compile(r"^##\s", re.MULTILINE)
+
+
+def _links_without_reason(content: str) -> list[str]:
+    """`## 相关` 一节里**链接后面没写理由**的那些。
+
+    规则 4 说得很清楚（见 `build_system_prompt`）：列在 `## 相关` 里的链接
+    要在后面用 `——` 写一句共性。而 `validate_plan` 原先只机械地查了
+    「正文有链接」「链接目标存在」——**「有没有理由」同样是机械的、能写成
+    `if`**，它却只写在提示词里。实测同一批次：一篇 3 条链接全带理由、另一篇
+    3 条全裸，**同一份提示词，一次做到一次没做到**。正是 CLAUDE.md 那条
+    「机械约束归代码」要收的东西。
+
+    **只查 `## 相关` 这一节。** 正文句子里的链接不查——那句话本身就是理由，
+    而提示词把这两种写法并列写着的（「链在正文句子里的，让那句话把它说清楚」）。
+    查全篇的话，推荐的写法反而会被一条条打回。
+    """
+    head = _RELATED_HEADING_RE.search(content)
+    if not head:
+        return []
+    rest = content[head.end():]
+    end = _ANY_HEADING_RE.search(rest)
+    section = rest[: end.start()] if end else rest
+
+    bare: list[str] = []
+    for line in section.splitlines():
+        for match in _LINK_RE.finditer(line):
+            # 链接后面（同一行内）要跟 `——`；`- [[X]] —— 理由` 也算。
+            if not line[match.end():].lstrip().startswith("——"):
+                bare.append(match.group(1).strip())
+    return bare
 
 # 日志与索引页由服务生成，不由 LLM 产出——所以不在给模型的允许列表里
 _LLM_ALLOWED_TYPES = [t for t in NoteType if t not in (NoteType.JOURNAL, NoteType.INDEX)]
@@ -209,6 +243,29 @@ def build_system_prompt() -> str:
 
 # ------------------------------------------------------------ 提示词
 
+def _sections_suffix(path: Path) -> str:
+    """候选笔记**已有的章节名**，接在候选行末尾。
+
+    「这条洞见属于哪一篇」和「这篇里已经写过没有」是两个问题，而原先的候选
+    清单（标题、标签、路径）只够回答第一个。2026-09-18 实测：把「文本模式写
+    bat 换行是 LF」fold 进 `Windows 批处理文件必须用 GBK 编码`，模型新加了
+    一节——**而那一篇里本来就有同一段内容**，于是同一篇里说了两遍。
+    Q101 解决的是「同一洞见摊成多篇」，**篇内的重复它管不着**。
+
+    **只带章节名，不带正文。** 候选默认 8 条，正文会让提示词线性膨胀；而
+    「大概讲过没有」这件事，章节名配标题通常够判断。真不够时还有一条兜底：
+    模型可以选 `rewrite`，或者把内容 fold 进**已有的**那一节（提示词里写着
+    「同一个洞见摊成三篇…」那一段）。**这是一个折中，不是完整解**——
+    要彻底解决得让模型看见正文，那笔 token 账没人算过。
+    """
+    try:
+        _, body = read_note(path)
+    except OSError:
+        return ""
+    heads = section_headings(body)
+    return f"｜已有章节：{'、'.join(heads)}" if heads else ""
+
+
 def _rel(path: Path, vault_root: Path) -> str:
     try:
         return path.relative_to(vault_root).as_posix()
@@ -225,7 +282,8 @@ def build_messages(
     """构造给 LLM 的 messages。"""
     if candidates:
         cand_lines = "\n".join(
-            f"- {c.title}｜标签：{'、'.join(c.tags) or '无'}｜路径：{_rel(c.path, vault_root)}"
+            f"- {c.title}｜标签：{'、'.join(c.tags) or '无'}｜"
+            f"路径：{_rel(c.path, vault_root)}{_sections_suffix(c.path)}"
             for c in candidates
         )
     else:
@@ -443,6 +501,14 @@ def validate_plan(plan: OrganizePlan, vault_root: Path) -> None:
         ]
         if missing:
             raise PlanError(f"链接指向不存在的笔记：{'、'.join(missing)}")
+
+        bare = _links_without_reason(plan.content)
+        if bare:
+            raise PlanError(
+                "`## 相关` 里的链接要说得出共性（规则 4）："
+                f"{'、'.join(bare)} 后面没有用 `——` 写一句。"
+                "说不出来共性就别链——凑数的链接比没有链接更糟。"
+            )
         return
 
     # Outcome.FOLD
