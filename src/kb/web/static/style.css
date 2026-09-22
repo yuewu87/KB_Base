@@ -196,7 +196,12 @@ body.collapsed .toggle { justify-content: center; padding-left: 0; padding-right
   cursor: pointer;
   transition: background var(--dur) var(--ease), color var(--dur) var(--ease);
 }
-.side-btn:hover { background: var(--line-soft); color: var(--ink); text-decoration: none; }
+/* ⚠️ **`:not(.is-disabled)` 不能省**（未初始化时置灰那两个入口，见文件末尾）。
+   省了的话置灰项悬停照样变深——而 `.side-action.is-disabled` 更糟：它静止态是
+   `--accent-tint` 底 + `--accent` 字，覆盖规则里的 `background: none;
+   color: inherit` 会把它抹成透明底 + `--ink` 字，**悬停的变化比可点项还大**。
+   「悬停不给可点的反馈」靠的是这几条**不命中**它，不是再写一条去盖。 */
+.side-btn:not(.is-disabled):hover { background: var(--line-soft); color: var(--ink); text-decoration: none; }
 
 .side-btn.active {
   background: var(--accent-soft);
@@ -222,7 +227,7 @@ body.collapsed .toggle { justify-content: center; padding-left: 0; padding-right
   font-weight: 600;
   transition: background var(--dur) var(--ease), border-color var(--dur) var(--ease);
 }
-.side-action:hover {
+.side-action:not(.is-disabled):hover {
   background: var(--accent-soft);
   border-color: var(--accent-mid);
   text-decoration: none;
@@ -241,7 +246,7 @@ body.collapsed .side-action {
   color: var(--faint);
   transition: color var(--dur) var(--ease);
 }
-.side-btn:hover .icon { color: var(--accent); }
+.side-btn:not(.is-disabled):hover .icon { color: var(--accent); }
 
 /* ---- 主区 ---- */
 
@@ -1564,15 +1569,12 @@ button.secondary.danger:hover {
   opacity: .45;
   cursor: not-allowed;
 }
-/* 悬停不给「可点」的反馈，不然置灰是骗人的 */
-.side-btn.is-disabled:hover,
-.side-action.is-disabled:hover {
-  background: none;
-  color: inherit;
-  text-decoration: none;
-}
-.side-btn.is-disabled:hover .icon,
-.side-action.is-disabled:hover .icon { color: var(--faint); }
+/* 悬停不给「可点」的反馈——**靠上面那三条 `:not(.is-disabled):hover` 不命中它**，
+   这里不再写覆盖规则。写过一版 `background: none; color: inherit`，两种都错：
+   `color: inherit` 解析出来是 `body` 的 `--ink`，正是可点项悬停给的那个值；
+   而 `.side-action` 静止态本来是 `--accent-tint` 底，被抹成透明之后
+   **变化比可点项还大**。 */
+.side-btn.is-disabled .icon { color: var(--faint); }
 
 /* ---- 首屏引导卡（未初始化时） ---- */
 

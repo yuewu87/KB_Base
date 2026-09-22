@@ -717,7 +717,11 @@ def test_chat_shows_the_first_run_card_before_init(client):
     assert 'class="first-run"' in html
     assert "还没有知识库" in html
     assert "初始化知识库" in html
-    assert "startInit()" in html
+    # ⚠️ 断言的是**整个 onclick 属性**，不是 `"startInit()"`。
+    # 后者是恒真的：`base.html` 里 `async function startInit() {` 这一行
+    # 本身就含 `startInit()`，把按钮的 onclick 删掉、或写成漏了括号的
+    # `onclick="startInit"`（点下去只取到函数引用，什么也不发生），它照样绿。
+    assert 'onclick="startInit()"' in html
 
 
 def test_chat_hides_the_first_run_card_after_init(initialized_vault, env, tmp_path):
@@ -754,8 +758,9 @@ def test_the_remove_modal_is_not_a_native_confirm(client):
 def test_sidebar_greys_out_the_push_entries_before_init(client):
     """需求表第 1 条：未初始化时投递/整理入口置灰。
 
-    **只是界面礼貌**——CLI 和接入指南都绕开界面，真拦截在 `vault_guard`
-    （`tests/api/test_busy.py` 那边钉着）。这里只钉模板真的渲染出了那个状态。
+    **只是界面礼貌**——CLI 和接入指南都绕开界面，真拦截在 `vault_guard`：
+    端点的 409 由本文件的 `test_vault_endpoints_409_before_init` 与
+    `tests/api/test_busy.py` 钉着。这里只钉模板真的渲染出了那个状态。
     """
     html = client.get("/").text
     assert html.count('is-disabled') == 2          # 记一条 + 巡检，一个不多
@@ -766,7 +771,9 @@ def test_sidebar_is_not_greyed_after_init(initialized_vault, env, tmp_path):
     """建好之后再进来，两个入口得能点。
 
     ⚠️ 上面那条的 `count == 2` 而不是 `>= 2`：**置灰错的面板比不置灰更糟**
-    ——把 ai对话 或日志那几页也灰掉，首屏那张引导卡就没了落脚处
-    （`test_pages_still_open_before_init` 会红）。这个数就是在防「顺手全灰了」。
+    ——把 ai对话 或日志那几页也灰掉，首屏那张引导卡就没了落脚处。
+    **这个数就是那张唯一的网**：`test_pages_still_open_before_init` 只断言
+    状态码（`/`、`/journal`、`/settings`、`/new` 都回 200），把「设置」也灰掉
+    它照样绿——别以为那边还兜着一层。
     """
     assert "is-disabled" not in _client_for(env, tmp_path).get("/").text

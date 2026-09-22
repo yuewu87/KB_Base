@@ -486,23 +486,21 @@
           _wizardMsg(_detail(data, '初始化失败') + '（HTTP ' + r.status + '）', false);
           return;
         }
-        // 建成了：**把设置窗整个重载一遍**。同一屏换成「已初始化」态，
-        // 不做局部刷新——两态的形状差得远，重载比补丁简单也更不容易错。
+        // 建成了：**把整页重载一遍**。
         //
-        // ⚠️ **这句消息的写法有讲究，别顺手改回 `_wizardMsg`。**
-        // `openSettings()` 会把 `#settings-modal` 的 `innerHTML` **整个换掉**，
-        // 所以在它前后直接写 `_wizardMsg` 都不成立：
-        //   ① 写在它**之前** → 那句跟着旧 DOM 一起被扔掉，用户根本看不见；
-        //   ② 写在它**之后** → `#wizard-msg` 这个东西已经不存在了，它属于
-        //      「未初始化」那一态，重载后那一屏换成「已初始化」了。
-        // 落到 `_msg` 上：它写的是 `_settings.html` 里那个 `#settings-msg`，
-        // 那是**两态共用**的底部消息位（在 `.pane` 外面、`.settings-actions`
-        // 上面），重载后照样在。`data.actions` 里是「建了哪几个目录」——
-        // **用户要看的正是这个**，丢了就等于「点完按钮什么都没说」。
+        // ⚠️ **必须重载整页，不能只重载设置窗。** 原先这里是
+        // `await openSettings(); showGroupByName('知识库'); _msg(done, true)`
+        // ——消息确实进对了地方，但**页面骨架一格都不会变**：首屏那张
+        // 「还没有知识库」的引导卡、侧栏那两个灰掉的入口，都是服务端按
+        // `vault_ready` 渲染出来的，没有任何 JS 会重绘它们。用户关掉设置窗
+        // 之后看到的还是「还没有知识库」，和刚刚那句「建好了」当场互相打脸。
+        //
+        // 消息用 `alert` 而不是 `_msg`：重载之后 `#settings-msg` 连同整个
+        // 设置窗 DOM 一起没了，消息没有落脚处。同文件另外两个动作
+        // （`confirmRemove` / `openMigrate`）也都是「alert 说完 → reload」。
         const done = '建好了：' + (data.actions || []).join('、');
-        await openSettings();
-        showGroupByName('知识库');
-        _msg(done, true);
+        alert(done);
+        location.reload();
       } catch (e) {
         _wizardMsg('初始化失败：' + e, false);
       } finally {
@@ -555,16 +553,33 @@
           alert('移除失败：' + _detail(data, '未知原因') + '（HTTP ' + r.status + '）');
           return;
         }
-        // **删不干净的地方要如实说。** Windows 上正被服务打开的日志文件
-        // 删不掉——那是操作系统的边界，不是设计妥协。不说这一句，用户下次
-        // 在 data/logs/ 里看见文件会以为移除没生效。
-        const notes = data.notes || [];
-        if (notes.length) alert('移除完成，但有几句要说明：\n\n' + notes.join('\n'));
+        // **`notes` 和 `failed` 都要说，一句都不能少。**
+        //
+        // `notes` 是「删了，但有句话得说」（比如日志正被服务占着，下次重启
+        // 再清）；`failed` 是「**这份没删掉，以及怎么办**」——「先关掉
+        // Obsidian、停在库里的资源管理器、正在扫这个目录的杀软，再试」和
+        // 「已经删了一部分，不是原样，笔记可能有缺」都只写在 `failed` 里。
+        // 只弹 `notes` 的话，库没删成时可能**一个字都不弹**（新库没有
+        // chats/logs 时 `notes` 是空的），用户看到的是「点了一下，什么都没
+        // 发生」——而笔记可能已经被删掉一半了。标题也跟着分岔：没删成的时候
+        // 说「移除完成」是假话。
+        const lines = (data.notes || []).concat(data.failed || []);
+        if (lines.length) {
+          const head = data.vault_removed ? '移除完成，但有几句要说明：'
+                                          : '库没删掉：';
+          alert(head + '\n\n' + lines.join('\n'));
+        }
         location.reload();
       } catch (e) {
         alert('移除失败：' + e);
       } finally {
-        btn.disabled = false;
+        // **恢复的是「勾选框说了算」，不是无条件点亮。** 请求在天上飞的
+        // 那几秒（大库 rmtree 可能好几秒）用户可以把「我知道，删了找不回来」
+        // 取消勾选；无条件 `disabled = false` 的话，失败之后（409 busy、
+        // 400、fetch 挂了）按钮就在没勾的状态下可点——点下去照样删。
+        // 勾选框那道确认等于没有，而它正是 style.css 里
+        // `button.danger:disabled` 那条规则存在的理由。
+        btn.disabled = !document.getElementById('remove-ok').checked;
       }
     }
 
@@ -590,8 +605,16 @@
           alert('没搬成：' + _detail(data, '未知原因') + '（HTTP ' + r.status + '）');
           return;
         }
-        alert('搬好了：' + data.moved.files + ' 个文件 / ' +
-              Math.round(data.moved.bytes / 1024) + ' KB。新位置：' + data.vault_path);
+        let msg = '搬好了：' + data.moved.files + ' 个文件 / ' +
+                  Math.round(data.moved.bytes / 1024) + ' KB。新位置：' + data.vault_path;
+        // **`moved.notes` 必须说。** 「旧库没删干净」那条警告只在这里，
+        // 而它是**唯一能防用户删错库的一句话**（点明了「别把新库删了」）。
+        // 源被 Obsidian 或杀软占着时 Windows 上删不掉是常态，
+        // `migrate_vault` 自己写明「不抛、如实记」。不说的话，用户在磁盘上
+        // 看到两个库，不知道哪个是旧的。
+        const notes = data.moved.notes || [];
+        if (notes.length) msg += '\n\n' + notes.join('\n');
+        alert(msg);
         location.reload();
       } catch (e) {
         alert('没搬成：' + e);
