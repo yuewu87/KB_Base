@@ -165,10 +165,16 @@ def test_root_matches_generated_archive():
 
 
 def test_style_css_contains_generated_blocks():
-    """另外五块逐字等于 `render_block()` 的输出。"""
+    """除现有蓝外的每一套，逐字等于 `render_block()` 的输出。
+
+    **跳过的判据是 `archive` 这个名字，不是 `DEFAULT_SKIN`**：现有蓝的家在
+    文件开头的 `:root`（见 `skins.blocks()` 的 docstring）。按默认那套跳的话，
+    默认一改成 garnet 就会变成「跳过 garnet、要求 archive 有块」——
+    两头都错，而错法恰好是**整页退回现有蓝**。
+    """
     text = STYLE_CSS.read_text(encoding="utf-8")
     for skin_id in skins.SKIN_IDS:
-        if skin_id == skins.DEFAULT_SKIN:
+        if skin_id == "archive":
             continue
         assert skins.render_block(skin_id) in text, (
             f"style.css 里没有 {skin_id} 的块，或与生成结果不一致"

@@ -314,9 +314,20 @@ def render_block(skin_id: str) -> str:
 
 
 def blocks() -> str:
-    """除现有蓝之外那五套，整段拼好——`scripts/derive_skins.py` 写进 CSS 用。"""
+    """除现有蓝之外那五套，整段拼好——`scripts/derive_skins.py` 写进 CSS 用。
+
+    ⚠️ **这里排除的是 `archive` 这个名字，不是 `DEFAULT_SKIN`。**
+    现有蓝的 32 行写在 `style.css` 开头的 `:root` 里（那份是从上一版
+    style.css 逐字抄下来的、不参与推导），所以它**没有** `[data-skin]` 块
+    ——`data-skin="archive"` 匹配不上任何块，落回 `:root`，值正好一样。
+
+    原先写的是 `if sid != DEFAULT_SKIN`，等于假设「默认那套就是现有蓝」。
+    2026-09-22 默认改成 garnet 时它当场出事：garnet 既不是 `:root`
+    （那里是 archive），也没有自己的块，**整页退回 `:root` 的现有蓝**
+    ——`data-skin="garnet"` 白写着，页面上一点红都看不到。
+    """
     return "".join(
-        render_block(sid) for sid in SKIN_IDS if sid != DEFAULT_SKIN
+        render_block(sid) for sid in SKIN_IDS if sid != "archive"
     )
 
 

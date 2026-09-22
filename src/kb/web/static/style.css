@@ -1244,41 +1244,6 @@ button.side-btn {
 
 /* ===== 皮肤：由 scripts/derive_skins.py 生成，不要手改 ===== */
 
-[data-skin="archive"] {   /* 现有蓝 */
-  color-scheme: light;
-  --paper: #fbfcfe;
-  --surface: #ffffff;
-  --ink: #1a2233;
-  --line: #e4e9f0;
-  --accent: #2f5d8a;
-  --accent-soft: #eef4fb;
-  --muted: #5b6b7f;
-  --faint: #8a97a8;
-  --ink-soft: #37445a;
-  --faint-dim: #b9c3d0;
-  --line-soft: #eff3f8;
-  --line-strong: #d3dce7;
-  --divider: #3d4753;
-  --accent-mid: #3d7ab8;
-  --accent-tint: #f7fafd;
-  --accent-line: #dbe7f4;
-  --accent-ring: rgba(61, 122, 184, .12);
-  --accent-ink: #2f5d8a;
-  --on-accent: #ffffff;
-  --on-danger: #ffffff;
-  --journal-soft: #fdf1f5;
-  --journal-line: #f2dbe4;
-  --terminal-void: #1b2430;
-  --terminal-text: #c9d4e0;
-  --scrim: rgba(26, 34, 51, .38);
-  --sweep-gold: #c9a86a;
-  --sweep-gold-deep: #b8934f;
-  --sweep-gold-wash: #fdf8ee;
-  --danger: #8c3b3b;
-  --danger-hover: #a24646;
-  --shadow: 0 1px 2px rgba(26, 34, 51, .04), 0 4px 12px rgba(26, 34, 51, .045);
-  --shadow-lift: 0 2px 6px rgba(26, 34, 51, .07), 0 12px 28px rgba(26, 34, 51, .07);
-}
 [data-skin="dark-pink"] {   /* 炭黑甜酷粉 */
   color-scheme: dark;
   --paper: #1a1a1d;
@@ -1344,6 +1309,41 @@ button.side-btn {
   --sweep-gold: #9f82fd;
   --sweep-gold-deep: #a98efd;
   --sweep-gold-wash: #3e3262;
+  --danger: #d4736f;
+  --danger-hover: #e08a86;
+  --shadow: 0 1px 2px rgba(0, 0, 0, .40), 0 4px 12px rgba(0, 0, 0, .32);
+  --shadow-lift: 0 2px 6px rgba(0, 0, 0, .48), 0 12px 28px rgba(0, 0, 0, .42);
+}
+[data-skin="garnet"] {   /* 石榴红雾粉桃 */
+  color-scheme: dark;
+  --paper: #410d14;
+  --surface: #4f0f19;
+  --ink: #fbe9ea;
+  --line: #681420;
+  --accent: #f1dddf;
+  --accent-soft: #5a3339;
+  --muted: #c5a9ac;
+  --faint: #9e7b7f;
+  --ink-soft: #ddc6c8;
+  --faint-dim: #886165;
+  --line-soft: #5d121d;
+  --line-strong: #7a2e38;
+  --divider: #dfc6c9;
+  --accent-mid: #f4e4e6;
+  --accent-tint: #451118;
+  --accent-line: #69444a;
+  --accent-ring: rgba(244, 228, 230, 0.28);
+  --accent-ink: #f1dddf;
+  --on-accent: #0a0a0c;
+  --on-danger: #0a0a0c;
+  --journal-soft: #662c35;
+  --journal-line: #93666c;
+  --terminal-void: #24070b;
+  --terminal-text: #e5d8da;
+  --scrim: rgba(0, 0, 0, .62);
+  --sweep-gold: #f1dddf;
+  --sweep-gold-deep: #f3e1e3;
+  --sweep-gold-wash: #662c35;
   --danger: #d4736f;
   --danger-hover: #e08a86;
   --shadow: 0 1px 2px rgba(0, 0, 0, .40), 0 4px 12px rgba(0, 0, 0, .32);
