@@ -48,14 +48,17 @@ class Config:
     skin: str = "archive"
 
 
-# 没有知识库时，每条路都用这一句。**说全两步**——`scripts/init_vault.py`
-# 只建目录，**它不写 `.env`**（写配置一直是服务的活）。只说「跑这个脚本」
-# 会把人引到一个半截状态：库建好了、服务还是不知道该看哪儿。
+# 没有知识库时，每条路都用这一句。**说全两步，顺序也不能反**——
+# `scripts/init_vault.py` 只建目录，**它不写 `.env`**（写配置一直是服务的活），
+# 而且它**只认命令行给的路径、不读 `.env`**。原来这句写的是「填好 .env 再跑
+# 脚本」，照做的人会在脚本的默认路径上建库、而 `.env` 指着别处——正是这句
+# 文案本来要避免的半截状态。脚本的路径现在必填了，这句也照实写。
 # 文案必须 GBK 可编码：中文 Windows 的控制台与管道都是 GBK，编不出来的字符
 # 会抛 UnicodeEncodeError（`tests/test_architecture.py` 守着这条）。
 NO_VAULT_MESSAGE = (
     "还没有知识库。请在网页上点「初始化知识库」，"
-    "或手工把 .env 的 KB_VAULT_PATH 填好、再跑 python scripts/init_vault.py"
+    "或跑 python scripts/init_vault.py <路径> 建好骨架、"
+    "再把该路径填进 .env 的 KB_VAULT_PATH"
 )
 
 

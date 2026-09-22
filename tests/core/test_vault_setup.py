@@ -1,6 +1,9 @@
 """建 vault 骨架。这个模块是**知识库结构的唯一真源**。"""
 
+import os
 import subprocess
+import sys
+from pathlib import Path
 
 from kb.core.vault import ATTACHMENTS, INBOX, INDEX, JOURNAL_DIR, PENDING
 from kb.core.vault_setup import (
@@ -110,3 +113,44 @@ def test_script_is_a_thin_shell():
     from scripts import init_vault as script
 
     assert script.init_vault is vault_setup.init_vault
+
+
+def _run_script(*args: str, cwd: Path | None = None) -> subprocess.CompletedProcess:
+    """跑真脚本（`__main__` 那一段），拿 `CompletedProcess`。
+
+    **必须给子进程塞 `PYTHONIOENCODING=utf-8`**：中文 Windows 下 stdout 接管道
+    时按 locale（GBK）编码，父进程按 utf-8 解码就全是乱码——`kb.bat` 那条
+    规矩的同一个坑，只是这次坑在测试自己身上。
+    """
+    root = Path(__file__).resolve().parents[2]
+    return subprocess.run(
+        [sys.executable, str(root / "scripts" / "init_vault.py"), *args],
+        capture_output=True,
+        encoding="utf-8",
+        errors="replace",
+        cwd=cwd,
+        env={**os.environ, "PYTHONIOENCODING": "utf-8"},
+    )
+
+
+def test_script_refuses_to_guess_a_path():
+    """不给路径必须报错退出，**不回落到任何写死的路径**。
+
+    原来这里回落到 `E:\\KB_Library`：别人的机器上会凭空长出**作者**那个路径的
+    骨架，而服务的 `.env` 指着别处。这是最坏的一种失败——看起来是成功的。
+    """
+    proc = _run_script()
+    assert proc.returncode == 2
+    assert "用法" in proc.stdout
+
+
+def test_script_refuses_a_relative_path_before_creating_anything(tmp_path):
+    """相对路径要挡掉，**而且挡在建目录之前**——失败了就不该留下东西。
+
+    填进 `.env` 后服务的启动目录和用户的 shell 不是同一个，库会绑到他没想到
+    的地方；设置窗那条路也是这么挡的，两个入口不该有两套规矩。
+    """
+    proc = _run_script("myvault", cwd=tmp_path)
+    assert proc.returncode == 2
+    assert "绝对路径" in proc.stdout
+    assert not (tmp_path / "myvault").exists()
