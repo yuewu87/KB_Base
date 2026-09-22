@@ -193,6 +193,43 @@ def test_migrate_refuses_a_non_empty_target_before_copying(tmp_path):
     assert (target / "占位").is_file()                  # 目标原有的东西也没被删
 
 
+def test_migrate_keeps_the_target_when_the_source_cannot_be_deleted(
+        tmp_path, monkeypatch):
+    """**删源失败绝不回滚目标，而且绝不抛裸 `OSError`。**
+
+    走到删源这一步时，目标已经拷完并校验通过，它是**唯一完整的一份**；
+    源正在被删、可能只剩一半。这时候回滚（`_rmtree(target)`）等于把好的
+    那份也毁了——**方向反了**：上面那段 `except` 里的回滚只适用于**拷贝**
+    阶段，那时源是完整的、目标是半截的。
+
+    而 `_rmtree(source)` 失败在 Windows 上是常态（被 Obsidian、资源管理器
+    预览、杀软占着），并且抛的是**裸 `OSError`**——端点那句
+    `except LifecycleError` 接不住，用户拿到 500、`.env` 没改、旧库残着，
+    重试又撞「目标非空」400，走进死胡同。所以这里按 `notes` 如实汇报，
+    `.env` 照常指向新库。
+
+    **`_rmtree` 的替身只对 source 生效。** 拷贝失败的回滚那一路也调
+    `_rmtree(target)`，无差别抛错的话这条用例测的就是别的东西了。
+    """
+    source = _make_vault(tmp_path / "旧")
+    target = tmp_path / "新"
+    real = lifecycle._rmtree
+
+    def refuse(path, **kwargs):
+        if path == source:
+            raise OSError(13, "占着")
+        real(path, **kwargs)
+
+    monkeypatch.setattr(lifecycle, "_rmtree", refuse)
+
+    moved = migrate_vault(source, target)            # 不抛
+
+    assert (target / "计算机" / "笔记0.md").is_file()  # 新库是齐的（没回滚）
+    assert moved["notes"]
+    assert str(source) in moved["notes"][0]           # 说清脏东西留在哪儿
+    assert str(target) in moved["notes"][0]           # 并叮嘱别把新库删了
+
+
 def test_rmtree_deletes_a_read_only_file(tmp_path):
     """**只读文件也删得掉**——`_rmtree` 存在的全部理由。
 
@@ -214,6 +251,29 @@ def test_rmtree_deletes_a_read_only_file(tmp_path):
 
 
 # ---------- remove_vault ----------
+
+def test_remove_refuses_a_dir_that_is_not_a_vault(tmp_path):
+    """**填错一个字母就删掉一个不相干的目录**——这个函数最严重的一种失败。
+
+    端点拿到的是 `.env` 里那个字符串，一个字都不校验就交给 `remove_vault`，
+    而后者**改名 + 递归删除**。用户把路径填成 `E:\\Documents` 这种手滑，
+    一句 `POST /setup/remove` 就把那个目录整个端掉；界面上的确认框是
+    **界面礼貌**，拦不住 `curl`、也拦不住接入指南里的会话层 AI。所以判据
+    落在最里面这一层。
+
+    **断言必须落到文件上**：只断言「抛了 `LifecycleError`」的话，一个
+    「先删了再抛」的实现照样绿。
+    """
+    plain = tmp_path / "我的文档"
+    plain.mkdir()
+    (plain / "重要.txt").write_text("别删我", encoding="utf-8")
+
+    with pytest.raises(LifecycleError, match="不是一个知识库"):
+        remove_vault(plain, tmp_path / "data")
+
+    assert plain.is_dir()                            # 目录还在
+    assert (plain / "重要.txt").is_file()             # 里面那个文件也在
+
 
 def test_remove_deletes_vault_chats_logs_and_state(tmp_path):
     vault = _make_vault(tmp_path / "库")

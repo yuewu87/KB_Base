@@ -353,6 +353,92 @@ def test_remove_then_init_again_keeps_the_model_config(initialized_vault, env,
     assert c.get("/setup/state").json()["initialized"] is True
 
 
+def test_remove_refuses_a_path_that_is_not_a_vault(env, tmp_path):
+    """**填错一个字母就删掉一个不相干的目录**——端点这一层也得拦住。
+
+    `/setup/state` 和 `/setup/init` 的闸都判 `.git`（用 `lifecycle.vault_ready`），
+    只有删除这条原来是「拿到路径就删」。界面上的确认框拦不住 `curl`，
+    也拦不住接入指南里的会话层 AI，所以这里必须回 400。
+
+    **断言要落到文件上**，并且要验 `.env` 没被解绑——闸得在**真动手之前**，
+    不是删完了才回 400。
+    """
+    data = tmp_path / "data"
+    data.mkdir()
+    plain = tmp_path / "我的文档"
+    plain.mkdir()
+    (plain / "重要.txt").write_text("别删我", encoding="utf-8")
+    env.write_text(
+        "KB_LLM_API_KEY=k\nKB_LLM_BASE_URL=http://x\nKB_LLM_MODEL=m\n"
+        f"KB_VAULT_PATH={plain}\n",
+        encoding="utf-8",
+    )
+    c = TestClient(create_app(reload_config(env), llm=FakeLLM([]),
+                              data_dir=data, env_file=env))
+
+    resp = c.post("/setup/remove")
+
+    assert resp.status_code == 400, resp.text
+    assert "不是一个知识库" in resp.json()["detail"]
+    assert plain.is_dir()                             # 目录还在
+    assert (plain / "重要.txt").is_file()              # 里面那个文件也在
+    assert f"KB_VAULT_PATH={plain}" in env.read_text(encoding="utf-8")
+
+
+def test_remove_still_reports_a_missing_vault_dir(env, tmp_path):
+    """反向：**目录本来就不在了是合法的**，不能因为上面那道闸把这条也拦成 400。
+
+    `vault_ready` 对不存在的路径同样返回 `False`，所以闸必须自己判
+    `exists()`——不然「库被人手工删掉了，回来点一下移除清干净」这件事
+    就永远做不成，用户只剩手改 `.env` 一条路。
+    """
+    data = tmp_path / "data"
+    data.mkdir()
+    gone = tmp_path / "早就没了"
+    env.write_text(
+        "KB_LLM_API_KEY=k\nKB_LLM_BASE_URL=http://x\nKB_LLM_MODEL=m\n"
+        f"KB_VAULT_PATH={gone}\n",
+        encoding="utf-8",
+    )
+    c = TestClient(create_app(reload_config(env), llm=FakeLLM([]),
+                              data_dir=data, env_file=env))
+
+    resp = c.post("/setup/remove")
+
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["vault_removed"] is True
+    assert any("本来就不在了" in n for n in resp.json()["notes"])
+    assert "KB_VAULT_PATH=" in env.read_text(encoding="utf-8")   # 解绑了
+
+
+def test_migrate_refuses_when_the_current_vault_is_not_a_vault(env, tmp_path):
+    """`_check_migration` 原先只判 `source.exists()`，不判它是不是库。
+
+    路径填歪了、那儿是个普通目录时，搬家的结果是「把一个不相干的目录当成
+    库搬走」。挡在拷贝之前，一个字节都不动。
+    """
+    data = tmp_path / "data"
+    data.mkdir()
+    plain = tmp_path / "我的文档"
+    plain.mkdir()
+    (plain / "重要.txt").write_text("别搬我", encoding="utf-8")
+    env.write_text(
+        "KB_LLM_API_KEY=k\nKB_LLM_BASE_URL=http://x\nKB_LLM_MODEL=m\n"
+        f"KB_VAULT_PATH={plain}\n",
+        encoding="utf-8",
+    )
+    c = TestClient(create_app(reload_config(env), llm=FakeLLM([]),
+                              data_dir=data, env_file=env))
+
+    target = tmp_path / "新"
+    resp = c.post("/setup/migrate", json={"target": str(target)})
+
+    assert resp.status_code == 400, resp.text
+    assert "不是一个知识库" in resp.json()["detail"]
+    assert not target.exists()
+    assert (plain / "重要.txt").is_file()
+
+
 # ---------- 路径体检 ----------
 
 def test_check_reports_a_missing_path(client, tmp_path):

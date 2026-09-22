@@ -735,6 +735,15 @@ def build_router(
                 status_code=400,
                 detail=f"当前库不在了：{source}。这本身就不正常，先查一下",
             )
+        # **判据和 `/setup/state` 一致**（都在 `lifecycle.vault_ready`）：路径
+        # 填歪了、那儿是个普通目录时，只判 `exists()` 的话会把一个不相干的
+        # 目录当成库搬走。`migrate_vault` 里没有对应的闸——它拿到的是已经
+        # 过完这一道的 `source`，闸设在这儿就够了。
+        if not vault_ready(source):
+            raise HTTPException(
+                status_code=400,
+                detail=f"{source} 不是一个知识库（那儿没有 .git），先确认设置里的知识库路径填对了",
+            )
         if target == source:
             raise HTTPException(status_code=400, detail="目标就是当前库，不用搬")
         if source in target.parents:
@@ -805,7 +814,14 @@ def build_router(
         # 末尾那个 `()` 同样不能省（理由见 `setup_migrate` 里那段）。
         with busy_guard(busy, "remove")():
             vault_root = get_cfg().vault_path
-            result = remove_vault(vault_root, data_dir)
+            # **`remove_vault` 的闸抛 `LifecycleError`，这里必须接住。** 那句
+            # 是「这个路径不是库，我不删」，得变成 400 给用户看——接不住的话
+            # 一个「`.env` 填歪了」会以 500 的样子出现，而用户多半会当成
+            # 服务坏了，不去看自己填的路径。写法照抄上面 `setup_migrate`。
+            try:
+                result = remove_vault(vault_root, data_dir)
+            except LifecycleError as exc:
+                raise HTTPException(status_code=400, detail=str(exc)) from exc
             if result["vault_removed"]:
                 unbind_vault()
             else:

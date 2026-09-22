@@ -174,10 +174,14 @@ def _tree_size(root: Path) -> tuple[int, int]:
 
 
 def migrate_vault(source: Path, target: Path) -> dict:
-    """把整棵库从 `source` 搬到 `target`。成功返回 `{files, bytes}`。
+    """把整棵库从 `source` 搬到 `target`。成功返回 `{files, bytes, notes}`。
 
-    **失败时回滚目标，源库一根汗毛不动。** 这条是铁律：数据有两份的时候，
-    永远让**旧的那份先活着**，新的可以再造。
+    `notes` 只装一类事：**库搬成了，但旧的那份没删干净**。拷贝阶段出错一律
+    抛 `LifecycleError`、目标回滚；只有删源那一步是「不抛、如实记」。
+
+    **拷贝失败时回滚目标，源库一根汗毛不动。** 这条是铁律：数据有两份的
+    时候，永远让**旧的那份先活着**，新的可以再造。（铁律只管拷贝那一段。
+    删源失败时**新**的才是唯一完整的一份，方向正好反过来，见下面那段。）
 
     目标**存在但是空的**是合法目标（spec 5.1），所以 `copytree` 必须带
     `dirs_exist_ok=True`——不带的话撞上已存在的目录**一律**抛
@@ -215,8 +219,27 @@ def migrate_vault(source: Path, target: Path) -> dict:
             raise
         raise LifecycleError(f"拷贝失败：{exc}") from exc
 
-    _rmtree(source)
-    return {"files": files, "bytes": size}
+    notes: list[str] = []
+
+    # **删源失败绝不回滚目标。** 走到这里目标已经拷完并校验通过，它是**唯一
+    # 完整的一份**；源正在被删、可能只剩一半。这时候 `_rmtree(target)` 等于
+    # 把好的那份也毁了。上面那段 `except` 里的回滚只适用于**拷贝**阶段——
+    # 那时源是完整的、目标是半截的，方向正好相反。
+    #
+    # `_rmtree(source)` 失败在 Windows 上是常态（文件被 Obsidian、资源管理器
+    # 预览、杀软占着），而且**抛的是裸 `OSError`**——端点的
+    # `except LifecycleError` 接不住，用户拿到 500、`.env` 没改、旧库残着、
+    # 重试又撞「目标非空」400，走进死胡同。所以这里**不抛**：
+    # 如实记进 `notes`（语义和 `/setup/remove` 的 `notes` 一致），`.env` 照常
+    # 指向新库，脏东西留在旧路径上，用户可以回头自己清。
+    try:
+        _rmtree(source)
+    except OSError as exc:
+        notes.append(
+            f"新库已经就位，但旧库没删干净：{source}（{exc.strerror or exc}）。"
+            f"里面剩下的东西可以自己删——**别把新库 {target} 删了**"
+        )
+    return {"files": files, "bytes": size, "notes": notes}
 
 
 # ------------------------------------------------------------ 移除
@@ -247,6 +270,20 @@ def remove_vault(vault_root: Path | None, data_dir: Path) -> dict:
     failed: list[str] = []
     notes: list[str] = []
     vault_removed = True
+
+    # **闸必须在真动手之前。** 这个函数会把拿到的路径整个删掉，而调用方
+    # 给的只是 `.env` 里那个字符串——填错一个字母就删掉一个不相干的目录。
+    # 界面上的确认框是**界面礼貌**，拦不住 `curl` 和会话层 AI，所以判据
+    # 落在最里面的这一层。判据用 `vault_ready`，全仓只此一份。
+    #
+    # ⚠️ 必须判 `exists()`：`vault_ready` 对不存在的路径也返回 False，
+    # 而「目录本来就不在了」是**合法**的（下面走 `notes` 汇报），
+    # 不能把它变成报错。
+    if vault_root is not None and vault_root.exists() and not vault_ready(vault_root):
+        raise LifecycleError(
+            f"{vault_root} 不是一个知识库（那儿没有 .git），移除只删库、不删别的目录。"
+            "先确认设置里的知识库路径填对了"
+        )
 
     if vault_root is None:
         pass
