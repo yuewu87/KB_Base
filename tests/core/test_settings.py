@@ -139,7 +139,7 @@ def test_manifest_snapshot():
             ("KB_LLM_API_KEY", "secret", "", ()),
         ]),
         ("知识库", [
-            ("KB_VAULT_PATH", "readonly", "", ()),
+            ("KB_VAULT_PATH", "text", "", ()),
         ]),
         ("服务", [
             ("KB_PORT", "readonly", "", ()),
@@ -155,9 +155,15 @@ def test_manifest_snapshot():
 
 
 def test_readonly_fields_are_not_editable():
-    """vault 路径换错了整个服务当场废；端口改了就换地址、书签作废。"""
+    """端口改了就换地址、书签作废，仍然只读。
+
+    **vault 路径不再只读**（2026-09-22）。当初把它设成只读是本机被改废过的
+    教训，现在敢放开，靠的是两条机械约束：改路径时目标必须是个已初始化的库
+    （`validate` 里那条 `_vault_path_problem`），以及「搬家」这个显式动作。
+    放开的是输入框，不是判断。
+    """
     keys = editable_keys()
-    assert "KB_VAULT_PATH" not in keys
+    assert "KB_VAULT_PATH" in keys
     assert "KB_PORT" not in keys
     assert "KB_LLM_MODEL" in keys
 
@@ -237,8 +243,12 @@ def test_validate_rejects_bad_keep_days():
 
 
 def test_validate_drops_readonly_and_unknown():
-    """**后端不信前端。** 只读字段与服务端不认识的键一律丢掉。"""
-    out = validate({"KB_VAULT_PATH": "E:\\别处", "KB_PORT": "1", "KB_LLM_MODEL": "m"})
+    """**后端不信前端。** 只读字段与服务端不认识的键一律丢掉。
+
+    这条原来拿 `KB_VAULT_PATH` 当「只读」的例子，2026-09-22 起它不再是只读，
+    改由 `KB_NOT_A_KEY` 顶这个位置——顺带把「服务端不认识的键」那半句也验上。
+    """
+    out = validate({"KB_PORT": "1", "KB_NOT_A_KEY": "x", "KB_LLM_MODEL": "m"})
     assert out == {"KB_LLM_MODEL": "m"}
 
 
@@ -298,3 +308,53 @@ def test_slow_fields_say_they_need_a_restart():
 
     for key in ("KB_SWEEP_INTERVAL", "KB_LOG_KEEP_DAYS"):
         assert "下次启动" in find_field(key).help
+
+
+# ---------- 改路径（spec 9.2） ----------
+
+def _vault_at(tmp_path, *, with_git: bool) -> str:
+    """造一个（或不是）已初始化的库，返回它的路径字符串。"""
+    path = tmp_path / "库"
+    path.mkdir(exist_ok=True)           # 同一个用例里会被调两次，取路径 + 核路径
+    if with_git:
+        (path / ".git").mkdir(exist_ok=True)
+    return str(path)
+
+
+def test_vault_path_accepts_an_initialized_vault(tmp_path):
+    """**这是「换机器后路径变了」那条路**——库还在，只是位置不同。"""
+    clean = validate({"KB_VAULT_PATH": _vault_at(tmp_path, with_git=True)})
+    assert clean["KB_VAULT_PATH"] == _vault_at(tmp_path, with_git=True)
+
+
+def test_vault_path_rejects_a_plain_directory(tmp_path):
+    """指到一个没有 `.git` 的目录 = 把服务换废：收件箱建起来、领域是空的、
+    每条都掉进待归类。文案要告诉用户两条正路。"""
+    with pytest.raises(SettingsError) as exc:
+        validate({"KB_VAULT_PATH": _vault_at(tmp_path, with_git=False)})
+    assert "迁移到别处" in str(exc.value)
+    assert "移除知识库" in str(exc.value)
+
+
+def test_vault_path_rejects_a_missing_path(tmp_path):
+    with pytest.raises(SettingsError, match="还没有知识库"):
+        validate({"KB_VAULT_PATH": str(tmp_path / "根本没有这个目录")})
+
+
+def test_vault_path_rejects_empty(tmp_path):
+    """**不给「留空 = 解绑」。**
+
+    那会留下笔记、会话、日志在原地，而界面上显示成「还没有知识库」——
+    痕迹还在、界面说没了，正是本设计要消灭的那种状态。解绑走「移除知识库」。
+    """
+    with pytest.raises(SettingsError, match="移除知识库"):
+        validate({"KB_VAULT_PATH": ""})
+
+
+def test_missing_vault_key_is_not_an_error():
+    """`.env` 里没这一行 ≠ 用户想把路径改成空。
+
+    `validate` 只处理**提交上来的**键；设置窗没提交它，就不该报错。
+    这条和上一条是一对，别把空的当成一个错误。
+    """
+    assert validate({"KB_LLM_MODEL": "m"}) == {"KB_LLM_MODEL": "m"}

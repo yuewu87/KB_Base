@@ -612,14 +612,19 @@ def test_save_settings_ignores_readonly(client, tmp_path):
     提交 `KB_LLM_MODEL=m`（夹具 `.env` 里就是 `m`）会得到空字典——
     那样这条用例就退化成看着 `{}` 发呆，只读被不被丢掉它一声不吭。
     改看 `.env`：只读那栏一个字都没落进去。
+
+    **换过例子**（2026-09-22）：原来拿 `KB_VAULT_PATH` 当只读的样板，它现在
+    可编辑了，提交一个不存在的路径会被 `settings.validate` 挡下来（400），
+    这条用例就不再是「只读被丢掉」而是在测路径校验了——那有它自己的用例
+    （`tests/core/test_settings.py`）。改用仍然只读的 `KB_PORT`。
     """
     resp = client.post(
         "/settings",
-        json={"values": {"KB_VAULT_PATH": "E:\\别处", "KB_LLM_MODEL": "m2"}},
+        json={"values": {"KB_PORT": "1", "KB_LLM_MODEL": "m2"}},
     )
     assert resp.status_code == 200
     assert resp.json()["saved"] == {"KB_LLM_MODEL": "m2"}   # 只读键不在里头
-    assert "别处" not in (tmp_path / ".env").read_text(encoding="utf-8")
+    assert "KB_PORT" not in (tmp_path / ".env").read_text(encoding="utf-8")
 
 
 def test_saved_only_lists_what_actually_changed(tmp_path):
@@ -693,11 +698,19 @@ def test_settings_has_the_about_group(client):
 
 
 def test_readonly_fields_show_the_effective_values(tmp_path):
-    """只读两栏显示**生效值**，不是 `.env` 里的字面值。
+    """只读那栏显示**生效值**，不是 `.env` 里的字面值。
 
-    这份 `.env` 里没写 `KB_VAULT_PATH` / `KB_PORT`——按字面值两栏都是**空白**，
-    尽管跑起来用的是配置里的 vault 路径、端口是自动找的空闲端口。
-    空白看起来像坏了，而这一页的任务正是让人看清现在在用的是什么。
+    这份 `.env` 里没写 `KB_PORT`——按字面值是**空白**，尽管跑起来端口是自动
+    找的空闲端口。空白看起来像坏了，而这一页的任务正是让人看清现在在用的是
+    什么。
+
+    **vault 路径那一半 2026-09-22 删掉了。** 它不再只读（见
+    `tests/core/test_settings.py::test_readonly_fields_are_not_editable`），
+    而 `settings_context._value` 那条「生效值」的分支是按 `kind == "readonly"`
+    判的——可改字段的规矩反过来：**必须**显示 `.env` 字面值，否则留空 = 不改
+    的语义就没了。于是这一栏在这份 `.env` 下渲染成空白，是**新契约下的正确
+    行为**，不是坏了。「有没有库、路径是哪个」该在界面上怎么显示由
+    `settings_context` 的「一屏两态」负责（Task 6），不在这一条里。
     """
     env = tmp_path / ".env"
     env.write_text(
@@ -709,7 +722,6 @@ def test_readonly_fields_show_the_effective_values(tmp_path):
         create_app(cfg, data_dir=tmp_path, env_file=env)
     ).get("/settings").text
 
-    assert "我的库" in body          # vault 路径：生效值
     assert "自动" in body            # 端口没配 → 说清是自动找的，不是空白
 
 
