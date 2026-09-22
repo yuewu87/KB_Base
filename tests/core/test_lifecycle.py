@@ -1,5 +1,7 @@
 """库的生命周期：状态推断、路径体检、搬家、移除。"""
 
+import os
+
 import pytest
 
 from kb.core import lifecycle
@@ -118,18 +120,72 @@ def test_migrate_rolls_back_the_target_when_verification_fails(tmp_path, monkeyp
     assert (source / "计算机" / "笔记0.md").is_file()  # 源完好
 
 
-def test_migrate_removes_the_source_only_after_verification(tmp_path):
-    """校验没过就删源 = 数据没了。这条用「目标被占」间接验：
-    copytree 到已存在的目录会抛，源必须还在。"""
+def test_migrate_rolls_back_the_target_when_the_copy_fails(tmp_path, monkeypatch):
+    """**拷贝自己失败（磁盘满、权限）也要回滚目标，源不动。**
+
+    `copytree` 抛的是 `OSError`，不是 `LifecycleError`。只接住后者的话，
+    错误会冒到 `router.py` 那句 `except LifecycleError` 外面变成 500，而
+    **目标留着半截**——用户按提示重试，又撞上「目标非空」400，走进死胡同。
+    spec 9.3「拷贝中途失败 → 回滚目标目录，源不动，报错」说的就是这条。
+    """
+    source = _make_vault(tmp_path / "旧")
+    target = tmp_path / "新"
+
+    def boom(*a, **k):
+        raise OSError(28, "No space left on device")
+
+    monkeypatch.setattr(lifecycle.shutil, "copytree", boom)
+
+    with pytest.raises(LifecycleError, match="No space left"):
+        migrate_vault(source, target)
+
+    assert not target.exists()                       # 目标回滚了
+    assert (source / "计算机" / "笔记0.md").is_file()  # 源完好
+
+
+def test_migrate_refuses_a_non_empty_target_before_copying(tmp_path):
+    """**非空目标必须被挡在拷贝之前**——一旦进了回滚分支，目标里原有的
+    东西会被一起删掉。
+
+    这条闸在 `migrate_vault` 里再兜一道（端点上 `_check_migration` 已经先
+    400 了），因为 `dirs_exist_ok=True` 对非空目标是**静默合并**：拷完文件数
+    4≠3，校验挂掉 → 回滚 → `_rmtree(target)` 连用户那个 `占位` 一起删。
+    所以这里断言的不只是「源还在」，还有**目标里原有的东西也没被碰**。
+
+    （修 ① 之前这条靠 `copytree` 撞上已存在目录抛 `FileExistsError` 来验，
+    现在那个异常不存在了；docstring 里原来那句「copytree 到已存在的目录会抛」
+    已经不作数。）
+    """
     source = _make_vault(tmp_path / "旧")
     target = tmp_path / "新"
     target.mkdir()
     (target / "占位").write_text("x", encoding="utf-8")
 
-    with pytest.raises(OSError):
+    with pytest.raises(LifecycleError, match="非空"):
         migrate_vault(source, target)
 
-    assert (source / "计算机" / "笔记0.md").is_file()
+    assert (source / "计算机" / "笔记0.md").is_file()   # 源一根汗毛没动
+    assert (target / "占位").is_file()                  # 目标原有的东西也没被删
+
+
+def test_rmtree_deletes_a_read_only_file(tmp_path):
+    """**只读文件也删得掉**——`_rmtree` 存在的全部理由。
+
+    git 的松散对象是只读的（实测 `0o100444`），Windows 上 `shutil.rmtree`
+    撞上它直接抛 `PermissionError [WinError 5]`。上面那条
+    `test_remove_reports_a_locked_vault_instead_of_pretending` 看着也走
+    `_rmtree`，其实它把 `shutil.rmtree` 整个换成了「一律抛 OSError」，
+    chmod-重试那条路**一步都走不到**，所以这条得单独写。
+    """
+    tree = tmp_path / "树"
+    obj = tree / "objects" / "ab" / "cdef"
+    obj.parent.mkdir(parents=True)
+    obj.write_text("x", encoding="utf-8")
+    os.chmod(obj, 0o444)                     # 跟 git 的松散对象一样：只读
+
+    lifecycle._rmtree(tree)
+
+    assert not tree.exists()
 
 
 # ---------- remove_vault ----------

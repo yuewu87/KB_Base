@@ -217,6 +217,29 @@ def test_migrate_moves_and_repoints(initialized_vault, env, tmp_path):
     assert c.get("/setup/state").json()["vault_path"] == str(target)
 
 
+def test_migrate_into_an_existing_empty_target(initialized_vault, env, tmp_path):
+    """目标**存在但是空的**也是合法目标（spec 5.1）——正是界面「检查」会
+    建议的那种：`entries: []`，看着正合适。
+
+    `copytree` 默认 `dirs_exist_ok=False`，撞上已存在的目录**一律**抛
+    `FileExistsError`（哪怕它是空的），而那是 `OSError` 不是 `LifecycleError`，
+    端点那句 `except LifecycleError` 接不住 → 500，重试还是 500。
+    """
+    data = tmp_path / "data"
+    data.mkdir(exist_ok=True)
+    cfg = reload_config(env)
+    c = TestClient(create_app(cfg, llm=FakeLLM([]), data_dir=data, env_file=env))
+    (initialized_vault / "计算机" / "笔记.md").write_text("x", encoding="utf-8")
+
+    target = tmp_path / "已经建好的空目录"
+    target.mkdir()
+
+    resp = c.post("/setup/migrate", json={"target": str(target)})
+    assert resp.status_code == 200, resp.text
+    assert (target / "计算机" / "笔记.md").is_file()
+    assert not initialized_vault.exists()
+
+
 def test_migrate_refuses_a_non_empty_target(initialized_vault, env, tmp_path):
     data = tmp_path / "data"
     data.mkdir(exist_ok=True)
@@ -298,7 +321,10 @@ def test_remove_keeps_service_json(initialized_vault, env, tmp_path):
     cfg = reload_config(env)
     c = TestClient(create_app(cfg, llm=FakeLLM([]), data_dir=data, env_file=env))
 
-    c.post("/setup/remove")
+    # **不看响应的话这条是弱断言**：端点整个坏掉（500）也照样绿，
+    # 因为「没删掉」和「压根没跑」在文件系统上长得一模一样。
+    resp = c.post("/setup/remove")
+    assert resp.status_code == 200, resp.text
 
     assert (data / "runtime" / "service.json").is_file()
     assert (data / "unrelated.txt").is_file()

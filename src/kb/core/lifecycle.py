@@ -153,22 +153,42 @@ def migrate_vault(source: Path, target: Path) -> dict:
 
     **失败时回滚目标，源库一根汗毛不动。** 这条是铁律：数据有两份的时候，
     永远让**旧的那份先活着**，新的可以再造。
+
+    目标**存在但是空的**是合法目标（spec 5.1），所以 `copytree` 必须带
+    `dirs_exist_ok=True`——不带的话撞上已存在的目录**一律**抛
+    `FileExistsError`（哪怕它是空的），而那是 `OSError` 不是
+    `LifecycleError`，端点的 `except LifecycleError` 接不住，界面按「检查」
+    的建议选一个现成的空文件夹就得到一句 500，**重试还是 500**。
     """
+    # 非空目标由调用方 `_check_migration` 先挡（spec 5.1），这里再兜一道：
+    # `dirs_exist_ok=True` 会**静默合并**，而合并进一个已有的库是灾难。
+    # **这道闸在 `try` 之外**——它拦的是「调用方用错了」，不是「拷贝出错」，
+    # 绝不能走回滚：回滚那句 `_rmtree(target)` 会把目标里**原有的东西一起
+    # 删掉**，那是数据损失，比 400 严重得多。
+    if target.exists() and any(target.iterdir()):
+        raise LifecycleError(f"目标非空（{target}），换一个空的目录")
+
     files, size = _tree_size(source)
 
-    shutil.copytree(source, target)
     try:
+        shutil.copytree(source, target, dirs_exist_ok=True)
         got_files, got_size = _tree_size(target)
         if (got_files, got_size) != (files, size):
             raise LifecycleError(
                 f"拷完对不上：拷了 {got_files} 个文件 / {got_size} 字节，"
                 f"源有 {files} 个 / {size} 字节。目标目录已清掉，源库没动。"
             )
-    except LifecycleError:
-        # `ignore_errors=True`：这一步是**回滚**，删不干净也不能盖掉上面那个
-        # `LifecycleError`——用户要看见的是「拷完对不上」，不是「回滚没删掉」。
+    except (OSError, LifecycleError) as exc:
+        # `copytree` 自己失败（磁盘满、权限）抛的是 `OSError`，光接住
+        # `LifecycleError` 的话目标会**留着半截**——用户重试撞上「目标非空」
+        # 400，走进死胡同（spec 9.3：拷贝中途失败 → 回滚目标，源不动，报错）。
+        #
+        # `ignore_errors=True`：这一步是**回滚**，删不干净也不能盖掉真正的
+        # 错误——用户要看见的是「拷完对不上」或「磁盘满了」，不是「回滚没删掉」。
         _rmtree(target, ignore_errors=True)
-        raise
+        if isinstance(exc, LifecycleError):
+            raise
+        raise LifecycleError(f"拷贝失败：{exc}") from exc
 
     _rmtree(source)
     return {"files": files, "bytes": size}
@@ -243,7 +263,10 @@ def remove_vault(vault_root: Path | None, data_dir: Path) -> dict:
             # 但**照实记下来**——`failed` 的语义是「这份没删掉」，不是
             # 「出 bug 了」，两者混起来用户会在 `data/logs/` 里看见文件
             # 却什么都没被告知。`notes` 里那句是给人看的原因。
-            notes.append(f"{item} 里有文件正被服务打开，删不掉")
+            notes.append(
+                f"{item} 里今天那几个文件正被服务打开，删不掉——"
+                "下次重启服务后可以再清一次"
+            )
             failed.append(str(item))
 
     state = data_dir / "state.json"
