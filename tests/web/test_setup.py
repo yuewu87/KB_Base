@@ -767,6 +767,28 @@ def test_sidebar_greys_out_the_push_entries_before_init(client):
     assert 'aria-disabled="true"' in html
 
 
+def test_remove_reports_when_the_model_config_vanishes(
+        initialized_vault, env, tmp_path):
+    """移除只动 `KB_VAULT_PATH` 一个键——**但复查管的是「读回来完不完整」。**
+
+    `load_config` 是环境变量赢、`reload_config` 是文件赢，两者本来就会不一致：
+    模型三件套只有进程环境里有（`.env` 里没写）时，`reload_config` 读回来是
+    三个空串，`state["cfg"]` 就被换成一个空壳——`/settings` 里模型名与地址变
+    空白，`setup_init` 的「沿用现在的配置」跟着垮掉，而移除这条路**一声不响**。
+    同一份 `.env` 走 `/settings` 会得到 400「读回来必填项是空的」。
+
+    （库里那份 `test_remove_then_init_again_keeps_the_model_config` 断言它们
+    会被保留——但那条只覆盖「三件套**在** `.env` 里」这一种。）
+    """
+    # 把 `.env` 里的三件套抹掉，模拟「它们只在进程环境里」
+    env.write_text(f"KB_VAULT_PATH={initialized_vault}\n", encoding="utf-8")
+
+    resp = _client_for(env, tmp_path).post("/setup/remove")
+
+    assert resp.status_code == 400
+    assert "KB_LLM_MODEL" in resp.json()["detail"]
+
+
 def test_sweep_run_reports_instead_of_409_while_busy(client, tmp_path):
     """`/sweep/run` 被挡时**落一份报告，不是 409**。
 

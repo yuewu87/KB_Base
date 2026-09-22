@@ -113,14 +113,13 @@ def busy_guard(busy: Busy, what: str = "organize") -> Callable[[], AbstractConte
     """
     @contextmanager
     def organizing():
-        if not busy.acquire(what):
-            # 那句话的**唯一来源**在 `Busy.refusal`——巡检页那份报告也要说
-            # 同一句话，两边各写一遍就会分岔。
-            raise HTTPException(status_code=409, detail=busy.refusal)
-        try:
+        # `busy.hold` 管 acquire/release 的配对，这里只管「拿不到时说什么」。
+        with busy.hold(what) as got:
+            if not got:
+                # 那句话的**唯一来源**在 `Busy.refusal`——巡检页那份报告也要
+                # 说同一句话，两边各写一遍就会分岔。
+                raise HTTPException(status_code=409, detail=busy.refusal)
             yield
-        finally:
-            busy.release()
 
     return organizing
 
@@ -341,9 +340,9 @@ def _sweep_in_background(
     「它走的是和整理草稿同一条链」）。
     """
     # 拿不到（启动那一瞬间恰好有请求在跑，可能性极小）就**连坑都不占**。
-    if not busy.acquire("sweep"):
-        return
-    try:
+    with busy.hold("sweep") as got:
+        if not got:
+            return
         # 先占坑：万一跑挂了也不会每次重启都重跑。
         # 用 mark_run 而不是 save_report——后者会留一份 read: false 的报告，
         # 侧栏会把它当正式报告显示（还带两个回复按钮）。
@@ -368,19 +367,12 @@ def _sweep_in_background(
         except Exception:      # noqa: BLE001
             logging.getLogger("kb.sweep").exception("巡检失败")
             try:
-                sweep_state.save_report(data_dir, {
-                    # 形状和别的失败报告**逐键对齐**：模板虽然用 `or []`
-                    # 兜住了缺键，但那是 Jinja 的 Undefined 在救场，
-                    # 不是这里可以少写两个键的理由。
-                    "summary": "这次巡检没跑成，看运行日志",
-                    "tag_merges": [],
-                    "dir_merges": [],
-                })
+                # 报告的形状只有 `save_failure` 那一份——原先这个字典在四处
+                # 各写一遍，其中一处还少两个键。
+                sweep_state.save_failure(data_dir, "看运行日志")
             except Exception:  # noqa: BLE001
                 # 报告也写不进去（多半是同一个盘的同一个问题）。照样不抛。
                 logging.getLogger("kb.sweep").exception("巡检失败的报告也写不进去")
-    finally:
-        busy.release()
 
 
 def create_app(
@@ -469,11 +461,24 @@ def create_app(
         「还没有知识库」，正是本设计要消灭的状态。移除不一样——它是
         **先删干净、再解绑**，所以这里直接写文件。
 
-        必填项那条复查也不做：移除只动 `KB_VAULT_PATH` 一个键，
-        模型三件套一个字都没碰。
+        **但必填项那条复查要做。** 原先这里写着「移除只动 `KB_VAULT_PATH`
+        一个键，模型三件套一个字都没碰」——那句话说的是**我们改了什么**，而
+        复查管的是**读回来完不完整**，两回事。`load_config` 是环境变量赢、
+        `reload_config` 是文件赢，两者本来就会不一致：三件套只有进程环境里
+        有（`.env` 里没写）时，`reload_config` 读回来是三个空串，
+        `state["cfg"]` 就被换成一个空壳——`/settings` 里模型名与地址变空白，
+        而移除这条路**一声不响**。同一份 `.env` 走 `/settings` 会得到 400
+        「读回来必填项是空的」。
         """
         settings.write_env(env_path, {"KB_VAULT_PATH": ""})
-        state["cfg"] = reload_config(env_path)
+        new_cfg = reload_config(env_path)
+        if not (new_cfg.llm_model and new_cfg.llm_base_url and new_cfg.llm_api_key):
+            raise settings.SettingsError(
+                "`KB_VAULT_PATH` 写空了，但读回来模型三件套是空的——检查一下 "
+                "`.env` 里 KB_LLM_API_KEY / KB_LLM_BASE_URL / KB_LLM_MODEL "
+                "这三行还在不在"
+            )
+        state["cfg"] = new_cfg
         cache["llm"] = None
 
     def _chat_organize_fn(kind: str, content: str, target: str | None) -> str:

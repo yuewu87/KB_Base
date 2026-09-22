@@ -93,6 +93,25 @@ def save_report(data_dir: Path, report: dict, when: datetime | None = None) -> N
         _write(data_dir, state)
 
 
+def save_failure(data_dir: Path, reason: str, when: datetime | None = None) -> None:
+    """落一份「这次巡检没跑成」的报告。**四处调用点共用这一份形状。**
+
+    「被挡住」「没有知识库」「跑挂了」「模型输出坏了」原先各写一遍那个字典
+    （`web/router.py` 三处 + `api/http.py` 一处），其中一处还少了
+    `tag_merges` / `dir_merges` 两个键——只靠 Jinja 对缺失键给 Undefined 才
+    没炸。想给失败报告补一个字段要记得改四处，最容易漏的正是后台那条
+    最难复现、也最不容易被测到的路。
+
+    和 `mark_run` / `save_report` 并列：它落的也是 `read: false` 的正式报告，
+    侧栏会显示、带回复按钮——那正是要的，用户得看得见「没跑成」。
+    """
+    save_report(
+        data_dir,
+        {"summary": f"这次巡检没跑成：{reason}", "tag_merges": [], "dir_merges": []},
+        when,
+    )
+
+
 def mark_run(data_dir: Path, when: datetime | None = None) -> None:
     """只占坑：把「上次巡检」推到现在，**不留报告**。
 

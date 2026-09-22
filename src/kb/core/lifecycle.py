@@ -10,8 +10,12 @@ import os
 import shutil
 import stat
 import threading
+from collections.abc import Iterator
+from contextlib import contextmanager
 from datetime import datetime
 from pathlib import Path
+
+from kb.core.vault import list_domains
 
 _BUSY_LABELS = {
     "organize": "整理", "migrate": "迁移", "remove": "移除", "sweep": "巡检",
@@ -34,6 +38,26 @@ class Busy:
     def __init__(self) -> None:
         self._lock = threading.Lock()
         self._what: str | None = None
+
+    @contextmanager
+    def hold(self, what: str) -> Iterator[bool]:
+        """占住锁；拿不到就 `yield False`——**不抛、也不等**。
+
+        **这是「每条退出路径都必须 release」那句话的唯一落点。** 原先
+        `acquire` / `finally: release` 手抄在四处（后台巡检线程、`POST /sweep`、
+        `/sweep/run`、`busy_guard`），谁在 `try` 前面插一行会抛的代码，锁就
+        **永久泄**——此后每次投递/整理/对话/迁移都 409「正在××，等它跑完再试」，
+        只能重启服务才解得开，而症状看着像「服务卡住」而不是「锁没还」。
+        收进来之后 acquire/release 永远成对，调用方只决定「拿不到时干什么」：
+        `busy_guard` 回 409，巡检落一份报告，后台线程静默返回。
+        """
+        if not self.acquire(what):
+            yield False
+            return
+        try:
+            yield True
+        finally:
+            self.release()
 
     def acquire(self, what: str) -> bool:
         # **名目必须配了中文标签。** 漏配时 `label` 走的是
@@ -131,6 +155,24 @@ def vault_ready(vault_path: Path | None) -> bool:
     )
 
 
+def vault_view(vault_path: Path | None) -> dict:
+    """给界面用的库状态：**路径字符串 + 磁盘上的领域**。
+
+    **`vault_ready` 不在这个字典里**，那不是漏了：它要另外算，因为这个返回
+    值会被摊在 `_ctx` 之上（`_ctx("settings", **settings_context(...))`），
+    两边都带这个键的话 `**extra` 会把先算的那份**静默顶掉**——同一次请求算
+    两遍、哪份生效取决于字典展开顺序，分岔时不会有任何东西报错。
+    `vault_ready` 由 `_ctx` 一处提供。
+
+    **不 ready 就一个都不读**：路径填歪了、填成一个文件、或写成相对路径时，
+    `list_domains` 读的是别人的目录（或者直接 500）。
+    """
+    return {
+        "vault_path": str(vault_path) if vault_path else "",
+        "domains": list_domains(vault_path) if vault_ready(vault_path) else [],
+    }
+
+
 def vault_path_problem(vault_path: Path) -> str | None:
     """这个路径能不能当「我们的库」来动。不能就返回一句人话，能返回 `None`。
 
@@ -226,7 +268,12 @@ def check_path(path: Path) -> dict:
     return {
         "exists": path.exists(),
         "writable": _writable(path),
-        "looks_like_vault": (path / ".git").exists(),
+        # **判据用 `vault_ready`，别再手写一遍 `(path / ".git").exists()`。**
+        # 上面那段 docstring 头一条就是「别在任何地方再写一遍」——写的当时
+        # 就是它漏的那一处。两边现在结果一样（`vault_ready` 多一条
+        # `is_absolute()`，而候选路径本来就该是绝对的），但那种「真出现分歧时
+        # 没有任何东西会报错」的位置正是要收掉的。
+        "looks_like_vault": vault_ready(path),
         "entries": entries,
     }
 

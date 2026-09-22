@@ -37,8 +37,9 @@ from kb.core.lifecycle import (
     remove_vault,
     vault_path_problem,
     vault_ready,
+    vault_view,
 )
-from kb.core.vault import list_domains, list_drafts, list_notes
+from kb.core.vault import list_drafts, list_notes
 from kb.core.vault_setup import DEFAULT_DOMAINS, DOMAIN_CANDIDATES, init_vault
 from kb.llm.base import LLM, LLMError
 from kb.logging_setup import LOG_DIR
@@ -165,18 +166,16 @@ def settings_context(env_path: Path, cfg: Config) -> dict:
     # 「知识库」那一组要**一屏两态**，模板得知道现在是哪一态。
     # ⚠️ 局部变量**不要再叫 `vault_ready`**——那会遮住 `lifecycle.vault_ready`
     # 这个函数，同一个名字在这里指两样东西。判据本身在它那儿，只有那一份。
-    vault_path = cfg.vault_path
-    ready = vault_ready(vault_path)
-
     return {
         "groups": groups,
-        "vault_ready": ready,
-        "vault_path": str(vault_path) if vault_path else "",
-        # 已初始化态要显示磁盘上住了哪些领域。**从磁盘读，不从配置读**——
-        # 领域的唯一真源始终是磁盘（Q95 那条）。**不 ready 就不读**：
-        # 路径填歪了、填成一个文件时，`list_domains` 读的是别人的目录
-        # （理由和 `/setup/state` 那条一样）。
-        "domains": list_domains(vault_path) if ready else [],
+        # **这里不返回 `vault_ready`。** 它由 `_ctx` 一处提供——这个函数的结果
+        # 是**摊在 `_ctx` 之上**的（`_ctx("settings", **settings_context(...))`），
+        # 两边都带这个键的话 `**extra` 会把先算的那份静默顶掉：同一次请求算
+        # 两遍，哪份生效取决于字典展开顺序，分岔时不会有任何东西报错。
+        #
+        # 路径字符串与领域**从磁盘读，不从配置读**——领域的唯一真源始终是
+        # 磁盘（Q95 那条）。判据与防 500 的那道守卫都在 `lifecycle.vault_view`。
+        **vault_view(cfg.vault_path),
         # 一条龙的段①要预填模型名与地址。**密钥不预填**（掩码都不给）：
         # 「留空 = 不改」是它的语义，预填成掩码等于让人一保存把 key 覆盖掉。
         "llm_model": values.get("KB_LLM_MODEL", ""),
@@ -284,12 +283,11 @@ def build_router(
         vault_path = get_cfg().vault_path
         return {
             "active": name,
-            # 未初始化时是空串，不是 `None`——侧栏要显示的是「没有」，
-            # 不是一个 Python 字面量。
-            "vault": str(vault_path) if vault_path else "",
             # 首屏那张引导卡看它，侧栏两处「未初始化就置灰」也看它。
             # 判据用 `lifecycle.vault_ready`——全仓唯一那一份（`/setup/state`、
-            # `/setup/init` 的闸、`settings_context` 都调它）。
+            # `/setup/init` 的闸、设置窗都调它）。**路径字符串与领域不在这里**：
+            # 那两样只有 `/settings` 和 `/setup/state` 要，走
+            # `lifecycle.vault_view`——每个请求都去扫一遍目录没必要。
             "vault_ready": vault_ready(vault_path),
             "skin": get_cfg().skin,
             "skins": skins.options(),
@@ -418,44 +416,23 @@ def build_router(
         一个 git commit），插进一轮迁移里会写成「一半旧库一半新库」，而那个
         样子是**看起来一切正常**。
         """
-        # 拿不到就落报告——`Busy.refusal` 和 409 的 detail 是同一句话。
-        if not busy.acquire("sweep"):
-            sweep_state.save_report(
-                data_dir,
-                {
-                    "summary": f"这次巡检没跑成：{busy.refusal}",
-                    "tag_merges": [],
-                    "dir_merges": [],
-                },
-            )
-            return RedirectResponse("/sweep", status_code=303)
-        try:
+        # `busy.hold` 管 acquire/release 的配对，这里只管「被挡住时说什么」。
+        # 被挡的理由拿 `Busy.refusal`——和 409 的 detail 是同一句话。
+        with busy.hold("sweep") as got:
+            if not got:
+                sweep_state.save_failure(data_dir, busy.refusal)
+                return RedirectResponse("/sweep", status_code=303)
+
             vault_path = get_cfg().vault_path
             if vault_path is None:
-                sweep_state.save_report(
-                    data_dir,
-                    {
-                        "summary": f"这次巡检没跑成：{NO_VAULT_MESSAGE}",
-                        "tag_merges": [],
-                        "dir_merges": [],
-                    },
-                )
+                sweep_state.save_failure(data_dir, NO_VAULT_MESSAGE)
                 return RedirectResponse("/sweep", status_code=303)
 
             try:
                 run_sweep(vault_path, data_dir, get_llm())
             except sweep.SweepError as exc:
-                sweep_state.save_report(
-                    data_dir,
-                    {
-                        "summary": f"这次巡检没跑成：{exc}",
-                        "tag_merges": [],
-                        "dir_merges": [],
-                    },
-                )
+                sweep_state.save_failure(data_dir, str(exc))
             return RedirectResponse("/sweep", status_code=303)
-        finally:
-            busy.release()
 
     @router.post("/sweep/reply")
     def sweep_reply():
@@ -652,13 +629,12 @@ def build_router(
         这里别再手写一遍。
         """
         vault_path = get_cfg().vault_path
-        ready = vault_ready(vault_path)
+        # 路径字符串、磁盘上的领域、以及「不 ready 就别去读」那道守卫都在
+        # `lifecycle.vault_view` 里——和设置窗共用同一份。原先这里和
+        # `settings_context` 逐行同构，连注释都要写「理由和那条一样」。
         return {
-            "initialized": ready,
-            "vault_path": str(vault_path) if vault_path else "",
-            # **不 ready 就不读**：路径填歪了、填成一个文件、或写成相对路径
-            # 时，`list_domains` 读的是别人的目录（或者直接 500）。
-            "domains": list_domains(vault_path) if ready else [],
+            "initialized": vault_ready(vault_path),
+            **vault_view(vault_path),
             "counts": _counts(vault_path),
             "busy": busy.what,
         }
@@ -902,6 +878,17 @@ def build_router(
                 # 写法照抄上面 `setup_migrate` 那段。
                 try:
                     unbind_vault()
+                except settings.SettingsError as exc:
+                    # 库已经没了、`.env` 也写空了，但读回来三件套是空的
+                    # （它们只在进程环境里）。`unbind_vault` 的 docstring 里
+                    # 写着为什么这条复查不能省。
+                    raise HTTPException(
+                        status_code=400,
+                        detail=(
+                            f"库已经删干净了（{vault_root}），但 {exc}。"
+                            "另外请确认 `.env` 里的 KB_VAULT_PATH 已经清空"
+                        ),
+                    ) from exc
                 except OSError as exc:
                     raise HTTPException(
                         status_code=400,

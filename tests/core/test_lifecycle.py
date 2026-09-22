@@ -65,6 +65,38 @@ def test_acquiring_an_unknown_name_is_an_error():
     assert busy.what is None          # 炸了就不许占住
 
 
+def test_hold_releases_on_every_path():
+    """**`hold` 是「每条退出路径都还锁」那句话的唯一落点。**
+
+    原先 `acquire` / `finally: release` 手抄在四处（后台巡检线程、`POST /sweep`、
+    `/sweep/run`、`busy_guard`），谁在 `try` 前面插一行会抛的代码，锁就
+    **永久泄**——此后每次写操作都 409「正在巡检」，只能重启，症状看着像
+    「服务卡住」而不是「锁没还」。这条钉三件事：拿到了、正常退出还了、
+    **抛异常也还了**。
+    """
+    busy = Busy()
+
+    with busy.hold("organize") as got:
+        assert got is True
+        assert busy.what == "organize"
+    assert busy.what is None                      # 正常退出
+
+    with pytest.raises(RuntimeError):
+        with busy.hold("organize") as got:
+            assert got is True
+            raise RuntimeError("干活干到一半炸了")
+    assert busy.what is None                      # 抛了也还
+
+    assert busy.acquire("organize") is True       # 别人正占着
+    with busy.hold("migrate") as got:
+        assert got is False
+        # **拿不到时不许碰锁**：既不能顶掉原持有者，也不能顺手把它放了。
+        assert busy.what == "organize"
+    assert busy.what == "organize"
+    busy.release()
+    assert busy.what is None
+
+
 def test_refusal_survives_the_holder_releasing():
     """**拿不到锁之后持锁方才释放**，不能生成半截句子。
 
