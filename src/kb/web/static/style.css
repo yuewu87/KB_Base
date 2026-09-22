@@ -270,9 +270,15 @@ body.collapsed .side-action {
 }
 .card:hover { border-color: var(--line-strong); box-shadow: var(--shadow); }
 
+/* 整理日志的卡片**只有一行字**（一条草稿的整理结果），没有标题。
+   所以这里要把 `.card li` 那套正文色/字号搬过来——不放 `<ul><li>` 之后，
+   卡里没有别的规则管它了。2026-09-22 一条草稿一张卡时加的。 */
 .card.journal {
   background: var(--accent-soft);
   border-color: var(--accent-line);
+  font-size: 13px;
+  line-height: 1.55;
+  color: var(--ink-soft);
 }
 .card.flow {
   background: var(--journal-soft);
@@ -813,7 +819,11 @@ button.secondary:hover { background: var(--accent-soft); border-color: var(--acc
 
 .chat-history.tabbed {
   display: flex;
-  gap: 0;
+  /* 页签与内容之间留出间隔。**原来写的是 0，两个叠在一起**——
+     页签右侧没边框、圆角只给左边，是当「贴在内容上的文件夹页签」做的。
+     2026-09-22 用户看过真页面：「页签和右边的内容之间需要有间隔，现在是贴着的」。
+     隔开之后页签不再贴边，所以 `.tab` 那边也把右边框和右侧圆角补了回来。 */
+  gap: 10px;
   padding-left: 0;
 }
 
@@ -831,8 +841,7 @@ button.secondary:hover { background: var(--accent-soft); border-color: var(--acc
   letter-spacing: 2px;
   padding: 9px 3px;
   border: 1px solid var(--line);
-  border-right: none;
-  border-radius: 5px 0 0 5px;
+  border-radius: 5px;      /* 不再贴内容，四角补全（原来是 5px 0 0 5px） */
   background: var(--line-soft);
   color: var(--faint);
   font: inherit;
@@ -868,6 +877,18 @@ button.secondary:hover { background: var(--accent-soft); border-color: var(--acc
   letter-spacing: 1px;
   color: var(--faint);
 }
+
+/* 一次整理的分组标签（`## 08:13 整理 34 条草稿`）。
+   比箱子名（`.day`）轻一档——它只是给下面那串卡片分堆，不是内容本身。
+   2026-09-22 之前这行是**卡片里的 `<h3>`**，一条草稿一张卡之后让位给了条目。 */
+.group {
+  margin: 20px 0 9px;
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 1px;
+  color: var(--faint);
+}
+.group:first-of-type { margin-top: 4px; }
 
 /* ---- 巡检页 ----
 

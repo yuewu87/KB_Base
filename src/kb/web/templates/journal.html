@@ -5,7 +5,7 @@
   <section>
     <div class="page-head">
       <h1>整理日志</h1>
-      <p>按天聚合，一次整理一张卡片。这一份是知识，进 vault，可被检索。</p>
+      <p>按天聚合，一条草稿一张卡片。这一份是知识，进 vault，可被检索。</p>
     </div>
 
     {% if not day %}
@@ -15,17 +15,19 @@
       </div>
     {% else %}
       <h2 class="day">{{ box_label(day) }}</h2>
+      {# 一条草稿一张卡片（需求第五节：「一张一张的长条形卡片装载，每一条日志一张卡片」）。
+         `## 08:13 整理 34 条草稿` 那行退成分组标签——卡片标题的位置让给条目本身。
+         2026-09-22 之前是一节一张卡，测试期每轮只有一两条看不出差别，
+         头一回一轮 34 条就成了一面 34 条的墙。 #}
       {% for title, items in sections %}
-        <article class="card journal">
-          <h3>{{ title }}</h3>
-          {% if items %}
-            <ul>
-              {% for item in items %}<li>{{ item }}</li>{% endfor %}
-            </ul>
-          {% else %}
-            <p class="muted">（这一节没有条目）</p>
-          {% endif %}
-        </article>
+        <h3 class="group">{{ title }}</h3>
+        {% if items %}
+          {% for item in items %}
+            <article class="card journal">{{ item }}</article>
+          {% endfor %}
+        {% else %}
+          <p class="muted">（这一节没有条目）</p>
+        {% endif %}
       {% endfor %}
     {% endif %}
   </section>
