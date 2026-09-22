@@ -9,6 +9,7 @@ from kb.api.http import create_app
 from kb.config import Config
 from kb.core.vault import write_note
 from kb.llm.base import FakeLLM, LLMError
+from kb.web import skins
 
 # 对话输出固定成「不做动作」的一句——Web 测试不该真连模型
 CHAT_REPLY = '{"say": "好的", "action": null, "params": {}}'
@@ -860,7 +861,9 @@ def test_every_page_carries_the_configured_skin(client):
     """
     for path in PAGES:
         body = client.get(path).text
-        assert 'data-skin="archive"' in body, f"{path} 没带 data-skin"
+        # **名字从 `skins.DEFAULT_SKIN` 拿，别写死**——这条守的是
+        # 「每页都带上了当前那套」，不是「默认永远是现有蓝」。
+        assert f'data-skin="{skins.DEFAULT_SKIN}"' in body, f"{path} 没带 data-skin"
 
 
 def test_skin_change_shows_up_on_next_request(client):
@@ -905,7 +908,7 @@ def test_skin_menu_marks_the_current_one(client):
         assert len(tags) == 1, f"选中的那行有 {len(tags)} 个（应当恰好 1 个）"
         return re.search(r'data-skin-id="([\w-]+)"', tags[0]).group(1)
 
-    assert marked(client.get("/").text) == "archive"
+    assert marked(client.get("/").text) == skins.DEFAULT_SKIN
     client.post("/settings", json={"values": {"KB_SKIN": "garnet"}})
     assert marked(client.get("/").text) == "garnet"
 
@@ -942,7 +945,7 @@ def test_settings_offers_the_same_choice(client):
     body = client.get("/settings").text
     assert "外观" in body
     assert '<option value="neon"' in body
-    assert 'data-init="archive"' in body
+    assert f'data-init="{skins.DEFAULT_SKIN}"' in body
 
 
 def test_test_connection_reports_failure(tmp_path):

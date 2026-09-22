@@ -151,8 +151,16 @@ def test_bad_log_level_in_env_falls_back_to_info(tmp_path):
 
 # ---------- 皮肤 ----------
 
-def test_skin_defaults_to_archive(tmp_path):
-    assert load_config(_write_env(tmp_path, VALID)).skin == "archive"
+def test_skin_defaults_to_the_default_skin(tmp_path):
+    """**别把默认皮肤的名字抄进这条测试。**
+
+    写死 `"archive"` 的话，改默认值那天这条会红——而它想守的是「`.env` 里
+    没这一行时用默认那套」，不是「默认永远是现有蓝」。名字直接从
+    `skins.DEFAULT_SKIN` 拿。
+    """
+    from kb.web.skins import DEFAULT_SKIN
+
+    assert load_config(_write_env(tmp_path, VALID)).skin == DEFAULT_SKIN
 
 
 @pytest.mark.parametrize("skin", ["archive", "dark-pink", "aurora", "garnet", "neon", "mono"])
@@ -167,15 +175,17 @@ def test_skin_is_read(tmp_path, skin):
 
 
 @pytest.mark.parametrize("bad", ["purple", "  ", "dark_pink", "炭黑"])
-def test_bad_skin_in_env_falls_back_to_archive(tmp_path, bad):
+def test_bad_skin_in_env_falls_back_to_the_default(tmp_path, bad):
     """手改 `.env` 写错皮肤名不能让服务崩。
 
     回落默认值跑着，设置窗里显示的就是默认值——人一看就知道不对。
     和 `_log_level` 是同一条理由：抛出去就是「文件改了、内存没换、
     客户端拿 500」的怪状态。
     """
+    from kb.web.skins import DEFAULT_SKIN
+
     env = _write_env(tmp_path, VALID + f"KB_SKIN={bad}\n")
-    assert load_config(env).skin == "archive"
+    assert load_config(env).skin == DEFAULT_SKIN
 
 
 def test_the_copied_skin_list_does_not_drift():
@@ -188,6 +198,29 @@ def test_the_copied_skin_list_does_not_drift():
     from kb.web.skins import SKIN_IDS
 
     assert set(_VALID_SKINS) == set(SKIN_IDS)
+
+
+def test_the_default_skin_agrees_in_all_four_places():
+    """**默认皮肤这一个名字散在四处**，改的时候必须一起改。
+
+    四处：`skins.DEFAULT_SKIN`、`config.Config.skin` 的字段默认、
+    `config._skin()` 的回落、`settings` 里那个字段的 `default`。
+    `config` **故意不 import `skins`**（不反过来依赖 web 层），所以拼不到一起。
+
+    散着写的代价就是「改了三处忘了一处」，而症状很难往这上面想：
+    - `_skin()` 忘了改 → 手改 `.env` 写错一个字母，回落到的不是文档说的那套
+    - `settings` 忘了改 → `.env` 里没写 `KB_SKIN` 的人，设置窗显示的是旧默认，
+      一保存**就把旧的那套写进 `.env`**，从此钉死
+    - `skins.DEFAULT_SKIN` 忘了改 → 那一套的变量不会进 `:root`，首屏闪一下
+    """
+    from kb.config import _skin
+    from kb.core import settings
+    from kb.web.skins import DEFAULT_SKIN
+
+    assert settings.find_field("KB_SKIN").default == DEFAULT_SKIN
+    assert _skin({}) == DEFAULT_SKIN
+    assert _skin({"KB_SKIN": "这套不存在"}) == DEFAULT_SKIN
+    assert Config("k", "u", "m", None, None).skin == DEFAULT_SKIN
 
 
 def test_reload_config_sees_the_new_value(tmp_path):

@@ -141,7 +141,7 @@ SKINS: tuple[Skin, ...] = (
 )
 
 SKIN_IDS: tuple[str, ...] = tuple(s.id for s in SKINS)
-DEFAULT_SKIN = "archive"
+DEFAULT_SKIN = "garnet"
 _BY_ID = {s.id: s for s in SKINS}
 
 # 展示顺序：用户定的 ①-⑥ 顺序，不是上面的定义顺序
@@ -275,13 +275,22 @@ def derive(skin_id: str) -> dict[str, str]:
 
     这个回落和 `kb.config._skin()` 是同一份语义：手改 `.env` 写错值不能让
     服务崩，界面上显示默认值，人一看就知道不对。
+
+    ⚠️ **`archive` 这一支和「默认那套」是两回事，别合并。** 现有蓝是**原样
+    保留**的那一套——`ARCHIVE` 那张表是从上一版的 `style.css` 里逐字抄下来
+    的，不参与推导（`test_archive_is_verbatim_todays_values` 守着）。
+    原先这里写的是：
+
+        if skin_id == DEFAULT_SKIN:
+            return dict(ARCHIVE)
+
+    那等于**假设了「默认就是现有蓝」**。2026-09-22 把默认改成 `garnet` 时
+    它当场露馅：`derive("garnet")` 返回了一整套现有蓝，而
+    `derive("archive")` 反倒去跑推导、32 个值全漂——两条测试一起红。
     """
-    if skin_id == DEFAULT_SKIN:
+    if skin_id == "archive" or skin_id not in _BY_ID:
         return dict(ARCHIVE)
-    skin = _BY_ID.get(skin_id)
-    if skin is None:
-        return dict(ARCHIVE)
-    return _derive(skin)
+    return _derive(_BY_ID[skin_id])
 
 
 # ----------------------------------------------------------------- 渲染

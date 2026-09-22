@@ -148,7 +148,7 @@ def test_manifest_snapshot():
             ("KB_LOG_KEEP_DAYS", "int", "90", ()),
         ]),
         ("外观", [
-            ("KB_SKIN", "choice", "archive",
+            ("KB_SKIN", "choice", "garnet",
              ("archive", "dark-pink", "aurora", "garnet", "neon", "mono")),
         ]),
     ]
@@ -184,11 +184,15 @@ def test_the_env_groups():
 
 def test_skin_is_a_choice_field():
     from kb.core.settings import find_field
+    from kb.web.skins import DEFAULT_SKIN
 
     field = find_field("KB_SKIN")
     assert field is not None
     assert field.kind == "choice"
-    assert field.default == "archive"
+    # 不写死名字：这条守的是「它是下拉框、默认值是默认那套」，
+    # 不是「默认永远是现有蓝」。四处默认必须一致由
+    # `tests/test_config.py::test_the_default_skin_agrees_in_all_four_places` 钉。
+    assert field.default == DEFAULT_SKIN
 
 
 def test_skin_choices_do_not_drift_from_the_web_layer():

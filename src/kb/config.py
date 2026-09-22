@@ -45,7 +45,7 @@ class Config:
     keep_days: int = 90
     # 界面皮肤。取值清单在 `kb.web.skins`，这里只做容错回落——
     # 不 import skins，免得 config 反过来依赖 web 层
-    skin: str = "archive"
+    skin: str = "garnet"
 
 
 # 没有知识库时，每条路都用这一句。**说全两步，顺序也不能反**——
@@ -96,13 +96,13 @@ _VALID_SKINS = ("archive", "dark-pink", "aurora", "garnet", "neon", "mono")
 
 def _skin(values: Mapping) -> str:
     """皮肤名只认清单里的——手改 `.env` 写错不能让服务崩，
-    回落 `archive` 跑着，界面上显示默认值，人一看就知道不对。
+    回落 `garnet` 跑着，界面上显示默认值，人一看就知道不对。
 
     和 `_log_level` 是同一条理由：`reload_config` 里那个「文件改了、内存没换」
     的怪状态，比一份不完整的配置难查得多。
     """
     raw = str(values.get("KB_SKIN") or "").strip().lower()
-    return raw if raw in _VALID_SKINS else "archive"
+    return raw if raw in _VALID_SKINS else "garnet"
 
 
 def _int_or(values: Mapping, key: str, default: int) -> int:
