@@ -13,7 +13,6 @@ from __future__ import annotations
 
 import time
 from collections.abc import Callable
-from contextlib import contextmanager
 from pathlib import Path
 
 from fastapi import APIRouter, Form, HTTPException, Request
@@ -22,7 +21,7 @@ from fastapi.templating import Jinja2Templates
 from pydantic import BaseModel
 
 from kb.api import runtime
-from kb.api.http import push_and_organize, run_sweep, vault_guard
+from kb.api.http import busy_guard, push_and_organize, run_sweep, vault_guard
 from kb.config import NO_VAULT_MESSAGE, Config
 from kb.core import settings, sweep, sweep_state
 from kb.core.chat import handle
@@ -217,21 +216,9 @@ def build_router(
 
     vault = vault_guard(get_cfg)
 
-    @contextmanager
-    def organizing():
-        """整理期间占住 `busy` 锁；拿不到就 409。
-
-        **不是 `with busy` 那种阻塞式**——拿不到锁要立刻回 409，
-        而不是让请求排在这儿等一个可能几分钟的整理跑完。
-        """
-        if not busy.acquire("organize"):
-            raise HTTPException(
-                status_code=409, detail=f"正在{busy.label}，等它跑完再试"
-            )
-        try:
-            yield
-        finally:
-            busy.release()
+    # **锁与那套 409 文案只有一份实现**（`api/http.py` 的 `busy_guard`）——
+    # 两边各抄一遍的话，改文案、加 `Retry-After` 都得记得改两处。
+    organizing = busy_guard(busy)
 
     def _ctx(name: str, **extra) -> dict:
         # `get_cfg()` 每请求现读，所以换皮肤**下一个请求就生效**，不用重启。

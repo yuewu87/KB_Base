@@ -16,7 +16,7 @@ import os
 import re
 import threading
 from collections.abc import Callable
-from contextlib import contextmanager
+from contextlib import AbstractContextManager, contextmanager
 from datetime import datetime
 from pathlib import Path
 
@@ -92,6 +92,31 @@ def vault_guard(get_cfg: Callable[[], Config]) -> Callable[[], Path]:
         except ConfigError as exc:
             raise HTTPException(status_code=409, detail=str(exc)) from exc
     return guard
+
+
+def busy_guard(busy: Busy) -> Callable[[], AbstractContextManager[None]]:
+    """造一个「整理期间占住 `busy`；拿不到就当场 409」的上下文管理器。
+
+    **`api/http.py` 与 `web/router.py` 共用这一份。** 逐字抄两遍的话，
+    改 409 文案、加 `Retry-After`、改状态码都得记得改两处——迟早漏一处，
+    而漏掉的正是你没点开的那条路。跟 `_commit_sweep` 里那两条 git 调用
+    是同一条理由：**平台坑与协议细节只该有一处**。
+
+    **不是 `with busy` 那种阻塞式**——拿不到锁要立刻回 409，
+    而不是让请求排在这儿等一个可能几分钟的整理跑完。
+    """
+    @contextmanager
+    def organizing():
+        if not busy.acquire("organize"):
+            raise HTTPException(
+                status_code=409, detail=f"正在{busy.label}，等它跑完再试"
+            )
+        try:
+            yield
+        finally:
+            busy.release()
+
+    return organizing
 
 
 def build_llm(cfg: Config) -> LLM:
@@ -412,21 +437,7 @@ def create_app(
     # 制造——那是测不动的，于是 409 那条路径永远没人验。
     app.state.busy = busy
 
-    @contextmanager
-    def organizing():
-        """整理期间占住 `busy` 锁；拿不到就 409。
-
-        **不是 `with busy` 那种阻塞式**——拿不到锁要立刻回 409，
-        而不是让请求排在这儿等一个可能几分钟的整理跑完。
-        """
-        if not busy.acquire("organize"):
-            raise HTTPException(
-                status_code=409, detail=f"正在{busy.label}，等它跑完再试"
-            )
-        try:
-            yield
-        finally:
-            busy.release()
+    organizing = busy_guard(busy)
 
     from fastapi.staticfiles import StaticFiles
 
