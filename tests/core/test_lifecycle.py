@@ -11,6 +11,7 @@ from kb.core.lifecycle import (
     check_path,
     migrate_vault,
     remove_vault,
+    vault_ready,
 )
 
 
@@ -53,6 +54,30 @@ def _make_vault(root):
     for i in range(3):
         (root / "计算机" / f"笔记{i}.md").write_text("x" * 100, encoding="utf-8")
     return root
+
+
+# ---------- vault_ready ----------
+
+def test_vault_ready_is_false_when_no_path_is_configured():
+    """没配库 = 没库。`None` 进来不能炸。"""
+    assert vault_ready(None) is False
+
+
+def test_vault_ready_is_false_for_a_dir_without_dot_git(tmp_path):
+    """**目录存在不算数。**
+
+    路径配了、目录也在，但那儿没库——这是最容易骗过界面的一种状态：界面
+    说「已初始化」，用户点进去发现 `list_notes` 空空的。判据认 `.git`，
+    理由见 `settings._vault_path_problem`。
+    """
+    plain = tmp_path / "普通目录"
+    plain.mkdir()
+    assert vault_ready(plain) is False
+
+
+def test_vault_ready_is_true_when_dot_git_exists(tmp_path):
+    vault = _make_vault(tmp_path / "库")
+    assert vault_ready(vault) is True
 
 
 # ---------- check_path ----------

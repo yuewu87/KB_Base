@@ -35,6 +35,7 @@ from kb.core.lifecycle import (
     check_path,
     migrate_vault,
     remove_vault,
+    vault_ready,
 )
 from kb.core.vault import list_domains, list_drafts, list_notes
 
@@ -601,11 +602,12 @@ def build_router(
         """四个状态里的「未初始化 / 已初始化」，加「谁正忙着」。
 
         判据是 **`.git` 存在**，不是「目录存在」——理由见
-        `settings._vault_path_problem`。
+        `settings._vault_path_problem`。**判据本身在 `lifecycle.vault_ready`**，
+        这里别再手写一遍。
         """
         vault_path = get_cfg().vault_path
         return {
-            "initialized": bool(vault_path and (vault_path / ".git").exists()),
+            "initialized": vault_ready(vault_path),
             "vault_path": str(vault_path) if vault_path else "",
             "domains": list_domains(vault_path) if vault_path else [],
             "counts": _counts(vault_path),
@@ -636,7 +638,7 @@ def build_router(
         那个状态下没有别的事在跑，加了是空转。
         """
         cfg = get_cfg()
-        if cfg.vault_path and (cfg.vault_path / ".git").exists():
+        if vault_ready(cfg.vault_path):
             raise HTTPException(
                 status_code=400,
                 detail="已经有知识库了。要改配置去对应的设置，要搬家用「迁移到别处」",

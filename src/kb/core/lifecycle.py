@@ -60,6 +60,31 @@ class LifecycleError(RuntimeError):
     """搬家搬不成。消息直接给人看。"""
 
 
+def vault_ready(vault_path: Path | None) -> bool:
+    """库真的建好了吗。**这个判据只有这一份。**
+
+    认 **`.git` 存在**，不是「目录存在」——路径配了但那儿没库，是最容易
+    骗过界面的一种状态，理由见 `settings._vault_path_problem`。
+
+    ⚠️ **别在任何地方再写一遍 `bool(p and (p / ".git").exists())`。**
+    这条判据本来散在四处（`/setup/state`、`/setup/init` 的「已经
+    初始化了」闸、Task 6 的 `settings_context`、Task 7 的 `_ctx`），每处
+    还都配了一句「判据要一模一样」的注释——**那种注释就是重复的信号**：
+    真出现分歧时，没有任何东西会站出来报错，只会出现「状态接口说已初始化、
+    设置窗说没有」这种自相矛盾的画面。同一份计划里 `busy_guard`（合掉两份
+    409）、`organizing()`（合掉两份去重）、`_BUSY_LABELS` 都刚收敛过，
+    这条是同一类。
+
+    **两处有意不并进来**，别顺手改：`settings._vault_path_problem` 与
+    `vault_setup.init_vault`。前者判的是**用户刚填进来的候选路径**，
+    要的是那句「那儿还没有知识库」的文案，不是「当前库建好没有」；
+    后者问的是「这儿要不要跑 `git init`」——**那是个 git 问题，不是
+    库的问题**，同一个 `.git` 只是恰好都出现在两句话里。并进来会把
+    两个不同的判断塞进一个名字里，正是上面说的那种假统一。
+    """
+    return bool(vault_path and (vault_path / ".git").exists())
+
+
 # ------------------------------------------------------------ 删树的公用件
 
 def _rmtree(path: Path, *, ignore_errors: bool = False) -> None:
