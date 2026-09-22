@@ -29,7 +29,24 @@ from kb.core.chat_store import list_chats, load_chat
 from kb.core.flow import STEPS, latest_run_rows
 from kb.core.flow import list_days as flow_days
 from kb.core.flow import read_day as read_flow_day
-from kb.core.lifecycle import Busy
+from kb.core.lifecycle import (
+    Busy,
+    LifecycleError,
+    check_path,
+    migrate_vault,
+    remove_vault,
+)
+from kb.core.vault import list_domains, list_drafts, list_notes
+
+# `DEFAULT_DOMAINS` 这一步就得带上。它 Task 5 里用不到，**Task 6 用**——
+# 设置窗那条龙拿它预勾复选框（`"default_domains": DEFAULT_DOMAINS`）。
+# 漏了的后果不是「到时候再说」：`settings_context` 是**请求时**执行的，
+# 第一次有人开 `/settings` 就 `NameError` → 500，`tests/web/test_router.py`
+# 里十来处 `client.get("/settings")` 加上本任务自己那条
+# `test_pages_still_open_before_init` 当场一起红。
+# `noqa: F401` 是**刻意**的：它这一步确实没人用（用的那一天是 Task 6），
+# ruff 会照 F401 报「导了不用」。别顺手把它删掉，也别删掉下面这行 import。
+from kb.core.vault_setup import DEFAULT_DOMAINS, DOMAIN_CANDIDATES, init_vault  # noqa: F401
 from kb.llm.base import LLM, LLMError
 from kb.logging_setup import LOG_DIR
 from kb.web import skins
@@ -52,8 +69,25 @@ templates = Jinja2Templates(directory=str(TEMPLATES_DIR))
 templates.env.globals["box_label"] = box_label
 
 
-class SettingsBody(BaseModel):
+class SettingsBody(BaseModel):          # ← 现成的那个，别动
     values: dict[str, str] = {}
+
+
+# **这两个必须住在模块级，不能挪进 `build_router` 函数体。**
+# 本文件开头有 `from __future__ import annotations`（12 行），于是所有注解
+# 都变成字符串；FastAPI 的 `get_typed_signature()` 是拿**函数所在模块的全局**
+# 去 eval 这个注解的——`SetupBody` 要是成了函数体里的局部名，在那儿查不到，
+# `create_app()` 会**当场 `NameError`**。
+# `SettingsBody` 和 `api/http.py` 的 `PushRequest` / `DropRequest` 都在模块级，
+# 跟它们是同一个规矩，别「顺手」挪回去。
+class SetupBody(BaseModel):
+    vault_path: str = ""
+    domains: list[str] = []
+    values: dict[str, str] = {}
+
+
+class MigrateBody(BaseModel):
+    target: str = ""
 
 
 def settings_context(env_path: Path, cfg: Config) -> dict:
@@ -195,6 +229,7 @@ def build_router(
     build_llm_fn: Callable[[Config], LLM],
     *,
     busy: Busy,
+    unbind_vault: Callable[[], None],
 ) -> APIRouter:
     """`data_dir`、`organize_fn`、`get_llm` 都由 `create_app` 传进来。
 
@@ -211,6 +246,10 @@ def build_router(
     `busy` 由 `create_app` 造了传进来——**锁必须是同一把**。各造一把的话，
     网页这边「正在整理」挡住了投递，服务端 `/organize` 却照样跑，
     等于没锁。
+
+    `unbind_vault` 是移除专用的一条路（直接写空 `KB_VAULT_PATH` 再重载），
+    **故意绕开 `apply_settings`**——那条路会走 `settings.validate`，
+    而那里「空值 = 400」。
     """
     router = APIRouter()
 
@@ -536,5 +575,243 @@ def build_router(
                 log_text=read_runtime(LOG_DIR, day) if day else "",
             ),
         )
+
+    # ---------------------------------------------------------- 知识库生命周期
+    #
+    # `SetupBody` / `MigrateBody` 在**模块级**（见 (a-2)）——写在这个函数体里
+    # 的话 FastAPI 解析不到注解，`create_app()` 会当场 NameError。
+
+    def _counts(vault_path: Path | None) -> dict:
+        """移除确认页要的「将要删掉多少」——数量让人看一眼就知道删的是不是
+        他以为的那个库。一句「确定要删除吗」在删 3 篇和删 3000 篇时长得
+        一模一样。"""
+        notes = 0
+        drafts = 0
+        if vault_path is not None and vault_path.exists():
+            notes = len(list_notes(vault_path))
+            drafts = len(list_drafts(vault_path))
+        chats = 0
+        chats_dir = data_dir / "chats"
+        if chats_dir.is_dir():
+            chats = len(list(chats_dir.glob("*.json")))
+        return {"notes": notes, "drafts": drafts, "chats": chats}
+
+    @router.get("/setup/state")
+    def setup_state() -> dict:
+        """四个状态里的「未初始化 / 已初始化」，加「谁正忙着」。
+
+        判据是 **`.git` 存在**，不是「目录存在」——理由见
+        `settings._vault_path_problem`。
+        """
+        vault_path = get_cfg().vault_path
+        return {
+            "initialized": bool(vault_path and (vault_path / ".git").exists()),
+            "vault_path": str(vault_path) if vault_path else "",
+            "domains": list_domains(vault_path) if vault_path else [],
+            "counts": _counts(vault_path),
+            "busy": busy.what,
+        }
+
+    @router.get("/setup/check")
+    def setup_check(path: str = "") -> dict:
+        """顺手验一下用户填的路径——**失败也不拦着初始化**。
+
+        它只回事实，不做判断：存在吗、能写吗、里面是不是已经有个库、有几个条目。
+        """
+        text = path.strip()
+        if not text:
+            return {"exists": False, "writable": False,
+                    "looks_like_vault": False, "entries": []}
+        return check_path(Path(text))
+
+    @router.post("/setup/init")
+    def setup_init(body: SetupBody) -> dict:
+        """一条龙：**建骨架 → 写配置 → 重载**。
+
+        **这个顺序不能反**，理由见下面那段注释：反过来的话
+        `settings.validate` 会因为「目标还没有 `.git`」把用户自己的初始化
+        请求拒掉，而那句文案还是「想搬过去用『迁移到别处』」。
+
+        **只在「未初始化」时允许**（已初始化时 400）。它**不加 busy 锁**——
+        那个状态下没有别的事在跑，加了是空转。
+        """
+        cfg = get_cfg()
+        if cfg.vault_path and (cfg.vault_path / ".git").exists():
+            raise HTTPException(
+                status_code=400,
+                detail="已经有知识库了。要改配置去对应的设置，要搬家用「迁移到别处」",
+            )
+
+        target = body.vault_path.strip()
+        if not target:
+            raise HTTPException(status_code=400, detail="知识库目录不能留空")
+
+        # 领域名不能随便起：候选清单之外的直接丢掉
+        domains = [d for d in dict.fromkeys(body.domains) if d in DOMAIN_CANDIDATES]
+        if not domains:
+            raise HTTPException(
+                status_code=400,
+                detail="至少勾一个领域——一个都没有的话，投进来的每一条都会掉进「待归类」",
+            )
+
+        # **模型三件套要在这里查，必须在建库之前。**
+        #
+        # `settings.validate` 只检查「提交上来的键」，**缺的键它不管**；真正兜底的
+        # 是 `apply_settings` 重载之后那句复查（`api/http.py:362`）。可那时候库
+        # 已经建好、`.env` 里的 `KB_VAULT_PATH` 也已经写下去了——留下一个
+        # 「有库、没模型」的半截状态。
+        #
+        # 本进程内它歪打正着还能救：`apply_settings` 是在换内存**之前**抛的
+        # （`http.py:362` 早于 374 行的 `state["cfg"] = new_cfg`），所以
+        # `get_cfg()` 拿到的还是旧的、`vault_path` 仍是 `None`，上面那道
+        # 「已初始化」的闸门关不上，用户补上那几项再点一次能过。
+        # **但那只是运气**——服务一重启，`reload_config` 就从 `.env` 里读到刚
+        # 写下的 `KB_VAULT_PATH`，闸门关上，用户只剩「移除知识库」或手改 `.env`
+        # 两条路。所以这个检查既不能省，也不能挪到建库之后。
+        #
+        # 留空的键**沿用现在的配置**（上面 2714 行那个 `cfg`，别再读一遍
+        # `.env`）。判据要和兄弟端点 `/settings/test`（`router.py:481-486`）
+        # 用同一套：**两边都是 `get_cfg()` 兜底**。不一致的话，用户会看见
+        # 「测试连接：通了」紧接着「初始化：还差 API Key」——同一个
+        # 「留空 = 不改」的语义，两个端点给出两种答案，而他还得自己猜哪个对。
+        known = {
+            "KB_LLM_MODEL": cfg.llm_model,
+            "KB_LLM_BASE_URL": cfg.llm_base_url,
+            "KB_LLM_API_KEY": cfg.llm_api_key,
+        }
+        known.update({k: v for k, v in body.values.items() if v})
+        missing = [
+            label
+            for key, label in (
+                ("KB_LLM_MODEL", "模型名"),
+                ("KB_LLM_BASE_URL", "API 地址"),
+                ("KB_LLM_API_KEY", "API Key"),
+            )
+            if not known.get(key)
+        ]
+        if missing:
+            raise HTTPException(
+                status_code=400,
+                detail=(
+                    "还差 " + "、".join(missing) + "，模型没配齐之前不建库。"
+                    "（留空的那些，`.env` 里本来有就沿用；这次是那儿也没有。）"
+                ),
+            )
+
+        # **先建库、再写配置。反过来是死锁。**
+        #
+        # `settings.validate` 现在要求 `KB_VAULT_PATH` 指向一个含 `.git` 的目录
+        # （Task 3 加的路径校验），而这一刻那个库当然还不存在——先写配置的话，
+        # 用户会被自己的初始化请求拒掉，文案还是「想搬过去用『迁移到别处』」。
+        # 建在前就没这个问题：写配置那一刻库已经在了。
+        #
+        # 反过来的风险（库建好了、写配置失败）靠上面那道检查兜着：模型三件套
+        # 已经确认齐了，`apply_settings` 到这一步不会因为「必填项是空的」而抛。
+        # 剩下的失败（磁盘满、目标只读）由 `except OSError` 接。
+        try:
+            actions = init_vault(Path(target), domains)
+        except OSError as exc:
+            raise HTTPException(
+                status_code=400, detail=f"建不了 {target}：{exc}"
+            ) from exc
+
+        values = dict(body.values)
+        values["KB_VAULT_PATH"] = target
+        try:
+            apply_settings(values)
+        except settings.SettingsError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+        return {"actions": actions, "vault_path": target, "domains": domains}
+
+    def _check_migration(source: Path, target: Path) -> None:
+        """迁移的前置检查。不过就抛 400，一句一条。"""
+        if not target.is_absolute():
+            raise HTTPException(status_code=400, detail="目标要填绝对路径")
+        if not source.exists():
+            raise HTTPException(
+                status_code=400,
+                detail=f"当前库不在了：{source}。这本身就不正常，先查一下",
+            )
+        if target == source:
+            raise HTTPException(status_code=400, detail="目标就是当前库，不用搬")
+        if source in target.parents:
+            raise HTTPException(
+                status_code=400,
+                detail=f"{target} 在当前库里面——搬进去会把库搬进自己肚子里",
+            )
+        if target.exists() and any(target.iterdir()):
+            # **「非空」= 有任何一个条目**，不区分是不是库。迁移做完就把目标
+            # 当成新库了，里面原有的任何东西都会混进笔记树——连一个
+            # `.DS_Store` 都算。
+            raise HTTPException(
+                status_code=400,
+                detail=f"目标非空（有 {len(list(target.iterdir()))} 个条目）。换一个空的目录",
+            )
+
+    @router.post("/setup/migrate")
+    def setup_migrate(body: MigrateBody) -> dict:
+        """整目录搬家：拷 → 校验 → 删源 → 改指向。
+
+        **同步做**（和 `/new` 一个路子）。库这个量级拷贝是秒级，不值得为它
+        再开一套进度协议；期间 busy 是 `"migrate"`，前端拿它做轮询。
+        """
+        # ⚠️ **下面整块比原稿少四格缩进**——头尾换成了 `with busy_guard(...)`，
+        # 中间一字不改。409 的文案与状态码只有 `busy_guard` 那一份。
+        #
+        # ⚠️ **末尾那个 `()` 不能省。** `busy_guard(busy, what)` 返回的是
+        # **工厂**（内层那个 `@contextmanager` 的 `organizing` 函数），不是
+        # 上下文管理器本身——现成的用法就是 `organizing = busy_guard(busy)`
+        # 之后 `with organizing():`。漏了 `()` 报的是
+        # `TypeError: 'function' object does not support the context manager protocol`，
+        # 而且只在**跑到这个端点**时才炸，导入期一切正常。
+        with busy_guard(busy, "migrate")():
+            source = vault()
+            target = Path(body.target.strip())
+            _check_migration(source, target)
+            try:
+                moved = migrate_vault(source, target)
+            except LifecycleError as exc:
+                raise HTTPException(status_code=400, detail=str(exc)) from exc
+            # **这里必须和 `setup_init` 一样兜住 `SettingsError`，而且更要兜。**
+            # 走到这一行时库已经搬完、源已经删了；`apply_settings` 要是以 500
+            # 抛出去，`.env` 仍指着那个不存在的旧路径——服务显示「还没有知识库」，
+            # 笔记却躺在 `target` 里，用户只能手工改 `.env` 才走得出来。
+            # 校验没法提前做：`validate` 要求目标已经有 `.git`，而迁移前它必然
+            # 是个空目录，提前校验会把合法的迁移目标全部拒掉。所以顺序是死的，
+            # 只能把失败说清楚——把该填什么直接写进消息里。
+            try:
+                apply_settings({"KB_VAULT_PATH": str(target)})
+            except settings.SettingsError as exc:
+                raise HTTPException(
+                    status_code=400,
+                    detail=(
+                        f"库已经搬到 {target} 了，但写 `.env` 没过校验（{exc}）。"
+                        f"请把 `.env` 里的 KB_VAULT_PATH 手工改成 {target}"
+                    ),
+                ) from exc
+            return {"moved": moved, "vault_path": str(target)}
+
+    @router.post("/setup/remove")
+    def setup_remove() -> dict:
+        """移除知识库：**全部删除，一点痕迹不留**——用户的原话。
+
+        逐项汇报是因为这里做不到「全部成功」：Windows 上正被服务打开的文件
+        （今天的日志）删不掉，那是操作系统的边界，不是设计妥协。
+        """
+        # 同 `setup_migrate`：整块少四格缩进，409 只有 `busy_guard` 那一份。
+        # 末尾那个 `()` 同样不能省（理由见 `setup_migrate` 里那段）。
+        with busy_guard(busy, "remove")():
+            vault_root = get_cfg().vault_path
+            result = remove_vault(vault_root, data_dir)
+            if result["vault_removed"]:
+                unbind_vault()
+            else:
+                # **库还在就别解绑。** 否则界面上显示「还没有知识库」而笔记
+                # 还躺在原地——正是本设计要消灭的那种状态。
+                result["notes"].append(
+                    "笔记目录没删掉，所以还指着它。处理完再点一次「移除」"
+                )
+            return result
 
     return router
