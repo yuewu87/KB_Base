@@ -8,6 +8,11 @@
 **只读的字段，后端也不信前端。** vault 路径换错了整个服务当场废、端口改了
 就换地址（书签作废，见 `04_踩坑与经验.md` 第 20 条）——前端不给改，
 后端**也**要把它们从提交里丢掉，不能只靠界面。
+（vault 路径 2026-09-22 已移出这一条，改由下面那条单独的路径检查守着。）
+
+**路径不是随便哪个目录都行。** `KB_VAULT_PATH` 提交上来时必须是**一个已初始化
+的库**（含 `.git`）。详见 `_vault_path_problem`——空值、不存在的路径、没 `.git`
+的目录都拒，各有各的出口文案。
 
 **API Key 留空 = 不改。** 掩码显示的字段，用户不填就是不想动它；
 当成空串写回去等于把 key 抹了。
@@ -56,8 +61,12 @@ GROUPS: tuple[Group, ...] = (
               help="掩码显示。留空表示不改"),
     )),
     Group("知识库", (
-        Field("KB_VAULT_PATH", "vault 路径", "readonly",
-              help="换库不是常事，换错了整个服务当场废。要改去改 .env"),
+        # 2026-09-22 从 `readonly` 放开。当初设成只读是本机被改废过的教训，
+        # 现在敢放开，靠的是 `validate` 里那条路径检查（目标必须是个已初始化
+        # 的库）+「迁移」这个显式动作——**放开的是输入框，不是判断**。
+        Field("KB_VAULT_PATH", "vault 路径", "text",
+              help="笔记本体存的地方，是个独立的 git 仓库。"
+                   "要搬去别处用下面的「迁移到别处」，不要在这儿直接改"),
     )),
     Group("服务", (
         Field("KB_PORT", "端口", "readonly",
@@ -161,6 +170,52 @@ def write_env(path: Path, updates: dict[str, str]) -> None:
     path.write_text("\n".join(lines) + "\n", encoding="utf-8", newline="\n")
 
 
+# ------------------------------------------------------------ vault 路径
+
+def _vault_path_problem(where: str) -> str | None:
+    """检查这个路径能不能当库用。返回一句人话，没问题返回 `None`。
+
+    **收的是原始字符串，不是 `Path`**：空值必须在建 `Path` **之前**判掉。
+    `Path("")` 是 `"."`，`str(Path(""))` 是 `"."`——既绕过了空值分支，又让
+    `Path("") / ".git"` 按当前工作目录去探（在仓库里跑测试时它还真的存在），
+    于是「留空 = 解绑」这个洞会从后门重新打开。
+
+    **只认「已初始化的库」= 含 `.git`。** 为什么用 `.git` 而不是「目录存在」：
+    `init_vault` 必然建 `.git`，而用户随便填一个空目录不会有。用「目录存在」
+    判，用户填了个现成的空文件夹就会被当成「已初始化」，然后投递进去——
+    `atomic_write` 会自己 `mkdir(parents=True)`，于是**在一个不是库的地方长出
+    半个库**：收件箱有草稿、领域是空的、每条都掉进待归类。那正是要防的
+    「看起来一切正常」。
+
+    **相对路径一律拒，判据在 `.git` 之前。** 这是上面那条空值检查的同一个形状：
+    服务的 cwd 就是工程根（`spawn_service` 用 `-m kb.api.http`、`cwd=PROJECT_ROOT`），
+    而那儿正好有 `.git`——于是提交 `.` / `./` 会被 `(Path(".") / ".git").exists()`
+    判成「已初始化的库」，`.env` 里写下 `KB_VAULT_PATH=.`，**库指到 KN_Base
+    仓库自己身上**，长出的是同一个半个库。除了这一手，相对路径写进 `.env`
+    本身也不该：`config.py` 是 `Path(vault_raw)`，不做 resolve，生效位置会绑到
+    服务的启动方式上。`is_absolute()` 在 Windows 上对 `C:\\x` 与 UNC 为真、
+    对 `/x` 为假，正合适。
+
+    **四种失败各有各的出口**，因为用户下一步该干的事不一样：
+    空值 → 用「移除知识库」；相对路径 → 改成绝对路径；路径不存在 / 没 `.git`
+    → 要么迁移过去、要么先移除再重建。
+    """
+    if not where.strip():
+        return "要解绑请用「移除知识库」，它会把痕迹一起清掉"
+    path = Path(where)
+    if not path.is_absolute():
+        return (
+            f"{where} 是相对路径，会绑到服务的启动目录上。"
+            "知识库要填绝对路径"
+        )
+    if not (path / ".git").exists():
+        return (
+            f"{where} 那儿还没有知识库。想搬过去用「迁移到别处」，"
+            "想从零建先「移除知识库」"
+        )
+    return None
+
+
 # ------------------------------------------------------------ 校验
 
 def validate(raw: dict[str, str]) -> dict[str, str]:
@@ -204,6 +259,17 @@ def validate(raw: dict[str, str]) -> dict[str, str]:
         # `choice` 撞「只能取…」、`secret` 当「不改」。顺带也不会再抛
         # `AttributeError`（路由只 catch `SettingsError`，别的当场就是 500）。
         text = value.strip() if isinstance(value, str) else ""
+
+        # **这条要在「`text` 留空 = 报错」之前。** 空值对 vault 路径不是
+        # 「不能留空」，而是「要解绑请用『移除知识库』」——用户下一步该干的
+        # 事不一样，文案也得不一样。放到那条下面，这里就成了死代码。
+        if spec.key == "KB_VAULT_PATH":
+            problem = _vault_path_problem(text)
+            if problem:
+                problems.append(problem)
+                continue
+            clean[key] = text
+            continue
 
         if spec.kind == "secret" and not text:
             continue                    # 留空 = 不改
