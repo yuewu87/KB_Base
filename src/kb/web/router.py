@@ -411,31 +411,51 @@ def build_router(
         写成报告的语义和后台那条失败路径一致（`_sweep_in_background` 也这么落），
         巡检页上看得见原因。**没有知识库也走这条路**：`/sweep` 是个页面表单，
         回 409 JSON 很难看，而且用户看不出下一步该干什么。
+
+        **正在整理/迁移/移除时不跑，但也不回 409**——理由同上，这还是个页面
+        表单，用户是在巡检页上点了个按钮。挡它的理由和 Task 4 挡整理一样：
+        `run_sweep` 走的是和整理草稿同一条链（同样改 vault 里的笔记、同样落
+        一个 git commit），插进一轮迁移里会写成「一半旧库一半新库」，而那个
+        样子是**看起来一切正常**。
         """
-        vault_path = get_cfg().vault_path
-        if vault_path is None:
+        # 拿不到就落报告——`Busy.refusal` 和 409 的 detail 是同一句话。
+        if not busy.acquire("sweep"):
             sweep_state.save_report(
                 data_dir,
                 {
-                    "summary": f"这次巡检没跑成：{NO_VAULT_MESSAGE}",
+                    "summary": f"这次巡检没跑成：{busy.refusal}",
                     "tag_merges": [],
                     "dir_merges": [],
                 },
             )
             return RedirectResponse("/sweep", status_code=303)
-
         try:
-            run_sweep(vault_path, data_dir, get_llm())
-        except sweep.SweepError as exc:
-            sweep_state.save_report(
-                data_dir,
-                {
-                    "summary": f"这次巡检没跑成：{exc}",
-                    "tag_merges": [],
-                    "dir_merges": [],
-                },
-            )
-        return RedirectResponse("/sweep", status_code=303)
+            vault_path = get_cfg().vault_path
+            if vault_path is None:
+                sweep_state.save_report(
+                    data_dir,
+                    {
+                        "summary": f"这次巡检没跑成：{NO_VAULT_MESSAGE}",
+                        "tag_merges": [],
+                        "dir_merges": [],
+                    },
+                )
+                return RedirectResponse("/sweep", status_code=303)
+
+            try:
+                run_sweep(vault_path, data_dir, get_llm())
+            except sweep.SweepError as exc:
+                sweep_state.save_report(
+                    data_dir,
+                    {
+                        "summary": f"这次巡检没跑成：{exc}",
+                        "tag_merges": [],
+                        "dir_merges": [],
+                    },
+                )
+            return RedirectResponse("/sweep", status_code=303)
+        finally:
+            busy.release()
 
     @router.post("/sweep/reply")
     def sweep_reply():

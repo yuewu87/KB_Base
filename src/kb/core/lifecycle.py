@@ -13,7 +13,9 @@ import threading
 from datetime import datetime
 from pathlib import Path
 
-_BUSY_LABELS = {"organize": "整理", "migrate": "迁移", "remove": "移除"}
+_BUSY_LABELS = {
+    "organize": "整理", "migrate": "迁移", "remove": "移除", "sweep": "巡检",
+}
 
 
 class Busy:
@@ -51,9 +53,23 @@ class Busy:
 
     @property
     def label(self) -> str:
-        """409 文案里那个动词。写英文会变成「正在migrate，等它跑完再试」。"""
+        """文案里那个动词。写英文会变成「正在migrate，等它跑完再试」。
+
+        **每加一个占锁的名目就要在这儿补一条**：`sweep` 是 Task 10 补的，
+        在那之前巡检占锁时回的是「正在sweep」，中英夹杂。
+        """
         what = self.what
         return _BUSY_LABELS.get(what, what or "")
+
+    @property
+    def refusal(self) -> str:
+        """拿不到锁时那句话。**只有这一份。**
+
+        409 那条路（`busy_guard`）和巡检页那份报告都要说同一句话；两边各写
+        一遍的话，改了「整理」忘了「巡检」——用户看到两种说法，还得自己猜
+        是不是两回事。
+        """
+        return f"正在{self.label}，等它跑完再试"
 
 
 class LifecycleError(RuntimeError):

@@ -5,6 +5,7 @@ from fastapi.testclient import TestClient
 
 from kb.api.http import create_app
 from kb.config import Config
+from kb.core.lifecycle import Busy
 from kb.llm.base import FakeLLM
 
 
@@ -29,7 +30,9 @@ def client(tmp_path):
                                  env_file=env))
 
 
-@pytest.mark.parametrize("what,label", [("migrate", "迁移"), ("remove", "移除")])
+@pytest.mark.parametrize(
+    "what,label", [("migrate", "迁移"), ("remove", "移除"), ("sweep", "巡检")]
+)
 def test_organize_is_rejected_while_something_else_runs(client, what, label):
     """别人在动库的时候 `/organize` 必须当场拒。
 
@@ -47,7 +50,9 @@ def test_organize_is_rejected_while_something_else_runs(client, what, label):
         busy.release()
 
 
-@pytest.mark.parametrize("what,label", [("migrate", "迁移"), ("remove", "移除")])
+@pytest.mark.parametrize(
+    "what,label", [("migrate", "迁移"), ("remove", "移除"), ("sweep", "巡检")]
+)
 def test_web_chat_form_is_rejected_while_something_else_runs(client, what, label):
     """网页对话表单（`POST /`）也要占锁——**它整轮都可能在写库**。
 
@@ -114,3 +119,30 @@ def test_reads_are_not_blocked_by_busy(client, path, data):
         assert resp.status_code == 200
     finally:
         busy.release()
+
+
+def test_a_background_sweep_stands_down_while_something_else_runs(tmp_path):
+    """后台巡检**要占住锁**，占不到就不跑、也不占坑。
+
+    它是服务进程里的一个 daemon 线程，跟请求处理是**并发**的——不占锁的话，
+    启动后那一轮巡检跑到一半就可能被一轮整理劈开（`run_sweep` 的 docstring
+    自己写着「它走的是和整理草稿同一条链」），而那个形状是「看起来一切正常」。
+    """
+    from kb.api.http import _sweep_in_background
+    from kb.core import sweep_state
+
+    data = tmp_path / "data"
+    data.mkdir()
+    busy = Busy()
+    assert busy.acquire("organize") is True
+    try:
+        _sweep_in_background(tmp_path / "库", data, FakeLLM([]), busy)
+    finally:
+        busy.release()
+
+    # **连坑都没占**：`mark_run` 是先用掉的「这次算跑过了」，留在锁外的话，
+    # 拿不到锁反而先把坑占上——下一轮要再等一个 `KB_SWEEP_INTERVAL`
+    # 才会重试，等于白丢一次巡检。
+    state = sweep_state.load_state(data)
+    assert state.get("last_sweep") is None
+    assert "report" not in state

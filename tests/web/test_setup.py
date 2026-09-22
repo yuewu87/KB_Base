@@ -767,6 +767,31 @@ def test_sidebar_greys_out_the_push_entries_before_init(client):
     assert 'aria-disabled="true"' in html
 
 
+def test_sweep_run_reports_instead_of_409_while_busy(client, tmp_path):
+    """`/sweep/run` 被挡时**落一份报告，不是 409**。
+
+    它是个页面表单（`/sweep` 页上那个按钮），回 409 JSON 用户看到一坨英文，
+    也不知道下一步该干什么。落成报告，巡检页上直接显示原因——跟「没有知识库」
+    那条路同一个形状。
+
+    那句原因和 409 的 detail **是同一句话**（`Busy.refusal`），所以这里也断言
+    「整理」两个字：两边各写一份的话，改了一边漏了另一边，用户就会看到两种说法。
+    """
+    from kb.core import sweep_state
+
+    busy = client.app.state.busy
+    assert busy.acquire("organize") is True
+    try:
+        resp = client.post("/sweep/run", follow_redirects=False)
+        assert resp.status_code == 303                   # 重定向回 /sweep，不是 409
+    finally:
+        busy.release()
+
+    report = sweep_state.load_state(tmp_path / "data")["report"]
+    assert "整理" in report["summary"]
+    assert report["read"] is False
+
+
 def test_sidebar_is_not_greyed_after_init(initialized_vault, env, tmp_path):
     """建好之后再进来，两个入口得能点。
 

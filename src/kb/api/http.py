@@ -113,9 +113,9 @@ def busy_guard(busy: Busy, what: str = "organize") -> Callable[[], AbstractConte
     @contextmanager
     def organizing():
         if not busy.acquire(what):
-            raise HTTPException(
-                status_code=409, detail=f"正在{busy.label}，等它跑完再试"
-            )
+            # 那句话的**唯一来源**在 `Busy.refusal`——巡检页那份报告也要说
+            # 同一句话，两边各写一遍就会分岔。
+            raise HTTPException(status_code=409, detail=busy.refusal)
         try:
             yield
         finally:
@@ -310,22 +310,40 @@ def run_sweep(vault_root: Path, data_dir: Path, llm: LLM) -> dict:
     return report
 
 
-def _sweep_in_background(vault_root: Path, data_dir: Path, llm: LLM) -> None:
+def _sweep_in_background(
+    vault_root: Path, data_dir: Path, llm: LLM, busy: Busy
+) -> None:
     """后台跑巡检。**绝不抛异常**——后台线程里抛了没人接。
 
     `llm` 由 `main()` 用现成的 `cfg` 建好传进来，**这里不重新 `load_config()`**：
     `load_dotenv` 写的是进程级 `os.environ`，同一进程内只该调用一次
     （见 `config.load_config` 的 docstring），而 `main()` 已经调过了。
+
+    **要占住 `busy`，从拿到锁一直占到跑完。** 这个线程和服务在同一个进程里，
+    跟请求处理是**并发**的：它占着，用户在那个窗口里点「整理」才会被 409
+    挡住；不占的话，一轮巡检跑到一半被一轮整理劈开，就是「一半旧库一半新库」
+    那个形状——而它**看起来一切正常**（`run_sweep` 的 docstring 自己写着
+    「它走的是和整理草稿同一条链」）。
     """
-    # 先占坑：万一跑挂了也不会每次重启都重跑。
-    # 用 mark_run 而不是 save_report——后者会留一份 read: false 的报告，
-    # 侧栏会把它当正式报告显示（还带两个回复按钮）。
-    sweep_state.mark_run(data_dir)
+    # 拿不到（启动那一瞬间恰好有请求在跑，可能性极小）就**连坑都不占**。
+    if not busy.acquire("sweep"):
+        return
     try:
-        run_sweep(vault_root, data_dir, llm)
-    except Exception:      # noqa: BLE001
-        logging.getLogger("kb.sweep").exception("巡检失败")
-        sweep_state.save_report(data_dir, {"summary": "这次巡检没跑成，看运行日志"})
+        # 先占坑：万一跑挂了也不会每次重启都重跑。
+        # 用 mark_run 而不是 save_report——后者会留一份 read: false 的报告，
+        # 侧栏会把它当正式报告显示（还带两个回复按钮）。
+        #
+        # ⚠️ **必须在锁内。** 留在锁外的话，拿不到锁反而先把「这次算跑过了」
+        # 的坑占上，于是要再等一个 `KB_SWEEP_INTERVAL` 才会重试——等于白丢
+        # 一次巡检，而拿不到锁恰恰是最不该占坑的那种情况。
+        sweep_state.mark_run(data_dir)
+        try:
+            run_sweep(vault_root, data_dir, llm)
+        except Exception:      # noqa: BLE001
+            logging.getLogger("kb.sweep").exception("巡检失败")
+            sweep_state.save_report(data_dir, {"summary": "这次巡检没跑成，看运行日志"})
+    finally:
+        busy.release()
 
 
 def create_app(
@@ -725,7 +743,9 @@ def main() -> None:
     ):
         threading.Thread(
             target=_sweep_in_background,
-            args=(cfg.vault_path, DATA_DIR, build_llm(cfg)),
+            # `app.state.busy` 就是 `create_app` 造的那一把——**必须是同一把**，
+            # 自己再造一把等于没锁（网页那边挡住了投递，后台这条照样跑）。
+            args=(cfg.vault_path, DATA_DIR, build_llm(cfg), app.state.busy),
             daemon=True,
         ).start()
 
