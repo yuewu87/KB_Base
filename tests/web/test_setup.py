@@ -555,3 +555,87 @@ def test_remove_reports_when_the_env_cannot_be_rewritten(
     assert resp.status_code == 400
     assert "手工" in resp.json()["detail"]
     assert str(initialized_vault) in resp.json()["detail"]
+
+
+# ---------- 设置窗的一屏两态 ----------
+#
+# Task 3 把 `test_readonly_fields_show_the_effective_values` 里 vault 那半断言
+# 删掉了（那边契约变了，确实该没）——**留下的覆盖缺口就是这里**：在那之前没有
+# 任何测试证明设置窗真的渲染出了两种状态。
+#
+# ⚠️ 后两条**用 `reload_config` 而不是 `load_config`**（计划里写的是后者）。
+# 本文件开头那段警告说的就是这个：`load_config` 是环境变量赢，它会读到
+# **上一条用例**那个临时库的路径；`reload_config` 直接解析文件，文件赢。
+
+def test_settings_shows_the_wizard_before_init(client):
+    """未初始化：画的是那条龙，不是「已初始化」那张卡。"""
+    html = client.get("/settings").text
+    # 断到这里为止、**不带那个 `>`**：`id="wizard"` 后面跟的是换行 + 那句
+    # `onkeydown`（拦回车的），写成 `<div class="wizard" id="wizard">`
+    # 永远匹配不上——而那种红看起来像「模板没渲染」。
+    assert '<div class="wizard" id="wizard"' in html
+    assert 'id="w-KB_LLM_MODEL"' in html          # 段①
+    assert 'class="domain-box"' in html           # 段③的复选框
+    assert 'class="vault-card"' not in html
+
+
+def test_the_wizard_is_not_a_nested_form(client):
+    """**整页只有 `#settings-form` 一个 `<form>`。**
+
+    一条龙整块住在 `#settings-form` 里面。它自己要是也写成 `<form>`，浏览器
+    解析 `box.innerHTML = await r.text()` 时会**一声不响地把内层那个丢掉**
+    ——`form` 的内容模型排除 `form` 后代，解析器碰到表单指针非 null 时的
+    `<form>` 开始标签是直接忽略的。丢掉之后：`getElementById('wizard-form')`
+    是 null、「测试连接」永远 TypeError、`onsubmit` 跟着标签一起没、
+    点「初始化」实际提交的是外层 `saveSettings`——**库根本没建，界面上还可能
+    弹一句「已保存 N 项」**。
+
+    ⚠️ **这条测试的能力边界**：`TestClient` 拿到的是**服务端渲染的字符串**，
+    浏览器丢不丢 form 它一无所知。所以它只能从源头钉住「我们没写出嵌套
+    form」——挡不住有人把一条龙整体挪进另一个 form 里，但挡得住最常见的那
+    两种改法（把 div 改回 form、给外层再套一层 form）。
+    """
+    html = client.get("/settings").text
+    assert html.count("<form") == 1
+    assert 'id="settings-form"' in html
+
+
+def test_the_wizard_swallows_enter(client):
+    """**回车不许触发外层表单的隐式提交。**
+
+    这条龙住在 `#settings-form` 肚子里，而那个 form 里有一颗
+    `<button type="submit">保存</button>`。不拦的话，在段①/段② 的输入框里
+    按回车 → 浏览器隐式提交 → `saveSettings` → POST `/settings`。用户填完
+    路径顺手一回车，看到「没有要改的」**而库没建**。
+
+    跟前一条（嵌套 form）是**同一个故障形状的两条路**，所以两条都要钉。
+    ⚠️ 同一条能力边界：这条只能证明我们**写出了** `onkeydown`，证明不了
+    浏览器真的执行了它。
+    """
+    html = client.get("/settings").text
+    assert 'onkeydown="if (event.key === \'Enter\')' in html
+
+
+def test_settings_shows_the_card_after_init(initialized_vault, env, tmp_path):
+    """已初始化：状态 + 路径 + 三个动作，初始化那条龙收起来。"""
+    html = _client_for(env, tmp_path).get("/settings").text
+    assert "已初始化" in html
+    assert str(initialized_vault) in html
+    assert "迁移到别处" in html
+    assert "移除知识库" in html
+    assert 'id="wizard"' not in html
+
+
+def test_settings_lists_the_domains_from_disk(initialized_vault, env, tmp_path):
+    """领域从**磁盘**读，不从配置读——建个文件夹就该在界面上出现。
+
+    钉的是「领域的唯一真源是磁盘」这条设计（Q95）。哪天有人图省事改成从
+    `.env` 或某个常量读，这条会红。
+    """
+    (initialized_vault / "新领域").mkdir()
+
+    html = _client_for(env, tmp_path).get("/settings").text
+
+    assert "计算机" in html
+    assert "健康" in html
+    assert "新领域" in html              # 人工建的也得认

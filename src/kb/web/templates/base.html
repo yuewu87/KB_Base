@@ -279,37 +279,197 @@
 
     async function testConnection(btn) {
       const form = document.getElementById('settings-form');
-      btn.disabled = true;
-      _msg('测试中…', true);
+      // **body 必传**：端点要的是「表单里当前填的值」，不带 body 会 422
+      // （那只能测已保存的配置，而用户刚改的正是表单里的值）。
+      await _testConnection(btn, Object.fromEntries(new FormData(form)), _msg);
+    }
 
+    // ---- 一条龙初始化 ----
+    //
+    // **整块按 id 读，一个字段都不从 `#settings-form` 里取。**
+    // ① 一条龙那块压根不是 `<form>`——它是嵌在 `#settings-form` 里面的一个
+    //    div（原因写在 `_vault_pane.html` 那段注释里，别改回去）；
+    // ② `saveSettings` 按 `data-init` 过滤没动过的字段，那是为「改配置」设计的，
+    //    而一条龙每次都要把三段全交上去（不然模型名会被当成「没改」漏掉）。
+    // 共用 `.pane` 那套样式，各自的 handler 各写各的。
+
+    function _wizardMsg(text, ok) {
+      const el = document.getElementById('wizard-msg');
+      el.textContent = text;
+      el.classList.toggle('bad', !ok);
+      el.hidden = false;
+    }
+
+    // ⚠️ **别把 `testConnection` 再抄一份。**
+    // 计划早先的稿子就是抄的：那条龙版本跟设置窗那份逐字相同——三分支、
+    // `_detail(data, '未知原因')`、「只有请求本身没走通才值得报状态码」那段
+    // 理由、`finally` 里恢复按钮，一处不差，只差「值从哪来」和「写进哪个
+    // 元素」。同一份文件里 `+ '（HTTP ' + r.status + '）'` 这个写法一度有四处。
+    // 这个项目刚为同一类重复做过三次收敛（`busy_guard` 合掉两份 409、
+    // `organizing()` 合掉两份去重），这条是第四次。
+    //
+    // 做法：把「试一次、写结果」抽出来，两个调用点只留「值从哪来」。
+    // **`testConnection` 的对外签名一个字都不变**（`_settings.html` 里那句
+    // `onclick="testConnection(this)"` 是模板里的字面量，改它就得改那一行），
+    // 所以是加一层薄壳，不是改调用方。
+    async function _testConnection(btn, values, msg) {
+      btn.disabled = true;
+      msg('测试中…', true);
       try {
-        // **body 必传**：端点要的是「表单里当前填的值」，不带 body 会 422
-        // （那只能测已保存的配置，而用户刚改的正是表单里的值）。
-        const values = Object.fromEntries(new FormData(form));
         const r = await fetch('/settings/test', {
           method: 'POST',
           headers: {'Content-Type': 'application/json'},
           body: JSON.stringify({values: values}),
         });
         const data = await r.json().catch(function () { return {}; });
-
         if (r.ok && data.ok) {
-          _msg('通了 · ' + data.seconds + ' 秒', true);
+          msg('通了 · ' + data.seconds + ' 秒', true);
         } else if (r.ok) {
           // **HTTP 通了、模型没通**（模型名不存在之类）。这时状态码是 200，
           // 缀在后面是噪音——只有请求本身没走通（422 那种）才值得报状态码。
-          _msg('不通：' + _detail(data, '未知原因'), false);
+          msg('不通：' + _detail(data, '未知原因'), false);
         } else {
           // **带上状态码**：不带的话 422 会显示成「未知原因」，排查时找不到北
-          _msg('不通：' + _detail(data, '未知原因') + '（HTTP ' + r.status + '）', false);
+          msg('不通：' + _detail(data, '未知原因') + '（HTTP ' + r.status + '）', false);
         }
       } catch (e) {
-        _msg('测试失败：' + e, false);
+        msg('测试失败：' + e, false);
       } finally {
         // **恢复按钮必须走 `finally`**：原来只包了 `r.json()`，`fetch` 本身
         // 抛错时这行根本执行不到，按钮就此永久禁用，页面上还没有任何说明。
         btn.disabled = false;
       }
+    }
+
+    function testWizardConnection(btn) {
+      const values = {};
+      ['KB_LLM_MODEL', 'KB_LLM_BASE_URL', 'KB_LLM_API_KEY'].forEach(function (k) {
+        values[k] = document.getElementById('w-' + k).value;
+      });
+      _testConnection(btn, values, _wizardMsg);
+    }
+
+    async function checkPath(btn) {
+      const path = document.getElementById('w-vault-path').value;
+      const msg = document.getElementById('w-check-msg');
+      if (!path.trim()) {
+        // **空输入在这儿拦住，别去问后端。** 后端拿 `Path('')` 当**当前目录**：
+        // `exists` 为真、`entries` 是服务目录那一大堆，回过来的话跟用户手里
+        // 那个空框对不上（「目录已存在，里面有 37 个条目」——哪个目录？）。
+        // 端点那边照样回 200，`test_check_with_an_empty_path_is_not_an_error`
+        // 钉的是「不 422」，不是「这条路径有话说」。
+        msg.textContent = '还没填路径。填一个目录的绝对路径再点「检查」';
+        msg.classList.add('bad');
+        msg.hidden = false;
+        return;
+      }
+      btn.disabled = true;
+      try {
+        const r = await fetch('/setup/check?path=' + encodeURIComponent(path));
+        const d = await r.json();
+        const bits = [];
+        if (!d.exists) bits.push('这个目录还不存在，初始化时会建出来');
+        else bits.push('目录已存在，里面有 ' + d.entries.length + ' 个条目');
+        if (d.looks_like_vault) bits.push('它已经是一个知识库了——会直接用它，已有的东西不动');
+        if (!d.writable) bits.push('这个位置写不进去，换一个地方');
+        msg.textContent = bits.join('。');
+        msg.classList.toggle('bad', !d.writable);
+        msg.hidden = false;
+      } catch (e) {
+        msg.textContent = '检查失败：' + e;
+        msg.classList.add('bad');
+        msg.hidden = false;
+      } finally {
+        btn.disabled = false;
+      }
+    }
+
+    // **Enter 不能把外层那个设置表单交上去。**
+    // 一条龙整块住在 `#settings-form` 里面（所以它自己不是 form，见
+    // `_vault_pane.html` 那段注释）。而 form 的隐式提交规矩是：在文本框里按
+    // Enter，浏览器会拿**这个 form 里第一个 submit 按钮**（`_settings.html`
+    // 底部那个「保存」）交一次。于是「在路径框里敲回车，想检查一下」变成
+    // 「把设置存了」——还附一句「已保存」。一条龙这几个字段**一个 `name`
+    // 都没有**，压根不会被提交，所以存的是个谁也没改的东西。
+    //
+    // 拦法：**委托在 `document` 上，不是绑在 `#wizard` 上。** `#wizard` 是
+    // `/settings` 那个片段取回来之后才进 DOM 的（`openSettings()` 里
+    // `box.innerHTML = await r.text()`），脚本解析时它还不存在——绑在它上面会
+    // `null.addEventListener` 直接炸。在处理函数里现找，才等得到它。
+    document.addEventListener('keydown', function (e) {
+      if (e.key !== 'Enter') return;
+      const wizard = document.getElementById('wizard');
+      if (!wizard || !wizard.contains(e.target)) return;   // 不关一条龙的事
+      if (e.target.tagName === 'TEXTAREA') return;         // 文本域里回车是换行
+      e.preventDefault();
+      // 路径框：Enter = 点旁边的「检查」，跟按钮是同一件事
+      if (e.target.id === 'w-vault-path') {
+        const btn = e.target.closest('.field-row').querySelector('button');
+        if (btn) checkPath(btn);
+      }
+    });
+
+    // `btn` 就是「初始化」那个按钮自己（`onclick="runInit(this)"`）。
+    async function runInit(btn) {
+      const wizard = document.getElementById('wizard');
+      const domains = Array.from(wizard.querySelectorAll('.domain-box input:checked'))
+        .map(function (el) { return el.value; });
+      if (!domains.length) {
+        // 前端拦一道只是礼貌，后端也会 400——理由写在按钮旁边那句里
+        _wizardMsg('至少勾一个领域——一个都没有的话，投进来的每一条都会掉进「待归类」', false);
+        return;
+      }
+      const values = {};
+      ['KB_LLM_MODEL', 'KB_LLM_BASE_URL', 'KB_LLM_API_KEY'].forEach(function (k) {
+        const v = document.getElementById('w-' + k).value;
+        if (v) values[k] = v;
+      });
+      btn.disabled = true;
+      _wizardMsg('正在建库…', true);
+      try {
+        const r = await fetch('/setup/init', {
+          method: 'POST',
+          headers: {'Content-Type': 'application/json'},
+          body: JSON.stringify({
+            vault_path: document.getElementById('w-vault-path').value,
+            domains: domains,
+            values: values,
+          }),
+        });
+        const data = await r.json().catch(function () { return {}; });
+        if (!r.ok) {
+          _wizardMsg(_detail(data, '初始化失败') + '（HTTP ' + r.status + '）', false);
+          return;
+        }
+        // 建成了：**把设置窗整个重载一遍**。同一屏换成「已初始化」态，
+        // 不做局部刷新——两态的形状差得远，重载比补丁简单也更不容易错。
+        //
+        // ⚠️ **这句消息的写法有讲究，别顺手改回 `_wizardMsg`。**
+        // `openSettings()` 会把 `#settings-modal` 的 `innerHTML` **整个换掉**，
+        // 所以在它前后直接写 `_wizardMsg` 都不成立：
+        //   ① 写在它**之前** → 那句跟着旧 DOM 一起被扔掉，用户根本看不见；
+        //   ② 写在它**之后** → `#wizard-msg` 这个东西已经不存在了，它属于
+        //      「未初始化」那一态，重载后那一屏换成「已初始化」了。
+        // 落到 `_msg` 上：它写的是 `_settings.html` 里那个 `#settings-msg`，
+        // 那是**两态共用**的底部消息位（在 `.pane` 外面、`.settings-actions`
+        // 上面），重载后照样在。`data.actions` 里是「建了哪几个目录」——
+        // **用户要看的正是这个**，丢了就等于「点完按钮什么都没说」。
+        const done = '建好了：' + (data.actions || []).join('、');
+        await openSettings();
+        showGroupByName('知识库');
+        _msg(done, true);
+      } catch (e) {
+        _wizardMsg('初始化失败：' + e, false);
+      } finally {
+        btn.disabled = false;
+      }
+    }
+
+    function showGroupByName(name) {
+      const modal = document.getElementById('settings-modal');
+      const nav = Array.from(modal.querySelectorAll('.nav-item'))
+        .find(function (b) { return b.textContent.trim() === name; });
+      if (nav) showGroup(nav);
     }
 
     async function quitService() {

@@ -48,7 +48,7 @@ from kb.core.vault import list_domains, list_drafts, list_notes
 # `test_pages_still_open_before_init` 当场一起红。
 # `noqa: F401` 是**刻意**的：它这一步确实没人用（用的那一天是 Task 6），
 # ruff 会照 F401 报「导了不用」。别顺手把它删掉，也别删掉下面这行 import。
-from kb.core.vault_setup import DEFAULT_DOMAINS, DOMAIN_CANDIDATES, init_vault  # noqa: F401
+from kb.core.vault_setup import DEFAULT_DOMAINS, DOMAIN_CANDIDATES, init_vault
 from kb.llm.base import LLM, LLMError
 from kb.logging_setup import LOG_DIR
 from kb.web import skins
@@ -111,10 +111,14 @@ def settings_context(env_path: Path, cfg: Config) -> dict:
     def _value(f) -> str:
         """只读字段显示**生效值**，可改字段显示 `.env` 里的字面值。
 
-        只读两栏不能按字面值显示：`.env` 里没写 `KB_VAULT_PATH` / `KB_PORT`
-        的人（默认值就是给这种 `.env` 准备的），那两栏会是**空白**——
-        尽管跑起来用的是 `DEFAULT_VAULT_PATH`、端口是自动找的空闲端口。
-        一栏空白看起来像坏了，而这一页的任务正是让人看清楚现在在用的是什么。
+        只读栏不能按字面值显示：`.env` 里没写 `KB_PORT` 的人（默认值就是给
+        这种 `.env` 准备的），那一栏会是**空白**——尽管跑起来是个自动找的
+        空闲端口。一栏空白看起来像坏了，而这一页的任务正是让人看清楚现在在
+        用的是什么。
+
+        （`KB_VAULT_PATH` 2026-09-22 从 `readonly` 改成了 `text`，而且「知识库」
+        那一组从 Task 6 起整个换成 `_vault_pane.html`、根本不走字段循环，
+        这里原先为它留的那条分支是**死代码**，已删。）
 
         可改字段反过来，**必须**是 `.env` 的字面值：留空 = 不改是它们的语义
         （密钥尤其），显示生效值就等于让人一保存把 key 覆盖成掩码。
@@ -126,11 +130,8 @@ def settings_context(env_path: Path, cfg: Config) -> dict:
         保存」，那个 `debug` 就被静默写成 `INFO`。归一之后，显示的就是
         **实际生效**的那个值，`data-init` 也跟着对得上。
         """
-        if f.kind == "readonly":
-            if f.key == "KB_VAULT_PATH":
-                return str(cfg.vault_path)
-            if f.key == "KB_PORT":
-                return str(cfg.port) if cfg.port else "自动"
+        if f.kind == "readonly" and f.key == "KB_PORT":
+            return str(cfg.port) if cfg.port else "自动"
         raw = values.get(f.key, f.default)
         if f.kind == "choice":
             raw = _normalize_choice(raw, f.choices)
@@ -170,7 +171,30 @@ def settings_context(env_path: Path, cfg: Config) -> dict:
             },
         ],
     })
-    return {"groups": groups}
+    # 「知识库」那一组要**一屏两态**，模板得知道现在是哪一态。
+    # ⚠️ 局部变量**不要再叫 `vault_ready`**——那会遮住 `lifecycle.vault_ready`
+    # 这个函数，同一个名字在这里指两样东西。判据本身在它那儿，只有那一份。
+    vault_path = cfg.vault_path
+    ready = vault_ready(vault_path)
+
+    return {
+        "groups": groups,
+        "vault_ready": ready,
+        "vault_path": str(vault_path) if vault_path else "",
+        # 已初始化态要显示磁盘上住了哪些领域。**从磁盘读，不从配置读**——
+        # 领域的唯一真源始终是磁盘（Q95 那条）。**不 ready 就不读**：
+        # 路径填歪了、填成一个文件时，`list_domains` 读的是别人的目录
+        # （理由和 `/setup/state` 那条一样）。
+        "domains": list_domains(vault_path) if ready else [],
+        # 一条龙的段①要预填模型名与地址。**密钥不预填**（掩码都不给）：
+        # 「留空 = 不改」是它的语义，预填成掩码等于让人一保存把 key 覆盖掉。
+        "llm_model": values.get("KB_LLM_MODEL", ""),
+        "llm_base_url": values.get("KB_LLM_BASE_URL", ""),
+        # 段③那九个复选框。清单是常量、不进 `.env`——勾选的作用只是建出目录，
+        # 建完就不再被读第二次（见 `DOMAIN_CANDIDATES` 那段注释）。
+        "domain_candidates": DOMAIN_CANDIDATES,
+        "default_domains": DEFAULT_DOMAINS,
+    }
 
 
 def _service_status() -> str:

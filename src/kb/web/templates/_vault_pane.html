@@ -1,0 +1,134 @@
+{# 「知识库」分组的一屏两态。由 `_settings.html` include 进来。 #}
+
+{% if vault_ready %}
+  {# ---------- 已初始化 ---------- #}
+  <div class="vault-card">
+    <p class="vault-state"><span class="dot on" aria-hidden="true"></span>已初始化</p>
+    <p class="vault-path">{{ vault_path }}</p>
+    <p class="hint">领域：{{ domains | join('　·　') if domains else '还没有领域——去库里建一个一级文件夹' }}</p>
+    <div class="vault-actions">
+      <button type="button" class="secondary" onclick="openMigrate()">迁移到别处</button>
+      <button type="button" class="secondary" onclick="openVaultFolder()">打开目录</button>
+      {# `secondary danger` 两个 class，**不是光一个 `danger`**——
+         形状靠 `button.secondary`，`button.danger` 只换颜色。理由见
+         style.css 里那两条规则上面的注释。 #}
+      <button type="button" class="secondary danger"
+              onclick="openRemove()">移除知识库…</button>
+    </div>
+  </div>
+  <p class="hint">
+    要改模型配置或日志级别，去左边对应的那一栏。
+    要加领域，在资源管理器里给库建个一级文件夹就行——服务下次就认。
+  </p>
+{% else %}
+  {# ---------- 未初始化：一条龙 ---------- #}
+
+  {# **这一块不是 `<form>`，是 `<div>`。别改回去。**
+
+     它整块住在 `_settings.html` 的 `<form class="settings-panes"
+     id="settings-form">` 里面。而 HTML 规范里 `form` 的内容模型明确排除
+     `form` 后代；解析器在「表单指针非 null」时碰到 `<form>` 开始标签是
+     **直接丢弃**的。这里是 `openSettings()` 里 `box.innerHTML = await
+     r.text()` 塞进来的，`box` 是 `#settings-modal`（`base.html` 里 body 下的
+     div，祖先链上没有 form），所以指针初始为 null → 外层那个建出来、指针被
+     设上 → **内层这个一声不响地没了**。
+
+     丢掉的后果一个都不报错：`getElementById('wizard-form')` 是 `null`
+     （`testWizardConnection` 第一行就 TypeError，「测试连接」永远显示失败）；
+     `onsubmit` 随标签一起没了 → 点「初始化」走的是外层 `#settings-form` 的
+     `saveSettings`，POST 到 `/settings`——要么 400，要么弹「已保存 N 项」
+     **而库根本没建**。正是这个项目最恨的那种「看起来一切正常」。
+
+     所以：值一律**按 id 读**，输入框一律**不给 `name`**。不给 `name` 是
+     沿用本文件已有的那条约定（只读字段也不给 `name`：不进 `FormData`，
+     就不会被 `saveSettings` 顺带提交）——顺带还解决了一件事：这些字段叫
+     `KB_LLM_MODEL` 之类，跟「模型配置」那一组的字段**同名**，留着 `name`
+     的话 `Object.fromEntries(new FormData(form))` 会取到重复 name 的最后一个。 #}
+  {# ⚠️ **回车必须拦掉。** 这条龙住在 `#settings-form` 肚子里，而那个 form 里
+     有一颗 `<button type="submit">保存</button>`。在段①/段② 任意输入框里按
+     回车，浏览器会走**隐式提交**去点那颗「保存」→ `saveSettings` →
+     POST `/settings`。用户填完路径顺手一回车，看到的会是「没有要改的」
+     （`saveSettings` 按 `data-init` 过滤，通常什么都不提交）**而库根本没建**
+     ——正是上面那段注释里最怕的那个形状。
+
+     拦掉而不是改成「回车 = 初始化」：回车时用户多半还停在第一段，
+     那会儿替他建库是越俎代庖。 #}
+  <div class="wizard" id="wizard"
+       onkeydown="if (event.key === 'Enter') { event.preventDefault(); }">
+
+    <div class="wizard-step">
+      <span class="wizard-num" aria-hidden="true">1</span>
+      <div class="wizard-body">
+        <p class="wizard-title">模型配置</p>
+        <p class="hint">整理笔记要调模型，先把钥匙给它。</p>
+        <div class="field-row">
+          <div class="field">
+            <label for="w-KB_LLM_MODEL">模型名</label>
+            <input id="w-KB_LLM_MODEL" value="{{ llm_model }}">
+          </div>
+          <div class="field">
+            <label for="w-KB_LLM_BASE_URL">API 地址</label>
+            <input id="w-KB_LLM_BASE_URL" value="{{ llm_base_url }}">
+          </div>
+        </div>
+        <div class="field">
+          <label for="w-KB_LLM_API_KEY">API Key</label>
+          <div class="field-row">
+            <input id="w-KB_LLM_API_KEY" type="password"
+                   value="" placeholder="留空表示不改" autocomplete="off">
+            <button type="button" class="secondary"
+                    onclick="testWizardConnection(this)">测试连接</button>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="wizard-step">
+      <span class="wizard-num" aria-hidden="true">2</span>
+      <div class="wizard-body">
+        <p class="wizard-title">知识库目录</p>
+        <p class="hint">笔记存哪儿。它会是一个独立的 git 仓库。</p>
+        <div class="field-row">
+          <input id="w-vault-path" class="mono"
+                 placeholder="D:\我的知识库" autocomplete="off">
+          <button type="button" class="secondary"
+                  onclick="checkPath(this)">检查</button>
+        </div>
+        <p class="hint" id="w-check-msg" hidden></p>
+      </div>
+    </div>
+
+    <div class="wizard-step">
+      <span class="wizard-num" aria-hidden="true">3</span>
+      <div class="wizard-body">
+        <p class="wizard-title">初始领域</p>
+        <p class="hint">
+          领域就是知识库的顶层分类。勾中的会建成一级目录。<br>
+          <b>至少勾一个</b>——一个都没有的话，投进来的每一条都会变成「待归类」。
+        </p>
+        {# 同样不给 `name`——`runInit` 按 `#wizard .domain-box input:checked` 收。 #}
+        <div class="domain-grid">
+          {% for d in domain_candidates %}
+            <label class="domain-box">
+              <input type="checkbox" value="{{ d }}"
+                     {{ 'checked' if d in default_domains }}>
+              <span>{{ d }}</span>
+            </label>
+          {% endfor %}
+        </div>
+      </div>
+    </div>
+
+    <p class="settings-msg" id="wizard-msg" hidden></p>
+
+    <div class="settings-actions">
+      <span class="hint wizard-foot">
+        初始化会建目录、写 .gitignore、初始化 git 仓库。幂等——重复点不会毁掉已有的东西。
+      </span>
+      {# 没有 form 了，所以是 `type="button"` + `onclick`，不是 `type="submit"`。
+         写成 submit 的话它会去提交外层的 `#settings-form`。 #}
+      <button type="button" class="primary" id="wizard-go"
+              onclick="runInit(this)">初始化</button>
+    </div>
+  </div>
+{% endif %}

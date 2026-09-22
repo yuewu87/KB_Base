@@ -929,9 +929,13 @@ button.primary:hover { background: var(--accent-soft); border-color: var(--accen
 
 /* 禁用态。**上面两条都把 `cursor: pointer` 写死了**，而设置窗里的
    「测试连接」「保存」在请求期间会 `btn.disabled = true`——不写这条，
-   灰下去的同时光标还是小手，看不出被按住了。两颗都写，别只顾 `.primary`。 */
+   灰下去的同时光标还是小手，看不出被按住了。**三颗都写，别只顾 `.primary`。**
+   （`.danger` 是 Task 7 那个移除确认模态要用的：它靠 `disabled` 拦住没勾
+   「我知道，删了找不回来」的人——漏了这颗的话按钮**看着照样能点**、光标还是
+   小手，而用户会以为「没勾也能删」。） */
 button.primary:disabled,
-button.secondary:disabled { opacity: .6; cursor: default; }
+button.secondary:disabled,
+button.danger:disabled { opacity: .6; cursor: default; }
 
 /* ==========================================================================
    设置模态窗与侧栏两个按钮（Q98）
@@ -1412,3 +1416,131 @@ button.side-btn {
 }
 
 /* ===== 皮肤块结束 ===== */
+
+/* ---- 知识库那条龙（设置窗「知识库」分组） ---- */
+
+.wizard-step {
+  display: flex;
+  gap: 11px;
+  margin-bottom: 16px;
+}
+
+.wizard-num {
+  flex: none;
+  width: 18px; height: 18px;
+  border-radius: 50%;
+  background: var(--accent);
+  color: var(--on-accent);
+  font-size: 10px; font-weight: 700;
+  display: flex; align-items: center; justify-content: center;
+}
+
+.wizard-body { flex: 1; min-width: 0; }
+
+.wizard-title {
+  color: var(--ink);
+  font-size: 11.5px; font-weight: 600;
+  margin: 0 0 4px;
+}
+
+.field-row { display: flex; gap: 8px; align-items: flex-start; }
+.field-row > .field { flex: 1; min-width: 0; }
+.field-row > button { flex: none; white-space: nowrap; }
+
+.domain-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 8px;
+}
+
+/* ⚠️ **选择器必须带 `.settings-panes` 前缀，不能只写 `.domain-box`。**
+   这几个格子渲染在 `.settings-panes` 里，那里已经有两条同族规则：
+
+     `.settings-panes label`  (0,1,1)  → `display: block; margin-bottom: 4px; color: var(--muted)`
+     `.settings-panes input`  (0,1,1)  → `width: 100%; padding: 7px 10px; border: 1px solid; …`
+
+   光写 `.domain-box` 是 (0,1,0)，**两条都压不过**：`display: flex` 被
+   `label` 那条的 `display: block` 吃掉，格子的排版回到竖排；而复选框会被
+   `input` 那条撑成 `width: 100%` 再加上内边距和边框，**变成一个占满整格的
+   大框**。加上前缀是 (0,2,0) / (0,2,1)，才轮得到下面这些生效。 */
+.settings-panes .domain-box {
+  display: flex; align-items: center; gap: 8px;
+  border: 1px solid var(--line);
+  border-radius: 5px;
+  padding: 8px 10px;
+  font-size: 10.5px;
+  color: var(--ink);
+  cursor: pointer;
+}
+/* `:has` 让整格跟着复选框变——点框和点字是一回事，但视觉上得有主次 */
+.settings-panes .domain-box:has(input:checked) {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+}
+/* 复选框要把上面 `.settings-panes input` 撑出来的那几样**逐条收回去**，
+   少收一样就看得出来（比如漏了 `width` 就是一个占满整格的方框）。 */
+.settings-panes .domain-box input {
+  width: auto; padding: 0; border: 0; background: none;
+  margin: 0; accent-color: var(--accent);
+}
+
+.vault-card {
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  padding: 12px 14px;
+}
+
+.vault-state {
+  display: flex; align-items: center; gap: 7px;
+  color: var(--ink); font-size: 11px; font-weight: 600;
+  margin: 0 0 9px;
+}
+
+.vault-state .dot {
+  width: 7px; height: 7px; border-radius: 50%;
+  background: var(--muted);
+}
+.vault-state .dot.on { background: var(--accent); }
+
+.vault-path {
+  color: var(--muted);
+  font-family: monospace;
+  font-size: 10px;
+  margin: 0 0 4px;
+  overflow-wrap: anywhere;   /* 长路径不许把卡片撑破 */
+}
+
+.vault-actions { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 12px; }
+
+/* 「移除知识库…」——**次级按钮的形状 + 危险色**。
+
+   形状（padding / font / cursor / 圆角 / 胶囊）全靠 `button.secondary`
+   那一份，这里只换颜色。**所以 HTML 里写的是 `class="secondary danger"`，
+   不是光一个 `danger`。** 光写 `danger` 的话站内没有任何规则给它 padding
+   与字体，浏览器默认外观直接露出来——本文件早先把这个毛病记过两次
+   （「光板 `<button>`，站内没有任何规则命中」）。
+   危险色不另写一套形状，理由还是那句：各写一份就是两处真相。 */
+button.secondary.danger {
+  border-color: var(--danger);
+  color: var(--danger);
+}
+/* ⚠️ hover 用 `--danger-hover` + `--on-danger`，**不是 `--accent-soft`**。
+   `--accent-soft` 是淡蓝：一颗红边红字的「移除知识库…」悬停变淡蓝底，
+   跟侧栏「退出」那颗（`.side-btn.quit:hover` 用的就是 `--danger-hover`）
+   不是一套，看着像两拨人做的。两个变量都现成在变量清单里，不用新增。 */
+button.secondary.danger:hover {
+  background: var(--danger-hover);
+  border-color: var(--danger);
+  color: var(--on-danger);
+}
+
+/* ⚠️ **这条不加的话，「这个位置写不进去」会是一行普通灰字。**
+   `checkPath` 里是 `msg.classList.toggle('bad', !d.writable)`，而 `msg` 是
+   `<p class="hint" id="w-check-msg">`。全站只有一条 `.bad` 规则
+   ——`.settings-msg.bad`，作用域不覆盖 `.hint`；裸 `.hint` 规则也没有
+   （只有 `.settings-panes .hint` 与 `.modal.notice .hint` 两条带作用域的）。
+   结果就是**「路径不可写」和「检查通过」长得一模一样**，而这条提示的全部
+   意义就是让用户分清这两种。 */
+.hint.bad { color: var(--danger); }
+
+.wizard-foot { flex: 1; }

@@ -23,6 +23,16 @@
     {% for g in groups %}
       <section class="pane" data-group="{{ loop.index0 }}"
                {{ 'hidden' if not loop.first }}>
+        {# 「知识库」是唯一一组自己画的：它要**一屏两态**（未初始化 = 一条龙，
+           已初始化 = 状态 + 三个动作）。通用字段循环表达不了这个，硬塞进去
+           会把模板变成一堆 if。 #}
+        {# **`'知识库'` 这三个字要和 `settings.py` 的 `Group("知识库", …)`
+           逐字对得上。** 对不上时不会报错，只是这一组悄悄退回通用字段循环
+           （一个可改的路径框），而 `test_settings_shows_the_wizard_before_init`
+           找不到 `id="wizard"` 会红——那条测试守着的就是这个。别顺手给分组改名。 #}
+        {% if g.name == '知识库' %}
+          {% include "_vault_pane.html" %}
+        {% else %}
         {% for f in g.fields %}
           <div class="field">
             <label for="f-{{ f.key }}">{{ f.label }}</label>
@@ -55,6 +65,7 @@
             {% if f.help %}<p class="hint">{{ f.help }}</p>{% endif %}
           </div>
         {% endfor %}
+        {% endif %}
       </section>
     {% endfor %}
 
