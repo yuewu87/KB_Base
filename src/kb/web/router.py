@@ -31,6 +31,7 @@ from kb.core.flow import list_days as flow_days
 from kb.core.flow import read_day as read_flow_day
 from kb.core.lifecycle import (
     Busy,
+    BusyError,
     LifecycleError,
     check_path,
     migrate_vault,
@@ -416,23 +417,26 @@ def build_router(
         一个 git commit），插进一轮迁移里会写成「一半旧库一半新库」，而那个
         样子是**看起来一切正常**。
         """
-        # `busy.hold` 管 acquire/release 的配对，这里只管「被挡住时说什么」。
-        # 被挡的理由拿 `Busy.refusal`——和 409 的 detail 是同一句话。
-        with busy.hold("sweep") as got:
-            if not got:
-                sweep_state.save_failure(data_dir, busy.refusal)
-                return RedirectResponse("/sweep", status_code=303)
-
-            vault_path = get_cfg().vault_path
-            if vault_path is None:
-                sweep_state.save_failure(data_dir, NO_VAULT_MESSAGE)
-                return RedirectResponse("/sweep", status_code=303)
-
-            try:
-                run_sweep(vault_path, data_dir, get_llm())
-            except sweep.SweepError as exc:
-                sweep_state.save_failure(data_dir, str(exc))
+        # **先问一句「现在忙不忙」**（只读，不占锁）——忙就落一份报告。
+        # 被挡的理由拿 `Busy.refusal`，和 409 的 detail 是同一句话。
+        # 真正的互斥在 `run_sweep` 动文件那一段，理由见它的 docstring。
+        if busy.what is not None:
+            sweep_state.save_failure(data_dir, busy.refusal)
             return RedirectResponse("/sweep", status_code=303)
+
+        vault_path = get_cfg().vault_path
+        if vault_path is None:
+            sweep_state.save_failure(data_dir, NO_VAULT_MESSAGE)
+            return RedirectResponse("/sweep", status_code=303)
+
+        try:
+            run_sweep(vault_path, data_dir, get_llm(), busy)
+        except (sweep.SweepError, BusyError) as exc:
+            # 「被挡住」和「巡检自己坏了」在这里落成同一种东西——都是
+            # 「这次巡检没跑成」的一份报告，原因原样给出去。用户看报告
+            # 就知道该等一会儿还是该去查日志。
+            sweep_state.save_failure(data_dir, str(exc))
+        return RedirectResponse("/sweep", status_code=303)
 
     @router.post("/sweep/reply")
     def sweep_reply():

@@ -5,6 +5,8 @@ import json
 import pytest
 
 from kb.api.http import run_sweep
+from kb.core import sweep as sweep_mod
+from kb.core.lifecycle import Busy, BusyError
 from kb.core.sweep import SweepError
 from kb.core.vault import write_note
 from kb.llm.base import FakeLLM
@@ -47,7 +49,7 @@ def test_run_sweep_refuses_a_path_that_is_not_a_vault(tmp_path):
     (plain / "重要.txt").write_text("别动我", encoding="utf-8")
 
     with pytest.raises(SweepError, match="不是一个知识库"):
-        run_sweep(plain, tmp_path, FakeLLM(_merge_json()))
+        run_sweep(plain, tmp_path, FakeLLM(_merge_json()), Busy())
 
     assert (plain / "重要.txt").is_file()
 
@@ -70,7 +72,7 @@ def test_run_sweep_saves_report(tmp_path):
 
     _two_topics(_make_vault(tmp_path))
 
-    report = run_sweep(tmp_path, tmp_path, FakeLLM(_merge_json()))
+    report = run_sweep(tmp_path, tmp_path, FakeLLM(_merge_json()), Busy())
     assert report["tag_merges"] or report["dir_merges"]
     assert load_state(tmp_path)["report"]["read"] is False
 
@@ -78,5 +80,52 @@ def test_run_sweep_saves_report(tmp_path):
 def test_run_sweep_on_clean_vault_reports_nothing(tmp_path):
     (tmp_path / "计算机").mkdir(parents=True)
     _make_vault(tmp_path)
-    report = run_sweep(tmp_path, tmp_path, FakeLLM('{"tag_merges": [], "dir_merges": []}'))
+    report = run_sweep(
+        tmp_path, tmp_path,
+        FakeLLM('{"tag_merges": [], "dir_merges": []}'), Busy(),
+    )
     assert report["summary"] is not None
+
+
+def test_run_sweep_holds_the_lock_only_while_touching_files(tmp_path, monkeypatch):
+    """**规划那一段不占锁**——它最长（一次 LLM 调用），而且只读。
+
+    锁原先是在三个调用点各挂一次、把整轮巡检（含规划）全罩住：冷启动那轮
+    后台巡检一跑几十秒到几分钟，期间**所有写入口都 409**，而 `POST /new`
+    是个纯 HTML 表单——浏览器把 `{"detail": …}` 直接渲染成一页，
+    **用户刚写的正文既没落草稿也没进 vault**。真正需要互斥的是「两个写者
+    交错」（迁移搬到一半巡检插进来），那只发生在动文件那一段。
+    """
+    _two_topics(_make_vault(tmp_path))
+    busy = Busy()
+    real = sweep_mod.make_plan
+
+    def spy(vault_root, llm):
+        assert busy.what is None, "规划的时候锁不该被占着"
+        return real(vault_root, llm)
+
+    monkeypatch.setattr(sweep_mod, "make_plan", spy)
+
+    report = run_sweep(tmp_path, tmp_path, FakeLLM(_merge_json()), busy)
+
+    assert report["tag_merges"] or report["dir_merges"]
+    assert busy.what is None                      # 跑完照样还回去
+
+
+def test_run_sweep_refuses_at_the_write_step_not_before(tmp_path):
+    """有人在动文件时，巡检**在动文件那一步**失败，而且一根汗毛都不动。
+
+    它抛 `BusyError`（不是 `SweepError`）——调用方要能把它映成 409 / 一份
+    「被挡住了」的报告，而不是当成「巡检自己坏了」。
+    """
+    _two_topics(_make_vault(tmp_path))
+    busy = Busy()
+    assert busy.acquire("organize") is True
+    try:
+        with pytest.raises(BusyError, match="整理"):
+            run_sweep(tmp_path, tmp_path, FakeLLM(_merge_json()), busy)
+    finally:
+        busy.release()
+
+    assert (tmp_path / "计算机" / "git" / "a.md").is_file()   # 一个文件都没动
+    assert (tmp_path / "计算机" / "版本控制" / "b.md").is_file()

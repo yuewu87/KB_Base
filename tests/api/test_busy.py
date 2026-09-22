@@ -171,6 +171,33 @@ def test_a_background_sweep_stands_down_while_something_else_runs(tmp_path):
     assert "report" not in state
 
 
+def test_planning_must_not_hold_the_lock(client, monkeypatch):
+    """**`POST /sweep` 在「规划」那一段不许占锁。**
+
+    这是这次收窄锁的**唯一**判据，而且只有从端点看才成立：直接调 `run_sweep`
+    时锁本来就没人占（占锁的是调用方），那种断言在旧代码上照样绿。
+
+    规划要调一次模型，是整个流程里最长的一段，而它只读。占着的话，冷启动
+    那轮后台巡检会把写入口冻住几十秒到几分钟：用户在「记一条」写完点投递 →
+    409，而 `POST /new` 是个纯 HTML 表单，浏览器把 `{"detail": …}` 直接渲染成
+    一页，**刚写的正文既没落草稿也没进 vault**。
+    """
+    from kb.core import sweep as sweep_mod
+
+    busy = client.app.state.busy
+    real = sweep_mod.make_plan
+    seen = {}
+
+    def spy(vault_root, llm):
+        seen["what"] = busy.what
+        return real(vault_root, llm)
+
+    monkeypatch.setattr(sweep_mod, "make_plan", spy)
+    client.post("/sweep")
+
+    assert seen["what"] is None, "规划的时候锁被占着了——写入口会一起被冻住"
+
+
 def test_a_background_sweep_never_raises(tmp_path, monkeypatch):
     """**「绝不抛异常」是它 docstring 里的承诺**——后台线程里抛了没人接。
 

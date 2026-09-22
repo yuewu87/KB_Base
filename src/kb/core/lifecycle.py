@@ -117,6 +117,15 @@ class LifecycleError(RuntimeError):
     """搬家搬不成。消息直接给人看。"""
 
 
+class BusyError(RuntimeError):
+    """想动库，但别人正占着。消息就是 `Busy.refusal`，直接给人看。
+
+    **和 `SweepError` 分开**：调用方对这两件事要说的话不一样——「被挡住了」
+    是 409 / 一份「这次没跑成，等它跑完再来」的报告，「巡检自己坏了」才是
+    500 / 看运行日志。混成一个的话，用户分不清该等一会儿还是该去查日志。
+    """
+
+
 def vault_ready(vault_path: Path | None) -> bool:
     """库真的建好了吗。**这个判据只有这一份。**
 

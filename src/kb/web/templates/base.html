@@ -594,6 +594,12 @@
     async function openMigrate() {
       const target = prompt('搬到哪里？填一个绝对路径，而且那个目录必须是空的（不存在也行）。');
       if (!target) return;
+      // **先说一句再动手。** 拷贝是同步的，库大的话页面会连着几十秒没反应
+      // ——不说这一句，用户看到的就是「点了按钮，页面卡死了」，多半会再点
+      // 一次或者直接关窗口。真正的进度条没做（要轮询 `/setup/state` 的
+      // `busy`，见 `docs/03_问题记录.md` Q108），但一句「在搬」和一片死寂
+      // 是两回事。
+      _msg('正在搬…（库大的话要等一会儿，别关这个窗口）', true);
       try {
         const r = await fetch('/setup/migrate', {
           method: 'POST',

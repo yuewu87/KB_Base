@@ -37,7 +37,7 @@ from kb.config import (
 from kb.core import flow, organize, settings, sweep, sweep_state
 from kb.core.chat import handle
 from kb.core.chat_store import list_chats, load_chat
-from kb.core.lifecycle import Busy, vault_path_problem, vault_ready
+from kb.core.lifecycle import Busy, BusyError, vault_path_problem, vault_ready
 from kb.core.models import Draft, OrganizeResult
 from kb.core.search import search_notes
 from kb.core.vault import (
@@ -273,10 +273,17 @@ def _commit_sweep(vault_root: Path, touched: list[Path], plan: sweep.SweepPlan) 
     return proc.returncode == 0
 
 
-def run_sweep(vault_root: Path, data_dir: Path, llm: LLM) -> dict:
+def run_sweep(vault_root: Path, data_dir: Path, llm: LLM, busy: Busy) -> dict:
     """跑一次巡检：规划 → 校验 → 落盘 → commit → 存报告。
 
     **它走的是和整理草稿同一条链**，只是输入换成了整个库的标签与目录。
+
+    **锁只罩着「动文件 + commit」那一段，规划不占。** 规划要调一次模型，是
+    整个流程里最长的一段，而它**只读**；罩进去的话，冷启动那轮后台巡检会把
+    写入口冻住几十秒到几分钟——用户在「记一条」写完点投递 → 409，而那条路
+    是个纯 HTML 表单，浏览器把 `{"detail": …}` 直接渲染成一页，
+    **刚写的正文既没落草稿也没进 vault**。互斥真正要挡的是「两个写者交错」
+    （迁移搬到一半、巡检插进来），那只发生在写的那一段。
     """
     # **巡检也得自验这个路径是不是库。** 它是这一串操作里最会毁东西的一个：
     # 把文件从一个分类 `replace()` 到另一个、`rmdir` 掉空目录，再在库里
@@ -309,10 +316,20 @@ def run_sweep(vault_root: Path, data_dir: Path, llm: LLM) -> dict:
 
     flow.emit("规划", f"巡检发现：{plan.summary or '有可以合并的'}")
     flow.emit("校验", "校验通过")
-    touched = sweep.apply_plan(plan, vault_root)
-    if touched:
-        flow.emit("落盘", f"动了 {len(touched)} 个文件")
-    _commit_sweep(vault_root, touched, plan)
+
+    with busy.hold("sweep") as got:
+        if not got:
+            raise BusyError(busy.refusal)
+        # **拿到锁之后再验一次库。** 规划那一段没占锁，几十秒里库完全可能被
+        # 搬走（迁移是先拷后删源）或者被移除——拿一份过期的计划去
+        # `apply_plan` 会写到不存在的地方。判据还是那一条。
+        problem = vault_path_problem(vault_root)
+        if problem:
+            raise sweep.SweepError(problem)
+        touched = sweep.apply_plan(plan, vault_root)
+        if touched:
+            flow.emit("落盘", f"动了 {len(touched)} 个文件")
+        _commit_sweep(vault_root, touched, plan)
 
     report = {
         "summary": plan.summary,
@@ -333,46 +350,38 @@ def _sweep_in_background(
     `load_dotenv` 写的是进程级 `os.environ`，同一进程内只该调用一次
     （见 `config.load_config` 的 docstring），而 `main()` 已经调过了。
 
-    **要占住 `busy`，从拿到锁一直占到跑完。** 这个线程和服务在同一个进程里，
-    跟请求处理是**并发**的：它占着，用户在那个窗口里点「整理」才会被 409
-    挡住；不占的话，一轮巡检跑到一半被一轮整理劈开，就是「一半旧库一半新库」
-    那个形状——而它**看起来一切正常**（`run_sweep` 的 docstring 自己写着
-    「它走的是和整理草稿同一条链」）。
+    互斥在 `run_sweep` **动文件那一段**（现在规划不占锁，理由见它的
+    docstring），这里只做两件事：**先问一句「现在忙不忙」**——忙就不跑，
+    省下一次白花的 LLM 调用，而且**连坑都不占**；然后如实汇报跑的结果。
     """
-    # 拿不到（启动那一瞬间恰好有请求在跑，可能性极小）就**连坑都不占**。
-    with busy.hold("sweep") as got:
-        if not got:
-            return
-        # 先占坑：万一跑挂了也不会每次重启都重跑。
-        # 用 mark_run 而不是 save_report——后者会留一份 read: false 的报告，
-        # 侧栏会把它当正式报告显示（还带两个回复按钮）。
-        #
-        # ⚠️ **必须在锁内。** 留在锁外的话，拿不到锁反而先把「这次算跑过了」
-        # 的坑占上，于是要再等一个 `KB_SWEEP_INTERVAL` 才会重试——等于白丢
-        # 一次巡检，而拿不到锁恰恰是最不该占坑的那种情况。
+    # **只是读一下，不占锁。** 真的互斥在 `run_sweep` 里面。
+    if busy.what is not None:
+        return
+    # 先占坑：万一跑挂了也不会每次重启都重跑。
+    # 用 mark_run 而不是 save_report——后者会留一份 read: false 的报告，
+    # 侧栏会把它当正式报告显示（还带两个回复按钮）。
+    try:
+        sweep_state.mark_run(data_dir)
+    except Exception:      # noqa: BLE001
+        # **写状态本身也会失败**（盘满、目录被设成只读——`atomic_write`
+        # 全程没有 try）。抛出去就逃出这个 daemon 线程；而
+        # `spawn_service` 传的是 `stderr=subprocess.DEVNULL`（`runtime.py`），
+        # 运行日志里一个字都没有：这一轮既没跑、也没留下「没跑成」的报告，
+        # 巡检页上是一片空白，看起来一切正常。**「绝不抛异常」就得真的
+        # 一句都不抛。**
+        logging.getLogger("kb.sweep").exception("巡检状态写不进去")
+        return
+    try:
+        run_sweep(vault_root, data_dir, llm, busy)
+    except Exception:      # noqa: BLE001
+        logging.getLogger("kb.sweep").exception("巡检失败")
         try:
-            sweep_state.mark_run(data_dir)
-        except Exception:      # noqa: BLE001
-            # **写状态本身也会失败**（盘满、目录被设成只读——`atomic_write`
-            # 全程没有 try）。它原先在一个只有 `finally`、没有 `except` 的
-            # 外层 try 里，抛出去就逃出这个 daemon 线程；而
-            # `spawn_service` 传的是 `stderr=subprocess.DEVNULL`（`runtime.py`），
-            # 运行日志里一个字都没有：这一轮既没跑、也没留下「没跑成」的报告，
-            # 巡检页上是一片空白，看起来一切正常。**「绝不抛异常」就得真的
-            # 一句都不抛。**
-            logging.getLogger("kb.sweep").exception("巡检状态写不进去")
-            return
-        try:
-            run_sweep(vault_root, data_dir, llm)
-        except Exception:      # noqa: BLE001
-            logging.getLogger("kb.sweep").exception("巡检失败")
-            try:
-                # 报告的形状只有 `save_failure` 那一份——原先这个字典在四处
-                # 各写一遍，其中一处还少两个键。
-                sweep_state.save_failure(data_dir, "看运行日志")
-            except Exception:  # noqa: BLE001
-                # 报告也写不进去（多半是同一个盘的同一个问题）。照样不抛。
-                logging.getLogger("kb.sweep").exception("巡检失败的报告也写不进去")
+            # 报告的形状只有 `save_failure` 那一份——原先这个字典在四处
+            # 各写一遍，其中一处还少两个键。
+            sweep_state.save_failure(data_dir, "看运行日志")
+        except Exception:  # noqa: BLE001
+            # 报告也写不进去（多半是同一个盘的同一个问题）。照样不抛。
+            logging.getLogger("kb.sweep").exception("巡检失败的报告也写不进去")
 
 
 def create_app(
@@ -722,17 +731,22 @@ def create_app(
 
         **同步跑**——巡检是低频动作，等一会儿可以接受；跑完直接拿报告。
         """
-        # 和别的写入口同一把锁。`kb sweep` 在终端里执行时，服务正在整理或
-        # 迁移是常事——两轮巡检（或一轮巡检叠一轮整理）会各自重命名同一批
-        # 标签目录、各自 git commit，正是这把锁要防的那个形状。
-        with busy_guard(busy, "sweep")():
-            try:
-                return run_sweep(vault(), data_dir, get_llm())
-            except sweep.SweepError as exc:
-                # 模型输出坏了、计划不合规——原因要说给人听，CLI 是拿它调试的。
-                # （「这个路径不是库」现在也走这里；CLI 那边 `kb sweep` 会把
-                # 500 的 detail 印出来，能照着查。）
-                raise HTTPException(status_code=500, detail=str(exc)) from exc
+        # **先问一句「现在忙不忙」，省下一次白花的 LLM 调用。** 只是读一下，
+        # 不占锁——真正的互斥在 `run_sweep` 动文件那一段（规划不占锁的理由
+        # 见它的 docstring：那一段最长，而 `POST /new` 这类纯 HTML 表单被
+        # 409 挡住时，用户刚写的正文就丢了）。
+        if busy.what is not None:
+            raise HTTPException(status_code=409, detail=busy.refusal)
+        try:
+            return run_sweep(vault(), data_dir, get_llm(), busy)
+        except BusyError as exc:
+            # 上面那一问之后的竞态：真正动手时别人插进来了。
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
+        except sweep.SweepError as exc:
+            # 模型输出坏了、计划不合规——原因要说给人听，CLI 是拿它调试的。
+            # （「这个路径不是库」现在也走这里；CLI 那边 `kb sweep` 会把
+            # 500 的 detail 印出来，能照着查。）
+            raise HTTPException(status_code=500, detail=str(exc)) from exc
 
     # 这里**不**放 `/sweep/reply`。它是网页那个表单在用（`web/router.py`
     # 里的 Form 版），而 `include_router` 先于 app 级路由注册——
