@@ -14,6 +14,7 @@ from pathlib import Path
 
 from kb.config import PROJECT_ROOT
 from kb.core import daybox
+from kb.core.flow import STEPS, latest_run_rows
 from kb.core.vault import INDEX, JOURNAL_DIR
 
 # 投递脚手架：**给人读**，帮他把话说清（`templates/笔记/` 那份是给机器读的 schema）
@@ -135,6 +136,19 @@ def group_flow(rows: list[dict], steps: list[str] | None = None) -> list[dict]:
             g["skipped"] = {s for i, s in enumerate(steps) if i < last and s not in g["reached"]}
             g["todo"] = {s for i, s in enumerate(steps) if i > last}
     return list(reversed(out))
+
+
+def latest_flow(data_dir: Path) -> dict | None:
+    """最近一次 run，**已经分成 reached / skipped / todo 三类**。没有就 `None`。
+
+    「流程图」那一栏原先自己在模板里算 `reached`，然后**没记录的一律画成
+    「还没走到」**——`group_flow` 明明把 `skipped` 与 `todo` 分开了
+    （它的 docstring 写着「比如『审核』常常没记录——那是没触发，不是卡住了。
+    画成一样会让人以为出了问题」），`style.css` 里 `.chain-step.skipped`
+    也早就备着色，**可模板从来没发过这个类**。
+    """
+    groups = group_flow(latest_run_rows(data_dir), steps=STEPS)
+    return groups[0] if groups else None
 
 
 def load_push_templates() -> dict[str, str]:

@@ -29,11 +29,16 @@
 
     <div class="pane" data-pane="chart">
       <h2>最近一次</h2>
-      {% if latest %}
-        {% set reached = latest | map(attribute="step") | list %}
+      {% if chart %}
+        {# **三种状态，不是两种。** 原先这里自己在模板里算 `reached`，
+           没记录的一律画成「还没走到」——于是「审核」那种「没新建分类所以
+           不跑」和真「卡在前一步」长得一模一样，看的人会以为出了问题。
+           `group_flow` 早把 `skipped`（流程越过了它）与 `todo`（还没走到）
+           分开算好了，`.chain-step.skipped` 的样式也早就备着。 #}
         <div class="chain">
           {% for step in steps %}
-            {% set state = 'done' if step in reached else 'todo' %}
+            {% set state = 'done' if step in chart.reached
+                            else ('skipped' if step in chart.skipped else 'todo') %}
             <div class="chain-step {{ state }}">
               {% if state == 'done' %}
                 <svg class="mark" viewBox="0 0 16 16" role="img">
@@ -44,13 +49,23 @@
                   <path d="M4.8 8.3l2.1 2.1 4.3-4.5" fill="none" stroke="var(--on-accent)"
                         stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/>
                 </svg>
+                <span>{{ step }}</span>
+              {% elif state == 'skipped' %}
+                <svg class="mark" viewBox="0 0 16 16" role="img">
+                  <title>{{ step }}：这一步没跑（流程越过了它，不是卡住）</title>
+                  <circle cx="8" cy="8" r="6.3" fill="none" stroke="currentColor"
+                          stroke-width="1.4" stroke-dasharray="2.5 2"/>
+                  <path d="M5.6 8h4.8" fill="none" stroke="currentColor"
+                        stroke-width="1.4" stroke-linecap="round"/>
+                </svg>
+                <span>{{ step }}（没跑）</span>
               {% else %}
                 <svg class="mark" viewBox="0 0 16 16" role="img">
                   <title>{{ step }}：还没走到</title>
                   <circle cx="8" cy="8" r="6.3" fill="none" stroke="currentColor" stroke-width="1.4"/>
                 </svg>
+                <span>{{ step }}</span>
               {% endif %}
-              <span>{{ step }}</span>
             </div>
             {% if not loop.last %}<div class="chain-line"></div>{% endif %}
           {% endfor %}

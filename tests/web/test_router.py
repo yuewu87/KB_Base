@@ -190,6 +190,26 @@ def test_flow_page_renders_chain(client, vault):
     assert "提交" in body            # 链上没走到的那几步也要画出来
 
 
+def test_flow_chain_tells_skipped_apart_from_todo(client, vault):
+    """**「没触发」和「还没走到」要画得不一样。**
+
+    `group_flow` 早就能把两者分开（它自己的 docstring 写着「画成一样会让人
+    以为出了问题」），`style.css` 里 `.chain-step.skipped` 也备着色——**可
+    模板从来没发过这个类**：它在模板里自己算了一遍 `reached`，没记录的一律
+    画成「还没走到」。于是「审核」那种「没新建分类所以不跑」和真「卡在前
+    一步」长得一模一样。
+    """
+    from kb.core.flow import emit, set_run
+
+    set_run("20260917-1400")
+    emit("投递", "投了")
+    emit("落盘", "落了")          # 中间的规划 / 校验 / 审核被越过
+
+    body = client.get("/flow").text
+    assert "chain-step skipped" in body, "被越过的那几步没画成「没触发」"
+    assert "chain-step todo" in body, "后面的步骤还得是「还没走到」"
+
+
 def test_flow_chain_uses_svg_marks_not_text_symbols(client, vault):
     """界面里不许出现 emoji / 类 emoji 符号——标记一律内联 SVG。"""
     from kb.core.flow import emit, set_run

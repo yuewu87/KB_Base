@@ -49,6 +49,7 @@ from kb.web.data import (
     box_label,
     group_flow,
     journal_days,
+    latest_flow,
     load_push_templates,
     read_journal,
     read_runtime,
@@ -426,6 +427,9 @@ def build_router(
                 day=day,
                 groups=group_flow(read_flow_day(data_dir, day), steps=STEPS),
                 steps=STEPS,
+                # 流程图那一栏要**分三类**（走过 / 没跑 / 还没走到），
+                # 不能在模板里自己算 `reached`——那样后两者会画成一样。
+                chart=latest_flow(data_dir),
                 latest=latest_run_rows(data_dir),
             ),
         )
