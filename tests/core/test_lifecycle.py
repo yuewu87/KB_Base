@@ -1,6 +1,7 @@
 """库的生命周期：状态推断、路径体检、搬家、移除。"""
 
 import os
+from pathlib import Path
 
 import pytest
 
@@ -354,3 +355,183 @@ def test_remove_reports_a_locked_vault_instead_of_pretending(tmp_path, monkeypat
     assert result["vault_removed"] is False
     assert result["failed"]
     assert vault.exists()                # 名字被改回去了
+
+
+# ---------- 修 ①：动手之前先自验这个路径 ----------
+#
+# 和上面 `test_remove_refuses_a_dir_that_is_not_a_vault` 同一类，补的是那个
+# 判据（`.git` 在不在）盖不住的两条：**相对路径**，以及**源这一侧**。
+# 两个函数最后都要 `_rmtree` 拿到手的那棵树，而拿到手的只是 `.env` 里那个
+# 字符串——`config._build` 做的是 `Path(vault_raw)`，不 resolve、不判是不是库。
+
+
+def test_migrate_refuses_a_source_that_is_not_a_vault(tmp_path):
+    """搬走一个不相干的目录 = 把它删掉。
+
+    原先这个闸只在端点的 `_check_migration` 里，而 `_rmtree(source)` 是在
+    `migrate_vault` 里跑的。判据落两层照着「非空目标」那条既有做法来。
+    """
+    plain = tmp_path / "我的文档"
+    plain.mkdir()
+    (plain / "重要.txt").write_text("别搬我", encoding="utf-8")
+
+    with pytest.raises(LifecycleError, match="不是一个知识库"):
+        migrate_vault(plain, tmp_path / "新")
+
+    assert (plain / "重要.txt").is_file()
+    assert not (tmp_path / "新").exists()
+
+
+def test_migrate_refuses_a_relative_source(tmp_path, monkeypatch):
+    """**`.env` 里手填 `KB_VAULT_PATH=.` 会把整个 KN_Base 仓库删掉。**
+
+    服务进程的 cwd 是 `PROJECT_ROOT`（`spawn_service` 传的 `cwd=`），那儿正好
+    有 `.git`——于是 `.` 一路通过 `exists()` 和 `vault_ready()`，整个仓库被
+    当成库拷到目标，紧接着 `_rmtree(source)` 把它清空，响应还是一句轻描淡写的
+    「旧库没删干净」。`settings._vault_path_problem` 早就写明了这一手，只是
+    `/setup/*` 从不走 `settings.validate`。
+    """
+    monkeypatch.chdir(tmp_path)
+    (tmp_path / ".git").mkdir()
+    (tmp_path / "src").mkdir()
+    (tmp_path / "src" / "kb.py").write_text("x", encoding="utf-8")
+
+    with pytest.raises(LifecycleError, match="相对路径"):
+        migrate_vault(Path("."), tmp_path / "新")
+
+    assert (tmp_path / ".git").is_dir()
+    assert (tmp_path / "src" / "kb.py").is_file()
+    assert not (tmp_path / "新").exists()
+
+
+def test_remove_refuses_a_relative_path(tmp_path, monkeypatch):
+    """同一个 `.` 打到移除这条路上，原先抛的是 `Path(".").with_name("")` 的
+    裸 `ValueError`——端点接不住，用户拿到 500 而不是「你路径填错了」。"""
+    monkeypatch.chdir(tmp_path)
+    (tmp_path / ".git").mkdir()
+    (tmp_path / "重要.txt").write_text("别删我", encoding="utf-8")
+
+    with pytest.raises(LifecycleError, match="相对路径"):
+        remove_vault(Path("."), tmp_path / "data")
+
+    assert (tmp_path / "重要.txt").is_file()
+    assert (tmp_path / ".git").is_dir()
+
+
+def test_migrate_refuses_a_target_that_is_a_file(tmp_path):
+    """目标填成一个**已存在的文件**：`any(target.iterdir())` 抛的是
+    `NotADirectoryError`，那是 `OSError` 不是 `LifecycleError`，端点的
+    `except` 接不住 → 500。
+
+    而界面正把用户往这条路上推：`/setup/check` 对同一个路径回的是
+    「存在、能写、里面一个条目都没有」。
+    """
+    source = _make_vault(tmp_path / "旧")
+    target = tmp_path / "notes.md"
+    target.write_text("我是一个文件", encoding="utf-8")
+
+    with pytest.raises(LifecycleError, match="文件"):
+        migrate_vault(source, target)
+
+    assert target.read_text(encoding="utf-8") == "我是一个文件"
+    assert (source / "计算机" / "笔记0.md").is_file()
+
+
+def test_migrate_wraps_a_source_it_cannot_measure(tmp_path, monkeypatch):
+    """量源（`_tree_size`）那一步原先在 `try` **外面**：`rglob` 与 `p.stat()`
+    之间文件正好没了（被整理、被编辑器重写）抛的就是裸 `OSError` → 500，
+    而那时源和目标都一根汗毛没动。包进 `try` 之后它和「拷贝失败」同路。
+    """
+    source = _make_vault(tmp_path / "旧")
+
+    def boom(path):
+        raise OSError(2, "量到一半文件没了")
+
+    monkeypatch.setattr(lifecycle, "_tree_size", boom)
+
+    with pytest.raises(LifecycleError, match="量到一半文件没了"):
+        migrate_vault(source, tmp_path / "新")
+
+    assert (source / "计算机" / "笔记0.md").is_file()
+
+
+# ---------- 修 ①：移除失败时如实汇报 ----------
+
+def test_remove_reports_a_partially_deleted_vault_honestly(tmp_path, monkeypatch):
+    """改名改回去成功 ≠「什么都没少」。
+
+    `_rmtree` 是**边走边删**的：`scandir` 顺序里前几个条目可能已经删掉了，
+    它才在某个被占着句柄的文件上失败。「改回去」恢复的是名字，不是内容。
+    """
+    vault = _make_vault(tmp_path / "库")
+
+    def refuse(*a, **k):
+        raise OSError(13, "Permission denied")
+
+    monkeypatch.setattr(lifecycle.shutil, "rmtree", refuse)
+
+    result = remove_vault(vault, tmp_path / "data")
+
+    assert result["vault_removed"] is False
+    assert any("删了一部分" in f for f in result["failed"])
+
+
+def test_remove_survives_a_rename_back_that_also_fails(tmp_path, monkeypatch):
+    """改名改回去这一步自己也会失败——那个进程既然占着库里的文件，Windows
+    上连目录改名都不会放行（实测 `WinError 5`）。
+
+    原先它是 `except OSError` 块里一句裸调，一抛就从 `remove_vault` 里逃出去，
+    端点的 `except LifecycleError` 接不住 → 500；而库已经躺在那个
+    `.库.deleting-<时间戳>` 的残骸里，谁都没被告知。
+    """
+    vault = _make_vault(tmp_path / "库")
+
+    def refuse_rmtree(*a, **k):
+        raise OSError(13, "Permission denied")
+
+    monkeypatch.setattr(lifecycle.shutil, "rmtree", refuse_rmtree)
+
+    real_rename = lifecycle.os.rename
+
+    def rename_fails_back(src, dst):
+        if Path(dst) == vault:
+            raise OSError(5, "拒绝访问")
+        real_rename(src, dst)
+
+    monkeypatch.setattr(lifecycle.os, "rename", rename_fails_back)
+
+    result = remove_vault(vault, tmp_path / "data")      # 不许抛
+
+    assert result["vault_removed"] is False
+    assert any("deleting-" in f for f in result["failed"])
+    assert any("删了一部分" in f for f in result["failed"])
+
+
+def test_remove_says_what_it_deleted_when_the_vault_survives(tmp_path, monkeypatch):
+    """库没删掉，`data/chats` / `data/logs` / `state.json` 照样删了——
+    **那是本来的设计**（逐项独立删，spec §6.2 / §9.4），但汇报里得说。
+
+    `data/chats` 是这份数据里唯一不可从 git 恢复的（会话历史），而端点补的
+    那句「笔记目录没删掉，所以还指着它」读起来是「删除失败、什么都没少」。
+    """
+    vault = _make_vault(tmp_path / "库")
+    data = tmp_path / "data"
+    (data / "chats").mkdir(parents=True)
+    (data / "chats" / "c.json").write_text("{}", encoding="utf-8")
+
+    # **只让库那棵树删不掉**（那个待删的改名目录），`data/chats` 照常删得掉
+    # ——无差别地让 `rmtree` 一律抛，测的就是「chats 也删不掉」那条路了。
+    real = lifecycle.shutil.rmtree
+
+    def refuse_only_the_graveyard(path, *a, **k):
+        if ".deleting-" in Path(path).name:
+            raise OSError(13, "Permission denied")
+        real(path, *a, **k)
+
+    monkeypatch.setattr(lifecycle.shutil, "rmtree", refuse_only_the_graveyard)
+
+    result = remove_vault(vault, data)
+
+    assert result["vault_removed"] is False
+    assert not (data / "chats").exists()            # 确实删了
+    assert any("chats" in n for n in result["notes"])   # 也确实说了

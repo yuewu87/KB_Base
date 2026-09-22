@@ -63,8 +63,17 @@ class LifecycleError(RuntimeError):
 def vault_ready(vault_path: Path | None) -> bool:
     """库真的建好了吗。**这个判据只有这一份。**
 
+    三条同时要：**配了**、**绝对路径**、**那儿有 `.git`**。
+
     认 **`.git` 存在**，不是「目录存在」——路径配了但那儿没库，是最容易
     骗过界面的一种状态，理由见 `settings._vault_path_problem`。
+
+    认**绝对路径**：`config._build` 只做 `Path(vault_raw)`，不 resolve，于是
+    `.env` 里一个 `.` 会按**服务的 cwd** 探（`spawn_service` 用
+    `cwd=PROJECT_ROOT`），而那儿正好有 KN_Base 仓库自己的 `.git`——状态接口
+    因此报「已初始化」，投递往项目仓库里写草稿，迁移把整个仓库拷走再删掉。
+    `settings._vault_path_problem` 早就写明这一手，只是 `/setup/*` 从不走
+    `settings.validate`，判据得在这儿再落一道。
 
     ⚠️ **别在任何地方再写一遍 `bool(p and (p / ".git").exists())`。**
     这条判据本来散在四处（`/setup/state`、`/setup/init` 的「已经
@@ -82,7 +91,47 @@ def vault_ready(vault_path: Path | None) -> bool:
     库的问题**，同一个 `.git` 只是恰好都出现在两句话里。并进来会把
     两个不同的判断塞进一个名字里，正是上面说的那种假统一。
     """
-    return bool(vault_path and (vault_path / ".git").exists())
+    return bool(
+        vault_path
+        and vault_path.is_absolute()
+        and (vault_path / ".git").exists()
+    )
+
+
+def vault_path_problem(vault_path: Path) -> str | None:
+    """这个路径能不能当「我们的库」来动。不能就返回一句人话，能返回 `None`。
+
+    **三个入口共用这一份**：`migrate_vault`、`remove_vault`、
+    `router._check_migration` 判的是同一件事，各写一份的话文案迟早分岔，
+    而用户看到哪一句取决于他点的是哪个按钮。
+    （`/setup/state` 不走它——那个端点只回状态，不该报错。）
+
+    **不存在的路径不算问题**——留给调用方自己判：移除要如实汇报「本来就不在
+    了」，搬家得当场报错，两边处理不一样。
+
+    两条理由：
+    - **必须绝对路径。** `config._build` 只做 `Path(vault_raw)`，不 resolve，
+      于是 `.env` 里一个 `.` 会按**服务的 cwd** 探（`spawn_service` 用
+      `cwd=PROJECT_ROOT`），而那儿正好有 KN_Base 仓库自己的 `.git`——于是
+      迁移会把整个仓库拷走再删掉。`settings._vault_path_problem` 早写明了
+      这一手，只是 `/setup/*` 从不走 `settings.validate`。
+      （`vault_ready` 也认绝对路径，但光靠它只会回一句「不是一个知识库」——
+      那儿明明有 `.git`，用户照着查会查错方向。）
+    - **必须是个库**（`vault_ready`）：路径填歪了、那儿是个普通目录时，
+      删掉/搬走的是别人的东西。
+    """
+    if not vault_path.is_absolute():
+        return (
+            f"{vault_path} 是相对路径，不能当库用——生效位置会绑到服务的"
+            "启动方式上，一个 `.` 就能把整个项目仓库当成库删掉。"
+            "请把它填成绝对路径"
+        )
+    if vault_path.exists() and not vault_ready(vault_path):
+        return (
+            f"{vault_path} 不是一个知识库（那儿没有 .git），"
+            "这个操作只动库本身、不碰别的目录。先确认设置里的知识库路径填对了"
+        )
+    return None
 
 
 # ------------------------------------------------------------ 删树的公用件
@@ -189,17 +238,36 @@ def migrate_vault(source: Path, target: Path) -> dict:
     `LifecycleError`，端点的 `except LifecycleError` 接不住，界面按「检查」
     的建议选一个现成的空文件夹就得到一句 500，**重试还是 500**。
     """
+    # **源也必须先自验：这个函数最后会 `_rmtree(source)` 把整棵源树删掉**，
+    # 而它拿到手的只是 `.env` 里那个字符串（`config._build` 只做
+    # `Path(vault_raw)`，不 resolve、不判是不是目录）。判据在
+    # `vault_path_problem` 里，和移除、和端点的 `_check_migration` 共用一份。
+    problem = vault_path_problem(source)
+    if problem:
+        raise LifecycleError(problem)
+
     # 非空目标由调用方 `_check_migration` 先挡（spec 5.1），这里再兜一道：
     # `dirs_exist_ok=True` 会**静默合并**，而合并进一个已有的库是灾难。
-    # **这道闸在 `try` 之外**——它拦的是「调用方用错了」，不是「拷贝出错」，
-    # 绝不能走回滚：回滚那句 `_rmtree(target)` 会把目标里**原有的东西一起
-    # 删掉**，那是数据损失，比 400 严重得多。
-    if target.exists() and any(target.iterdir()):
+    #
+    # **目标是已存在的文件**要单独判：`any(target.iterdir())` 对它抛的是
+    # `NotADirectoryError`，那是 `OSError` 不是 `LifecycleError`，端点接不住
+    # → 500，而 `/setup/check` 对这个路径回的是「存在、能写、里面没有条目」，
+    # 正把用户往这条路上推。
+    if target.exists() and not target.is_dir():
+        raise LifecycleError(
+            f"目标 {target} 是一个文件，不是目录——搬家要的是一个空目录"
+        )
+    if target.is_dir() and any(target.iterdir()):
         raise LifecycleError(f"目标非空（{target}），换一个空的目录")
 
-    files, size = _tree_size(source)
-
+    # **上面三道闸都在 `try` 之外**——它们拦的是「调用方用错了」，不是
+    # 「拷贝出错」，绝不能走回滚：回滚那句 `_rmtree(target)` 会把目标里
+    # **原有的东西一起删掉**，那是数据损失，比 400 严重得多。
     try:
+        # **量源这一步也在 `try` 里。** 它会 `rglob` + `stat()` 走一整棵树，
+        # 中间文件被人删掉（整理正好落盘、编辑器重写）就抛裸 `OSError`——
+        # 在 `try` 外面时端点接不住，用户拿到 500，而那时源和目标都还没动过。
+        files, size = _tree_size(source)
         shutil.copytree(source, target, dirs_exist_ok=True)
         got_files, got_size = _tree_size(target)
         if (got_files, got_size) != (files, size):
@@ -214,10 +282,11 @@ def migrate_vault(source: Path, target: Path) -> dict:
         #
         # `ignore_errors=True`：这一步是**回滚**，删不干净也不能盖掉真正的
         # 错误——用户要看见的是「拷完对不上」或「磁盘满了」，不是「回滚没删掉」。
+        # （空目标被这一句删掉是正常的：调用方那边那个目录本来就是空的。）
         _rmtree(target, ignore_errors=True)
         if isinstance(exc, LifecycleError):
             raise
-        raise LifecycleError(f"拷贝失败：{exc}") from exc
+        raise LifecycleError(f"搬家失败：{exc}") from exc
 
     notes: list[str] = []
 
@@ -274,16 +343,15 @@ def remove_vault(vault_root: Path | None, data_dir: Path) -> dict:
     # **闸必须在真动手之前。** 这个函数会把拿到的路径整个删掉，而调用方
     # 给的只是 `.env` 里那个字符串——填错一个字母就删掉一个不相干的目录。
     # 界面上的确认框是**界面礼貌**，拦不住 `curl` 和会话层 AI，所以判据
-    # 落在最里面的这一层。判据用 `vault_ready`，全仓只此一份。
+    # 落在最里面的这一层。判据用 `vault_path_problem`，全仓只此一份。
     #
-    # ⚠️ 必须判 `exists()`：`vault_ready` 对不存在的路径也返回 False，
-    # 而「目录本来就不在了」是**合法**的（下面走 `notes` 汇报），
-    # 不能把它变成报错。
-    if vault_root is not None and vault_root.exists() and not vault_ready(vault_root):
-        raise LifecycleError(
-            f"{vault_root} 不是一个知识库（那儿没有 .git），移除只删库、不删别的目录。"
-            "先确认设置里的知识库路径填对了"
-        )
+    # ⚠️ 判据里**不含「路径不存在」**：`vault_ready` 对不存在的路径也返回
+    # False，而「目录本来就不在了」是**合法**的（下面走 `notes` 汇报），
+    # 不能把它变成报错——`vault_path_problem` 的 docstring 里写着这条分工。
+    if vault_root is not None:
+        problem = vault_path_problem(vault_root)
+        if problem:
+            raise LifecycleError(problem)
 
     if vault_root is None:
         pass
@@ -309,9 +377,28 @@ def remove_vault(vault_root: Path | None, data_dir: Path) -> dict:
                 _rmtree(graveyard)
                 removed.append(str(vault_root))
             except OSError as exc:
-                os.rename(graveyard, vault_root)      # 改回去，失败可逆
+                # **改名改回去自己也会失败。** 那个进程既然占着库里的东西，
+                # Windows 上连目录改名都不放行（实测 `WinError 5`）。原先这行
+                # 是 `except` 块里的一句裸调，一抛就逃出 `remove_vault`——端点
+                # 的 `except LifecycleError` 接不住，用户拿到 500，而库的残骸
+                # 躺在 `.库.deleting-<时间戳>` 底下，谁都没被告知。
                 vault_removed = False
-                failed.append(f"{vault_root}（{exc.strerror or exc}）")
+                try:
+                    os.rename(graveyard, vault_root)
+                except OSError as back_exc:
+                    failed.append(
+                        f"{vault_root}（{exc.strerror or exc}）——**已经删了一部分**，"
+                        f"想改回原名也没成功（{back_exc.strerror or back_exc}），"
+                        f"剩下的残骸在 {graveyard}"
+                    )
+                else:
+                    # **名字回来了不等于内容回来了。** `_rmtree` 是边走边删的：
+                    # `scandir` 顺序里前几个条目可能已经删掉，它才在某个被占着
+                    # 句柄的文件上失败。原先那句只说「没删掉」，读起来像库完好。
+                    failed.append(
+                        f"{vault_root}（{exc.strerror or exc}）——**已经删了一部分**，"
+                        "不是原样，笔记可能有缺，先看一遍再决定怎么办"
+                    )
 
     for name in ("chats", "logs"):
         item = data_dir / name
@@ -338,6 +425,15 @@ def remove_vault(vault_root: Path | None, data_dir: Path) -> dict:
             removed.append(str(state))
         except OSError as exc:
             failed.append(f"{state}（{exc.strerror or exc}）")
+
+    # **库没删成的时候，得说清其余部分照样删了。** 逐项独立删是本来的设计
+    # （spec §6.2 / §9.4，`state.json` 与 `data/logs` 各删各的），但端点补的
+    # 那句「笔记目录没删掉，所以还指着它」很容易被读成「删除失败、什么都没少」
+    # ——而 `data/chats` 是这份数据里唯一不可从 git 恢复的（会话历史）。
+    if not vault_removed and removed:
+        notes.append(
+            "库没删掉，但这些已经删了：" + "、".join(removed) + "。这部分找不回来"
+        )
 
     return {
         "removed": removed,

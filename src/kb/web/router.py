@@ -35,6 +35,7 @@ from kb.core.lifecycle import (
     check_path,
     migrate_vault,
     remove_vault,
+    vault_path_problem,
     vault_ready,
 )
 from kb.core.vault import list_domains, list_drafts, list_notes
@@ -588,7 +589,13 @@ def build_router(
         一模一样。"""
         notes = 0
         drafts = 0
-        if vault_path is not None and vault_path.exists():
+        # **`vault_ready` 为假时一个都不数。** 原先判的是 `exists()`：`.env`
+        # 填成一个文件时（手滑打错一个字符）`list_notes` 的 `iterdir()` 当场抛
+        # `NotADirectoryError`，而 `/setup/state` 是每个页面首屏、还有 busy
+        # 轮询都要打的端点——它 500 就是整块界面死掉，唯一的出路是再去手改
+        # `.env`。也不能只把 `exists()` 换成 `is_dir()`：一个普通目录会被数出
+        # 一堆「笔记」吓用户，而 `remove_vault` 根本不会碰它。
+        if vault_ready(vault_path):
             notes = len(list_notes(vault_path))
             drafts = len(list_drafts(vault_path))
         chats = 0
@@ -606,10 +613,13 @@ def build_router(
         这里别再手写一遍。
         """
         vault_path = get_cfg().vault_path
+        ready = vault_ready(vault_path)
         return {
-            "initialized": vault_ready(vault_path),
+            "initialized": ready,
             "vault_path": str(vault_path) if vault_path else "",
-            "domains": list_domains(vault_path) if vault_path else [],
+            # **不 ready 就不读**：路径填歪了、填成一个文件、或写成相对路径
+            # 时，`list_domains` 读的是别人的目录（或者直接 500）。
+            "domains": list_domains(vault_path) if ready else [],
             "counts": _counts(vault_path),
             "busy": busy.what,
         }
@@ -730,19 +740,23 @@ def build_router(
         """迁移的前置检查。不过就抛 400，一句一条。"""
         if not target.is_absolute():
             raise HTTPException(status_code=400, detail="目标要填绝对路径")
+        # **判据和 `/setup/state` 一致**（都在 `lifecycle.vault_ready`）：路径
+        # 填歪了、那儿是个普通目录时，只判 `exists()` 的话会把一个不相干的
+        # 目录当成库搬走。（`migrate_vault` 里另有一道，那边拦的是「绕过这个
+        # 端点直接调它」。）
+        #
+        # **必须过 `vault_path_problem`，不能只判 `vault_ready`。** 判据本身
+        # 是同一份，`vault_ready` 对相对路径也回 False，但文案是「不是一个
+        # 知识库」——那儿明明有 `.git`（服务 cwd 底下那份），用户照着查会查错
+        # 方向；而且这一步得排在下面「在不在」之前，否则 `.env` 里写个不存在
+        # 的相对路径时，先甩出来的是一句「当前库不在了」，同样引错方向。
+        problem = vault_path_problem(source)
+        if problem:
+            raise HTTPException(status_code=400, detail=problem)
         if not source.exists():
             raise HTTPException(
                 status_code=400,
                 detail=f"当前库不在了：{source}。这本身就不正常，先查一下",
-            )
-        # **判据和 `/setup/state` 一致**（都在 `lifecycle.vault_ready`）：路径
-        # 填歪了、那儿是个普通目录时，只判 `exists()` 的话会把一个不相干的
-        # 目录当成库搬走。`migrate_vault` 里没有对应的闸——它拿到的是已经
-        # 过完这一道的 `source`，闸设在这儿就够了。
-        if not vault_ready(source):
-            raise HTTPException(
-                status_code=400,
-                detail=f"{source} 不是一个知识库（那儿没有 .git），先确认设置里的知识库路径填对了",
             )
         if target == source:
             raise HTTPException(status_code=400, detail="目标就是当前库，不用搬")
@@ -751,7 +765,16 @@ def build_router(
                 status_code=400,
                 detail=f"{target} 在当前库里面——搬进去会把库搬进自己肚子里",
             )
-        if target.exists() and any(target.iterdir()):
+        if target.exists() and not target.is_dir():
+            # **目标是文件**要单独判：`any(target.iterdir())` 对它抛的是
+            # `NotADirectoryError`，那是 `OSError` 不是 `LifecycleError`，
+            # 这句 `except` 接不住 → 500。而 `/setup/check` 对同一个路径回的是
+            # 「存在、能写、里面一个条目都没有」，正把用户往这条路上推。
+            raise HTTPException(
+                status_code=400,
+                detail=f"{target} 是一个文件，不是目录——搬家的目标得是个空目录",
+            )
+        if target.is_dir() and any(target.iterdir()):
             # **「非空」= 有任何一个条目**，不区分是不是库。迁移做完就把目标
             # 当成新库了，里面原有的任何东西都会混进笔记树——连一个
             # `.DS_Store` 都算。
@@ -823,7 +846,22 @@ def build_router(
             except LifecycleError as exc:
                 raise HTTPException(status_code=400, detail=str(exc)) from exc
             if result["vault_removed"]:
-                unbind_vault()
+                # **写 `.env` 也会失败**：编辑器或杀软占着那个文件、文件只读。
+                # 它原先裸在这儿，抛出去就是 500——而库已经删干净了、`.env`
+                # 还指着那个不存在的路径，用户连「去手改 `.env`」这句话都拿不到。
+                # 写法照抄上面 `setup_migrate` 那段。
+                try:
+                    unbind_vault()
+                except OSError as exc:
+                    raise HTTPException(
+                        status_code=400,
+                        detail=(
+                            f"库已经删干净了（{vault_root}），但写 `.env` 没成功"
+                            f"（{exc.strerror or exc}）。请把 `.env` 里的 "
+                            "KB_VAULT_PATH 手工清空——不清的话服务还指着那个"
+                            "已经不存在的路径"
+                        ),
+                    ) from exc
             else:
                 # **库还在就别解绑。** 否则界面上显示「还没有知识库」而笔记
                 # 还躺在原地——正是本设计要消灭的那种状态。

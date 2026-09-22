@@ -1,5 +1,7 @@
 """知识库生命周期的端点。走真 `init_vault` 的库，不是手搓的半骨架。"""
 
+import shutil
+
 import pytest
 from fastapi.testclient import TestClient
 
@@ -459,3 +461,97 @@ def test_check_reports_an_existing_vault(client, initialized_vault):
 def test_check_with_an_empty_path_is_not_an_error(client):
     """空输入不该 422——用户刚清空输入框就会打一次。"""
     assert client.get("/setup/check", params={"path": ""}).status_code == 200
+
+
+# ---------- 修 ①：`.env` 填歪了也要有下文，不许 500 ----------
+
+def _client_for(env, tmp_path):
+    """按 `.env` 现读造一个客户端。
+
+    这几条验的是**服务重读 `.env`** 之后的行为，所以不能用 `app` 夹具里那份
+    固定的 `cfg`——它写死了 `vault_path=None`。
+    """
+    data = tmp_path / "data"
+    data.mkdir(exist_ok=True)
+    return TestClient(
+        create_app(reload_config(env), llm=FakeLLM([]), data_dir=data,
+                   env_file=env)
+    )
+
+
+def test_state_survives_a_vault_path_that_points_at_a_file(env, tmp_path):
+    """`KB_VAULT_PATH` 指到一个**文件**（手滑打错一个字符）。
+
+    `/setup/state` 是每个页面首屏、还有 busy 轮询都要打的端点。`list_domains`
+    只判了 `exists()`，紧跟的 `iterdir()` 当场抛 `NotADirectoryError` → 500，
+    于是整块界面死掉，而唯一的出路是再去手改 `.env`——正是这次改动要消灭的
+    那种状态。
+    """
+    notes = tmp_path / "notes.md"
+    notes.write_text("x", encoding="utf-8")
+    env.write_text(
+        "KB_LLM_API_KEY=k\nKB_LLM_BASE_URL=http://x\nKB_LLM_MODEL=m\n"
+        f"KB_VAULT_PATH={notes}\n",
+        encoding="utf-8",
+    )
+
+    resp = _client_for(env, tmp_path).get("/setup/state")
+
+    assert resp.status_code == 200
+    got = resp.json()
+    assert got["initialized"] is False            # 一个文件不是库
+    assert got["domains"] == []
+    assert got["counts"]["notes"] == 0
+
+
+def test_migrate_refuses_a_relative_vault_path(env, tmp_path, monkeypatch):
+    """**`.env` 手填 `KB_VAULT_PATH=.` 时，一句 `curl -X POST /setup/migrate`
+    就能把整个 KN_Base 仓库删掉。**
+
+    端点拿到的「源」是 `vault()` 给的，也就是 `.env` 里那个字符串——
+    **从不走 `settings.validate`**，所以闸只能设在 core 里。而服务进程的 cwd
+    是 `PROJECT_ROOT`（`spawn_service` 传的），那儿正好有 `.git`，于是
+    `exists()` 与 `vault_ready()` 两道判据全过。
+    """
+    monkeypatch.chdir(tmp_path)
+    (tmp_path / ".git").mkdir()
+    (tmp_path / "重要.txt").write_text("别搬我", encoding="utf-8")
+    env.write_text(
+        "KB_LLM_API_KEY=k\nKB_LLM_BASE_URL=http://x\nKB_LLM_MODEL=m\n"
+        "KB_VAULT_PATH=.\n",
+        encoding="utf-8",
+    )
+    # 目标放在**源外面**：闸要是漏了（RED 那一轮），`copytree` 会在源里面
+    # 造一个目标目录，源又正在被拷——那就递归了。
+    target = tmp_path.parent / "新库"
+    shutil.rmtree(target, ignore_errors=True)      # 上一轮 RED 跑剩的
+
+    resp = _client_for(env, tmp_path).post(
+        "/setup/migrate", json={"target": str(target)}
+    )
+
+    assert resp.status_code == 400
+    assert "相对路径" in resp.json()["detail"]
+    assert (tmp_path / "重要.txt").is_file()
+    assert (tmp_path / ".git").is_dir()
+
+
+def test_remove_reports_when_the_env_cannot_be_rewritten(
+        initialized_vault, env, tmp_path, monkeypatch):
+    """库删干净了，`unbind_vault()` 写 `.env` 却失败（编辑器或杀软占着文件、
+    文件只读）——它原先裸在 `try` 外面，用户拿到 500，而库已经没了、`.env`
+    还指着那个不存在的路径，连「去手改 `.env`」这句话都没有。
+
+    对照 `setup_migrate`：它专门兜住了同样的失败，给的是「库已经搬到 X 了，
+    但写 `.env` 没过校验」这种能照着做的 400。
+    """
+    def refuse(*a, **k):
+        raise PermissionError(13, "拒绝访问")
+
+    monkeypatch.setattr("kb.core.settings.write_env", refuse)
+
+    resp = _client_for(env, tmp_path).post("/setup/remove")
+
+    assert resp.status_code == 400
+    assert "手工" in resp.json()["detail"]
+    assert str(initialized_vault) in resp.json()["detail"]
