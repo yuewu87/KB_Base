@@ -47,6 +47,52 @@ def test_organize_is_rejected_while_something_else_runs(client, what, label):
         busy.release()
 
 
+@pytest.mark.parametrize("what,label", [("migrate", "迁移"), ("remove", "移除")])
+def test_web_chat_form_is_rejected_while_something_else_runs(client, what, label):
+    """网页对话表单（`POST /`）也要占锁——**它整轮都可能在写库**。
+
+    对话层能触发「整理」动作（`api/http.py` 的 `_chat_organize_fn`），
+    所以半路迁移期间放它进来，落盘的就是一个搬了一半的库。
+    """
+    busy = client.app.state.busy
+    assert busy.acquire(what) is True
+    try:
+        resp = client.post("/", data={"message": "x"}, follow_redirects=False)
+        assert resp.status_code == 409
+        assert label in resp.json()["detail"]
+    finally:
+        busy.release()
+
+
+def test_chat_endpoint_is_rejected_while_something_else_runs(client):
+    """`/chat`（会话层 AI 走的 JSON 端点）同理。"""
+    busy = client.app.state.busy
+    assert busy.acquire("migrate") is True
+    try:
+        resp = client.post("/chat", json={"message": "x"})
+        assert resp.status_code == 409
+        assert "迁移" in resp.json()["detail"]
+    finally:
+        busy.release()
+
+
+def test_web_push_shares_the_same_lock(client):
+    """网页投递与服务端整理**必须是同一把锁**。
+
+    `create_app` 各造一把的话，网页这边「正在迁移」挡住了投递，服务端
+    `/organize` 却照样把半截笔记写进库——整把锁等于没上。这条就是钉
+    `app.include_router(..., busy=busy, ...)` 传的是**那个实例**本身。
+    """
+    busy = client.app.state.busy
+    assert busy.acquire("migrate") is True
+    try:
+        resp = client.post("/new", data={"content": "x"}, follow_redirects=False)
+        assert resp.status_code == 409
+        assert "迁移" in resp.json()["detail"]
+    finally:
+        busy.release()
+
+
 @pytest.mark.parametrize("path,data", [
     ("/drop", {"ids": ["x"]}),
     ("/inbox", None),
@@ -63,6 +109,8 @@ def test_reads_are_not_blocked_by_busy(client, path, data):
     assert busy.acquire("migrate") is True
     try:
         resp = client.get(path) if data is None else client.post(path, json=data)
-        assert resp.status_code != 409
+        # **写死 200，不写「不是 409」**——后者对 500 也放行，
+        # 而这个夹具下这几个端点都该正常返回：读照常才叫读照常。
+        assert resp.status_code == 200
     finally:
         busy.release()
