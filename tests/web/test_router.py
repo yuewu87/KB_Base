@@ -711,12 +711,15 @@ def test_readonly_fields_show_the_effective_values(tmp_path):
     的语义就没了。于是这一栏在这份 `.env` 下渲染成空白，是**新契约下的正确
     行为**，不是坏了。「有没有库、路径是哪个」该在界面上怎么显示由
     `settings_context` 的「一屏两态」负责（Task 6），不在这一条里。
+
+    配置里那个 vault 路径也跟着去掉了（原来是 `tmp_path / "我的库"`）：没有
+    任何断言核它，留着读的人会以为它还验着什么。
     """
     env = tmp_path / ".env"
     env.write_text(
         "KB_LLM_API_KEY=k\nKB_LLM_BASE_URL=u\nKB_LLM_MODEL=m\n", encoding="utf-8"
     )
-    cfg = Config("k", "u", "m", tmp_path / "我的库", None)
+    cfg = Config("k", "u", "m", tmp_path, None)
 
     body = TestClient(
         create_app(cfg, data_dir=tmp_path, env_file=env)

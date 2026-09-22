@@ -346,9 +346,35 @@ def test_vault_path_rejects_empty(tmp_path):
 
     那会留下笔记、会话、日志在原地，而界面上显示成「还没有知识库」——
     痕迹还在、界面说没了，正是本设计要消灭的那种状态。解绑走「移除知识库」。
+
+    **钉的是「走的哪条出口」，不是「有没有报错」。** 原来写
+    `match="移除知识库"`，可路径分支的文案里也含这四个字（「想从零建先
+    『移除知识库』」）——实现要是退化成「空值走路径分支」（计划原来那个 bug
+    的形状），这条用例照样绿，而「三种失败各有各的出口」正是本任务的核心。
+    `要解绑请用` 只在那条专用分支里出现。
     """
-    with pytest.raises(SettingsError, match="移除知识库"):
+    with pytest.raises(SettingsError, match="要解绑请用"):
         validate({"KB_VAULT_PATH": ""})
+
+
+def test_vault_path_rejects_whitespace_only(tmp_path):
+    """纯空格和空串走**同一条**出口——`text` 是先 `strip()` 过的。"""
+    with pytest.raises(SettingsError, match="要解绑请用"):
+        validate({"KB_VAULT_PATH": "   "})
+
+
+def test_vault_path_rejects_a_relative_path(tmp_path):
+    """**相对路径会把库指到 KN_Base 仓库自己身上。**
+
+    服务的 cwd 就是工程根（`spawn_service` 用 `cwd=PROJECT_ROOT`），那儿正好
+    有 `.git`——只看 `(where / ".git").exists()` 的话，提交 `.` 会被判成
+    「已初始化的库」，`.env` 里写下 `KB_VAULT_PATH=.`，长出的是同一个半个库。
+    **这条用例必须在工程根下跑才咬得住**，而 `pytest` 的 cwd 正是那儿。
+    """
+    with pytest.raises(SettingsError, match="绝对路径"):
+        validate({"KB_VAULT_PATH": "."})
+    with pytest.raises(SettingsError, match="绝对路径"):
+        validate({"KB_VAULT_PATH": "./"})
 
 
 def test_missing_vault_key_is_not_an_error():

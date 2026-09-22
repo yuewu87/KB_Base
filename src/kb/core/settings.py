@@ -187,13 +187,27 @@ def _vault_path_problem(where: str) -> str | None:
     半个库**：收件箱有草稿、领域是空的、每条都掉进待归类。那正是要防的
     「看起来一切正常」。
 
-    **三种失败各有各的出口**，因为用户下一步该干的事不一样：
-    空值 → 用「移除知识库」；路径不存在 / 没 `.git` → 要么迁移过去、要么先移除
-    再重建。
+    **相对路径一律拒，判据在 `.git` 之前。** 这是上面那条空值检查的同一个形状：
+    服务的 cwd 就是工程根（`spawn_service` 用 `-m kb.api.http`、`cwd=PROJECT_ROOT`），
+    而那儿正好有 `.git`——于是提交 `.` / `./` 会被 `(Path(".") / ".git").exists()`
+    判成「已初始化的库」，`.env` 里写下 `KB_VAULT_PATH=.`，**库指到 KN_Base
+    仓库自己身上**，长出的是同一个半个库。除了这一手，相对路径写进 `.env`
+    本身也不该：`config.py` 是 `Path(vault_raw)`，不做 resolve，生效位置会绑到
+    服务的启动方式上。`is_absolute()` 在 Windows 上对 `C:\\x` 与 UNC 为真、
+    对 `/x` 为假，正合适。
+
+    **四种失败各有各的出口**，因为用户下一步该干的事不一样：
+    空值 → 用「移除知识库」；相对路径 → 改成绝对路径；路径不存在 / 没 `.git`
+    → 要么迁移过去、要么先移除再重建。
     """
     if not where.strip():
         return "要解绑请用「移除知识库」，它会把痕迹一起清掉"
     path = Path(where)
+    if not path.is_absolute():
+        return (
+            f"{where} 是相对路径，会绑到服务的启动目录上。"
+            "知识库要填绝对路径"
+        )
     if not (path / ".git").exists():
         return (
             f"{where} 那儿还没有知识库。想搬过去用「迁移到别处」，"
