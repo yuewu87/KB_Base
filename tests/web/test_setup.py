@@ -609,11 +609,17 @@ def test_the_wizard_swallows_enter(client):
     路径顺手一回车，看到「没有要改的」**而库没建**。
 
     跟前一条（嵌套 form）是**同一个故障形状的两条路**，所以两条都要钉。
-    ⚠️ 同一条能力边界：这条只能证明我们**写出了** `onkeydown`，证明不了
-    浏览器真的执行了它。
+
+    **但不能把按钮上的回车一起拦掉**：在按钮上按回车是浏览器默认的「点击」
+    （合成一次 click），拦了它「Tab 到『初始化』按回车」就毫无反应、也没有
+    任何提示——而空格仍然管用，看起来像偶发。所以两道拦截都要放过 button。
+    （旁边那句注释刚写着「Enter = 点旁边的『检查』，跟按钮是同一件事」。）
+
+    ⚠️ 同一条能力边界：这条只能证明我们**写出了**这两句，证明不了浏览器真的
+    执行了它。
     """
-    html = client.get("/settings").text
-    assert 'onkeydown="if (event.key === \'Enter\')' in html
+    assert "!event.target.closest('button')" in client.get("/settings").text
+    assert "if (e.target.closest('button')) return;" in client.get("/").text
 
 
 def test_settings_shows_the_card_after_init(initialized_vault, env, tmp_path):
@@ -639,3 +645,57 @@ def test_settings_lists_the_domains_from_disk(initialized_vault, env, tmp_path):
     assert "计算机" in html
     assert "健康" in html
     assert "新领域" in html              # 人工建的也得认
+
+
+def test_the_wizard_prefills_the_configured_path(env, tmp_path):
+    """`.env` 里已经配着路径、但那儿不是库（库被挪走 / 盘符没挂）时，
+    **设置窗得把那串路径显示出来**。
+
+    路径框原先连 `value` 都没有，整页看不到 `KB_VAULT_PATH`——用户只能重打，
+    而重打完点「初始化」会把旧路径从 `.env` 里覆盖掉（`/setup/init` 无条件
+    `values["KB_VAULT_PATH"] = target`），旧库从此在界面上没有任何入口。
+    `settings_context` 早就把 `vault_path` 放进上下文了，只是没有一支模板读它。
+
+    顺带钉住那个框的 class：`.mono` 在 `.settings-panes input { font: inherit }`
+    （0,1,1）面前是 (0,1,0)，**压不过**——字体被重置回继承值、而 `.mono` 的
+    `color: var(--faint)` 却照样生效（那条不冲突），于是未初始化态的路径框
+    既不等宽、又是一副只读代码片段的灰。所以换了个专用 class。
+    """
+    moved = tmp_path / "搬走了的库"          # 目录不存在 → `vault_ready` 为假
+    env.write_text(
+        "KB_LLM_API_KEY=k\nKB_LLM_BASE_URL=http://x\nKB_LLM_MODEL=m\n"
+        f"KB_VAULT_PATH={moved}\n",
+        encoding="utf-8",
+    )
+
+    html = _client_for(env, tmp_path).get("/settings").text
+
+    assert f'value="{moved}"' in html
+    assert 'class="mono-path"' in html
+    assert '<div class="wizard" id="wizard"' in html     # 确实是未初始化那一态
+
+
+def test_init_refuses_a_relative_path_before_creating_anything(
+        env, tmp_path, monkeypatch):
+    """**相对路径会先在服务 cwd 底下真建出一个库，然后才被拒。**
+
+    `/setup/init` 的顺序是**先建库、后写配置**——那个顺序对绝对路径是必须的
+    （`settings.validate` 要求目标已经是含 `.git` 的库，先写配置会把用户自己的
+    初始化请求拒掉）。可它只拦了空串：相对路径会在**服务进程的 cwd**
+    （生产里 `spawn_service` 传的是 `PROJECT_ROOT`）建出一整棵带 `.git` 和首次
+    commit 的库，紧接着 `apply_settings` 才 400。用户只看到「失败了」，磁盘上
+    却真的多了一个库——而且是嵌在项目仓库里的一个**未跟踪的嵌套 git 仓库**，
+    一次 `git add -A` 就带进去了。
+
+    对照 `/setup/migrate`：那边第一句就是「目标要填绝对路径」。
+    """
+    monkeypatch.chdir(tmp_path)
+
+    resp = _client_for(env, tmp_path).post("/setup/init", json={
+        "vault_path": "我的库", "domains": ["计算机"], "values": {},
+    })
+
+    assert resp.status_code == 400
+    assert "绝对路径" in resp.json()["detail"]
+    # **断言必须落到磁盘上**：只看 400 的话，一个「先建了再拒」的实现照样绿。
+    assert not (tmp_path / "我的库").exists()

@@ -39,15 +39,6 @@ from kb.core.lifecycle import (
     vault_ready,
 )
 from kb.core.vault import list_domains, list_drafts, list_notes
-
-# `DEFAULT_DOMAINS` 这一步就得带上。它 Task 5 里用不到，**Task 6 用**——
-# 设置窗那条龙拿它预勾复选框（`"default_domains": DEFAULT_DOMAINS`）。
-# 漏了的后果不是「到时候再说」：`settings_context` 是**请求时**执行的，
-# 第一次有人开 `/settings` 就 `NameError` → 500，`tests/web/test_router.py`
-# 里十来处 `client.get("/settings")` 加上本任务自己那条
-# `test_pages_still_open_before_init` 当场一起红。
-# `noqa: F401` 是**刻意**的：它这一步确实没人用（用的那一天是 Task 6），
-# ruff 会照 F401 报「导了不用」。别顺手把它删掉，也别删掉下面这行 import。
 from kb.core.vault_setup import DEFAULT_DOMAINS, DOMAIN_CANDIDATES, init_vault
 from kb.llm.base import LLM, LLMError
 from kb.logging_setup import LOG_DIR
@@ -681,6 +672,17 @@ def build_router(
         target = body.vault_path.strip()
         if not target:
             raise HTTPException(status_code=400, detail="知识库目录不能留空")
+        # **相对路径必须挡在建库之前。** 下面那句 `init_vault` 是**真建**：
+        # 相对路径会按**服务进程的 cwd**（生产里 `spawn_service` 传的是
+        # `PROJECT_ROOT`）建出一整棵带 `.git` 和首次 commit 的库，紧接着
+        # `apply_settings` 才被 `settings.validate` 拒成 400——用户只看到
+        # 「失败了」，磁盘上却多了一个嵌在项目仓库里的**未跟踪的嵌套 git
+        # 仓库**，一次 `git add -A` 就带进去了。
+        #
+        # 顺序不能倒（「先建库、再写配置」的理由见下面那段），所以这个检查
+        # 只能在这儿、只能提前。判据和 `/setup/migrate` 第一句同款。
+        if not Path(target).is_absolute():
+            raise HTTPException(status_code=400, detail="知识库目录要填绝对路径")
 
         # 领域名不能随便起：候选清单之外的直接丢掉
         domains = [d for d in dict.fromkeys(body.domains) if d in DOMAIN_CANDIDATES]

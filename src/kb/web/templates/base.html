@@ -401,6 +401,11 @@
       const wizard = document.getElementById('wizard');
       if (!wizard || !wizard.contains(e.target)) return;   // 不关一条龙的事
       if (e.target.tagName === 'TEXTAREA') return;         // 文本域里回车是换行
+      // **按钮也要放过。** 在按钮上按回车是浏览器默认的「点击」（合成一次
+      // click），拦了它「Tab 到『初始化』按回车」毫无反应、也没有任何提示
+      // ——而空格仍然管用，看起来像偶发。下面那句注释刚写着「Enter = 点旁边
+      // 的『检查』，跟按钮是同一件事」，唯独漏了 button 这一条。
+      if (e.target.closest('button')) return;
       e.preventDefault();
       // 路径框：Enter = 点旁边的「检查」，跟按钮是同一件事
       if (e.target.id === 'w-vault-path') {

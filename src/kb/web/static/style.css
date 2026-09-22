@@ -1543,4 +1543,14 @@ button.secondary.danger:hover {
    意义就是让用户分清这两种。 */
 .hint.bad { color: var(--danger); }
 
+/* 未初始化态那个路径框：**等宽，但不要 `.mono` 那一套。**
+   `.mono` 是给只读的代码片段用的（还带 `color: var(--faint)`，套在可编辑的
+   输入框上像禁用）；更要命的是它在 `.settings-panes input { font: inherit }`
+   （0,1,1）面前是 (0,1,0)，**压不过**——字体被重置回继承值，而那条不冲突的
+   `color` 却照旧生效。结果就是同一个路径，未初始化态不等宽、还有一层灰，
+   已初始化态（`.vault-path`）是等宽的，两态长得不一样。 */
+.settings-panes input.mono-path {
+  font-family: var(--mono);
+}
+
 .wizard-foot { flex: 1; }

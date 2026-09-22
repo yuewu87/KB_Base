@@ -53,8 +53,11 @@
 
      拦掉而不是改成「回车 = 初始化」：回车时用户多半还停在第一段，
      那会儿替他建库是越俎代庖。 #}
+  {# 拦回车时**要放过按键落在按钮上的那种**：在按钮上按回车是浏览器默认的
+     「点击」（合成一次 click），拦了它「Tab 到『初始化』按回车」就毫无反应、
+     也没有任何提示——而空格仍然管用，看起来像偶发。 #}
   <div class="wizard" id="wizard"
-       onkeydown="if (event.key === 'Enter') { event.preventDefault(); }">
+       onkeydown="if (event.key === 'Enter' && !event.target.closest('button')) { event.preventDefault(); }">
 
     <div class="wizard-step">
       <span class="wizard-num" aria-hidden="true">1</span>
@@ -89,7 +92,18 @@
         <p class="wizard-title">知识库目录</p>
         <p class="hint">笔记存哪儿。它会是一个独立的 git 仓库。</p>
         <div class="field-row">
-          <input id="w-vault-path" class="mono"
+          {# **`value` 要预填。** 走到未初始化这一支的原因不止「还没建过」——
+             也可能 `.env` 里配着路径、可那儿不是库（库被挪走、盘符没挂）。
+             不预填的话整页看不到 `KB_VAULT_PATH`，用户只能重打，而重打完点
+             「初始化」会把旧路径从 `.env` 里覆盖掉（`/setup/init` 无条件
+             `values["KB_VAULT_PATH"] = target`），旧库从此在界面上没有入口。
+             `settings_context` 早就把它放进上下文了。
+
+             class 是 `mono-path` 而**不是 `mono`**：`.settings-panes input
+             { font: inherit }` 是 (0,1,1)，压得过 `.mono` 的 (0,1,0)——字体
+             会被重置回继承值，而 `.mono` 的 `color: var(--faint)` 却照样生效
+             （那条不冲突），于是这个框既不等宽、又是一副只读代码片段的灰。 #}
+          <input id="w-vault-path" class="mono-path" value="{{ vault_path }}"
                  placeholder="D:\我的知识库" autocomplete="off">
           <button type="button" class="secondary"
                   onclick="checkPath(this)">检查</button>
