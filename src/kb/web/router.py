@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import time
 from collections.abc import Callable
+from contextlib import contextmanager
 from pathlib import Path
 
 from fastapi import APIRouter, Form, HTTPException, Request
@@ -29,6 +30,7 @@ from kb.core.chat_store import list_chats, load_chat
 from kb.core.flow import STEPS, latest_run_rows
 from kb.core.flow import list_days as flow_days
 from kb.core.flow import read_day as read_flow_day
+from kb.core.lifecycle import Busy
 from kb.llm.base import LLM, LLMError
 from kb.logging_setup import LOG_DIR
 from kb.web import skins
@@ -192,6 +194,8 @@ def build_router(
     quit_fn: Callable[[], None],
     env_path: Path,
     build_llm_fn: Callable[[Config], LLM],
+    *,
+    busy: Busy,
 ) -> APIRouter:
     """`data_dir`、`organize_fn`、`get_llm` 都由 `create_app` 传进来。
 
@@ -204,10 +208,30 @@ def build_router(
 
     `env_path` 是**这个 app 实际在用的**那份 `.env`（`create_app` 决定，
     测试里是临时文件）。设置页显示它，不显示「工程根目录下恰好存在的那个」。
+
+    `busy` 由 `create_app` 造了传进来——**锁必须是同一把**。各造一把的话，
+    网页这边「正在整理」挡住了投递，服务端 `/organize` 却照样跑，
+    等于没锁。
     """
     router = APIRouter()
 
     vault = vault_guard(get_cfg)
+
+    @contextmanager
+    def organizing():
+        """整理期间占住 `busy` 锁；拿不到就 409。
+
+        **不是 `with busy` 那种阻塞式**——拿不到锁要立刻回 409，
+        而不是让请求排在这儿等一个可能几分钟的整理跑完。
+        """
+        if not busy.acquire("organize"):
+            raise HTTPException(
+                status_code=409, detail=f"正在{busy.label}，等它跑完再试"
+            )
+        try:
+            yield
+        finally:
+            busy.release()
 
     def _ctx(name: str, **extra) -> dict:
         # `get_cfg()` 每请求现读，所以换皮肤**下一个请求就生效**，不用重启。
@@ -260,14 +284,17 @@ def build_router(
     # 会把另一个的请求全吃掉（表单进 JSON 端点 = 422，反之亦然）。
     @router.post("/")
     def chat_post(message: str = Form(...), cid: str = Form("")):
-        chat_id, _ = handle(
-            data_dir,
-            vault(),
-            cid or None,
-            message,
-            get_llm(),
-            organize_fn=organize_fn,
-        )
+        # 对话层能触发整理（`organize_fn` 里那个 `organize` 动作），
+        # 所以**整轮对话都要占锁**——见 `api/http.py` 的 `/chat`。
+        with organizing():
+            chat_id, _ = handle(
+                data_dir,
+                vault(),
+                cid or None,
+                message,
+                get_llm(),
+                organize_fn=organize_fn,
+            )
         return RedirectResponse(f"/?cid={chat_id}", status_code=303)
 
     @router.get("/new", response_class=HTMLResponse)
@@ -287,7 +314,9 @@ def build_router(
         if not content.strip():
             raise HTTPException(status_code=400, detail="正文不能为空")
         vault()                     # 没库就 409，别等写了一半才发现
-        push_and_organize(get_cfg(), content, get_llm(), source="Web")
+        # 这条会整理，所以占锁——迁移期间投进来的东西会落进半截库。
+        with organizing():
+            push_and_organize(get_cfg(), content, get_llm(), source="Web")
         return RedirectResponse("/journal", status_code=303)
 
     @router.get("/journal", response_class=HTMLResponse)
