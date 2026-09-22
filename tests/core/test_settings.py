@@ -148,7 +148,7 @@ def test_manifest_snapshot():
             ("KB_LOG_KEEP_DAYS", "int", "90", ()),
         ]),
         ("外观", [
-            ("KB_SKIN", "choice", "garnet",
+            ("KB_SKIN", "choice", "dark-pink",
              ("archive", "dark-pink", "aurora", "garnet", "neon", "mono")),
         ]),
     ]

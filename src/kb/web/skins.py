@@ -141,7 +141,7 @@ SKINS: tuple[Skin, ...] = (
 )
 
 SKIN_IDS: tuple[str, ...] = tuple(s.id for s in SKINS)
-DEFAULT_SKIN = "garnet"
+DEFAULT_SKIN = "dark-pink"
 _BY_ID = {s.id: s for s in SKINS}
 
 # 展示顺序：用户定的 ①-⑥ 顺序，不是上面的定义顺序

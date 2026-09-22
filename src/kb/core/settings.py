@@ -95,7 +95,7 @@ GROUPS: tuple[Group, ...] = (
         # 配置」的清单，皮肤藏在别处会让人找不到。
         Field("KB_SKIN", "皮肤", "choice",
               choices=("archive", "dark-pink", "aurora", "garnet", "neon", "mono"),
-              default="garnet",
+              default="dark-pink",
               help="改完立刻生效，不用重启。左栏底部的「外观」也能切"),
     )),
 )
