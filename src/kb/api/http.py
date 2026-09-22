@@ -16,6 +16,7 @@ import os
 import re
 import threading
 from collections.abc import Callable
+from contextlib import AbstractContextManager, contextmanager
 from datetime import datetime
 from pathlib import Path
 
@@ -36,6 +37,7 @@ from kb.config import (
 from kb.core import flow, organize, settings, sweep, sweep_state
 from kb.core.chat import handle
 from kb.core.chat_store import list_chats, load_chat
+from kb.core.lifecycle import Busy
 from kb.core.models import Draft, OrganizeResult
 from kb.core.search import search_notes
 from kb.core.vault import (
@@ -90,6 +92,31 @@ def vault_guard(get_cfg: Callable[[], Config]) -> Callable[[], Path]:
         except ConfigError as exc:
             raise HTTPException(status_code=409, detail=str(exc)) from exc
     return guard
+
+
+def busy_guard(busy: Busy) -> Callable[[], AbstractContextManager[None]]:
+    """造一个「整理期间占住 `busy`；拿不到就当场 409」的上下文管理器。
+
+    **`api/http.py` 与 `web/router.py` 共用这一份。** 逐字抄两遍的话，
+    改 409 文案、加 `Retry-After`、改状态码都得记得改两处——迟早漏一处，
+    而漏掉的正是你没点开的那条路。跟 `_commit_sweep` 里那两条 git 调用
+    是同一条理由：**平台坑与协议细节只该有一处**。
+
+    **不是 `with busy` 那种阻塞式**——拿不到锁要立刻回 409，
+    而不是让请求排在这儿等一个可能几分钟的整理跑完。
+    """
+    @contextmanager
+    def organizing():
+        if not busy.acquire("organize"):
+            raise HTTPException(
+                status_code=409, detail=f"正在{busy.label}，等它跑完再试"
+            )
+        try:
+            yield
+        finally:
+            busy.release()
+
+    return organizing
 
 
 def build_llm(cfg: Config) -> LLM:
@@ -388,14 +415,29 @@ def create_app(
                 get_cfg(), content, get_llm(), source="Web", revise_target=target
             )
         if kind == "organize":
+            # **路径从 `require_vault` 取，不是 `get_cfg().vault_path`。**
+            # 没库时后者是 `None`，`list_drafts(None)` 当场 `TypeError`——
+            # 炸在对话线程里，症状是「聊着聊着 500」。
+            # 这里**不能再包一层 `organizing()`**：`/chat` 端点那一层已经占了
+            # 锁，同一线程对自己 `acquire` 会当场 409 掉自己（`Busy` 不重入）。
+            vault_path = require_vault(get_cfg())
             results = organize.organize_selected(
-                get_cfg().vault_path, list_drafts(get_cfg().vault_path), get_llm()
+                vault_path, list_drafts(vault_path), get_llm()
             )
             ok = sum(1 for r in results if not r.error)
             return f"整理了 {len(results)} 条，成功 {ok} 条。"
         return f"未知动作：{kind}"
 
     app = FastAPI(title="KN_Base 知识库服务")
+
+    # **谁在动 vault。** 服务是单进程多线程（uvicorn），整理与迁移可能同时
+    # 进来——那个交错会把一次整理劈成两半，见 `Busy` 的 docstring。
+    busy = Busy()
+    # **挂到 app 上给测试用。** 不然「正在忙」只能靠一个真跑几分钟的整理去
+    # 制造——那是测不动的，于是 409 那条路径永远没人验。
+    app.state.busy = busy
+
+    organizing = busy_guard(busy)
 
     from fastapi.staticfiles import StaticFiles
 
@@ -406,6 +448,7 @@ def create_app(
     app.include_router(build_router(
         get_cfg, data_dir, _chat_organize_fn, get_llm,
         apply_settings, quit_fn or _default_quit, env_path, make_llm,
+        busy=busy,
     ))
     app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
 
@@ -545,7 +588,8 @@ def create_app(
         # （入口有三个，在端点里记会漏掉另两条）
         log = logging.getLogger("kb.organize")
         log.info("开始整理 %d 条草稿", len(paths))
-        results = organize.organize_selected(vault_path, paths, get_llm())
+        with organizing():
+            results = organize.organize_selected(vault_path, paths, get_llm())
         for r in results:
             if r.error:
                 log.warning("草稿 %s → %s：%s", r.draft_id, r.kind.value, r.error)
@@ -563,14 +607,17 @@ def create_app(
         if req.chat_id and load_chat(data_dir, req.chat_id) is None:
             raise HTTPException(status_code=404, detail=f"找不到会话 {req.chat_id}")
         vault_path = vault()
-        chat_id, reply = handle(
-            data_dir,
-            vault_path,
-            req.chat_id,
-            req.message,
-            get_llm(),
-            organize_fn=_chat_organize_fn,
-        )
+        # 对话层能触发整理（`_chat_organize_fn` 里那个 `organize` 动作），
+        # 所以**整轮对话都要占锁**——否则一个正在迁移的库会在对话中途被读。
+        with organizing():
+            chat_id, reply = handle(
+                data_dir,
+                vault_path,
+                req.chat_id,
+                req.message,
+                get_llm(),
+                organize_fn=_chat_organize_fn,
+            )
         return {"chat_id": chat_id, "reply": reply}
 
     @app.get("/chats")
