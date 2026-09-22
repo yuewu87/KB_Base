@@ -37,9 +37,6 @@ INDEX = "_索引"
 ATTACHMENTS = "_附件"
 JOURNAL_DIR = "整理日志"
 
-# 内置领域——`init_vault.py` 用它建目录。运行时的领域清单以磁盘为准。
-SEED_DOMAINS = ["计算机", "艺术", "文学"]
-
 # 机器目录前缀——一级目录里带这个前缀的不是领域
 META_PREFIX = "_"
 
