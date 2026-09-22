@@ -1,6 +1,17 @@
 {% extends "base.html" %}
 {% block title %}ai对话 · KN_Base{% endblock %}
 {% block content %}
+{% if not vault_ready %}
+  {# 首屏引导卡。**按钮跳的是设置窗那条龙，不是另开一个向导**——
+     用户的原话是「初始化后以后就显示已初始化，要改就去对应的设置改」，
+     所以两处必须是同一屏。 #}
+  <div class="first-run">
+    <h2>还没有知识库</h2>
+    <p>KN_Base 把笔记存成一个独立目录（vault）。先告诉它两件事，就能建起来。</p>
+    <button type="button" class="primary" onclick="startInit()">初始化知识库</button>
+  </div>
+  <p class="hint first-run-hint">配好之前，投递和整理这几个入口用不了</p>
+{% endif %}
 <div class="chat-layout">
   <section class="chat-main">
     <div class="page-head">

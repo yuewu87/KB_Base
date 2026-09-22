@@ -25,7 +25,21 @@
         <span class="side-label">收起</span>
       </button>
 
-      <a href="/new" class="side-action {{ 'active' if active == 'new' }}">
+      {# **未初始化时置灰「记一条」与「巡检」。** 这两个是动作，按下去必然写库
+         （`/new` 的 POST 是投递、`/sweep` 动的是库里的标签和目录）；其余入口
+         是只读的，空库下看到空列表恰恰是告诉用户「还没东西」的正确方式——
+         一起灰掉等于把信息也藏了，何况首屏那张引导卡就住在 ai对话上面。
+
+         用 `onclick="return false"` 而不是 CSS 的 `pointer-events: none`：
+         后者一生效元素就不再接收鼠标事件，`title` 那句「为什么点不动」
+         **永远悬不出来**——置灰了却不告诉人为什么，等于没说。
+
+         **这只是界面礼貌**，真拦截在端点上（`vault_guard` 回 409）：
+         `kb.bat push` 走 CLI、接入指南里的会话层 AI 走 `/push`，都绕过界面。 #}
+      <a href="/new"
+         class="side-action {{ 'active' if active == 'new' }}{{ ' is-disabled' if not vault_ready }}"
+         {% if not vault_ready %}aria-disabled="true" title="还没有知识库，先初始化"
+         onclick="return false"{% endif %}>
         <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor"
              stroke-width="1.8" stroke-linecap="round" aria-hidden="true">
           <path d="M12 5v14M5 12h14"/>
@@ -65,7 +79,11 @@
         <span class="side-label">运行日志</span>
       </a>
 
-      <a href="/sweep" class="side-btn {{ 'active' if active == 'sweep' }}">
+      {# 置灰的理由同上。 #}
+      <a href="/sweep"
+         class="side-btn {{ 'active' if active == 'sweep' }}{{ ' is-disabled' if not vault_ready }}"
+         {% if not vault_ready %}aria-disabled="true" title="还没有知识库，先初始化"
+         onclick="return false"{% endif %}>
         <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor"
              stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
           <path d="M20 11a8 8 0 1 0-2.3 5.7"/>
@@ -163,6 +181,28 @@
       <p class="hint">下次用的时候双击 <code>web.bat</code>，或随便跑一条 <code>kb</code> 命令，它会自己起来。</p>
       <button type="button" class="primary"
               onclick="document.getElementById('quit-notice').hidden = true">知道了</button>
+    </div>
+  </div>
+
+  {# 移除确认。**不用浏览器原生 confirm()**（`quitService` 那个做法）：
+     原生 confirm 不能放清单、不能放勾选框，而且跟其余界面的样式是两套。
+     用的是 `quit-notice` 那套 `.modal.notice`。 #}
+  <div class="overlay" id="remove-overlay" hidden>
+    <div class="modal notice">
+      <h2>移除知识库</h2>
+      <p id="remove-counts" class="remove-counts"></p>
+      <p class="hint">这一步不能撤销，也不进回收站。</p>
+      <label class="remove-confirm">
+        <input type="checkbox" id="remove-ok" onchange="document.getElementById('remove-go').disabled = !this.checked">
+        <span>我知道，删了找不回来</span>
+      </label>
+      <div class="modal-actions">
+        <button type="button" class="secondary"
+                onclick="document.getElementById('remove-overlay').hidden = true">取消</button>
+        {# 同样 `secondary danger` 两个 class——见设置窗那张卡上的注。 #}
+        <button type="button" class="secondary danger" id="remove-go" disabled
+                onclick="confirmRemove()">移除</button>
+      </div>
     </div>
   </div>
 
@@ -475,6 +515,87 @@
       const nav = Array.from(modal.querySelectorAll('.nav-item'))
         .find(function (b) { return b.textContent.trim() === name; });
       if (nav) showGroup(nav);
+    }
+
+    // 首屏引导卡那颗按钮。**跳的就是设置窗那条龙**（`openSettings` +
+    // `showGroupByName`），不是另开一个向导——两处必须是同一屏。
+    async function startInit() {
+      await openSettings();
+      showGroupByName('知识库');
+    }
+
+    // ---- 知识库的三个动作（那条龙「已初始化」态上的按钮） ----
+
+    async function openRemove() {
+      const overlay = document.getElementById('remove-overlay');
+      const counts = document.getElementById('remove-counts');
+      document.getElementById('remove-ok').checked = false;
+      document.getElementById('remove-go').disabled = true;
+      counts.textContent = '正在数…';
+      overlay.hidden = false;
+      try {
+        const d = await (await fetch('/setup/state')).json();
+        // **先给数量、再给警告。** 数量让人看一眼就知道删的是不是他以为的
+        // 那个库——一句「确定要删除吗」在删 3 篇和删 3000 篇时长得一模一样。
+        counts.textContent =
+          d.counts.notes + ' 篇笔记 · ' + d.counts.drafts + ' 条草稿 · ' +
+          d.counts.chats + ' 段会话 · 全部整理日志';
+      } catch (e) {
+        counts.textContent = '数不出来（' + e + '），但删的东西是一样的';
+      }
+    }
+
+    async function confirmRemove() {
+      const btn = document.getElementById('remove-go');
+      btn.disabled = true;
+      try {
+        const r = await fetch('/setup/remove', {method: 'POST'});
+        const data = await r.json().catch(function () { return {}; });
+        if (!r.ok) {
+          alert('移除失败：' + _detail(data, '未知原因') + '（HTTP ' + r.status + '）');
+          return;
+        }
+        // **删不干净的地方要如实说。** Windows 上正被服务打开的日志文件
+        // 删不掉——那是操作系统的边界，不是设计妥协。不说这一句，用户下次
+        // 在 data/logs/ 里看见文件会以为移除没生效。
+        const notes = data.notes || [];
+        if (notes.length) alert('移除完成，但有几句要说明：\n\n' + notes.join('\n'));
+        location.reload();
+      } catch (e) {
+        alert('移除失败：' + e);
+      } finally {
+        btn.disabled = false;
+      }
+    }
+
+    async function openVaultFolder() {
+      // 服务是本地进程，浏览器沙箱里打不开资源管理器——**如实说**，别做一个
+      // 点了没反应的按钮。路径本身在设置窗里就显示着，可以复制。
+      // 要真打开就得后端加端点去 `Popen(['explorer', path])`，那是在用户机器上
+      // 执行命令，得单独讨论，本任务不做。
+      alert('在资源管理器里打开这个路径即可（路径就在上面，可以复制）。');
+    }
+
+    async function openMigrate() {
+      const target = prompt('搬到哪里？填一个绝对路径，而且那个目录必须是空的（不存在也行）。');
+      if (!target) return;
+      try {
+        const r = await fetch('/setup/migrate', {
+          method: 'POST',
+          headers: {'Content-Type': 'application/json'},
+          body: JSON.stringify({target: target}),
+        });
+        const data = await r.json().catch(function () { return {}; });
+        if (!r.ok) {
+          alert('没搬成：' + _detail(data, '未知原因') + '（HTTP ' + r.status + '）');
+          return;
+        }
+        alert('搬好了：' + data.moved.files + ' 个文件 / ' +
+              Math.round(data.moved.bytes / 1024) + ' KB。新位置：' + data.vault_path);
+        location.reload();
+      } catch (e) {
+        alert('没搬成：' + e);
+      }
     }
 
     async function quitService() {

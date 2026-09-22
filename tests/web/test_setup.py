@@ -699,3 +699,74 @@ def test_init_refuses_a_relative_path_before_creating_anything(
     assert "绝对路径" in resp.json()["detail"]
     # **断言必须落到磁盘上**：只看 400 的话，一个「先建了再拒」的实现照样绿。
     assert not (tmp_path / "我的库").exists()
+
+
+# ---------- 首屏引导卡 ----------
+#
+# ⚠️ 后两条同样用 `reload_config`（`_client_for` 里已经这么做了），
+# 不用计划里写的 `load_config`——理由见本文件开头那段。
+
+def test_chat_shows_the_first_run_card_before_init(client):
+    """未初始化时首屏那张卡在，按钮跳的是设置窗那条龙。
+
+    **不是另开一个向导**——用户的原话是「初始化后以后就显示已初始化，
+    要改就去对应的设置改」，所以两处必须是同一屏。`startInit()` 的存在
+    就是在钉这一条：它做的是 `openSettings()` + `showGroupByName('知识库')`。
+    """
+    html = client.get("/").text                      # chat.html 挂在 `/`
+    assert 'class="first-run"' in html
+    assert "还没有知识库" in html
+    assert "初始化知识库" in html
+    assert "startInit()" in html
+
+
+def test_chat_hides_the_first_run_card_after_init(initialized_vault, env, tmp_path):
+    """建好之后卡片收起来——**留着的话首屏永远在说「还没有知识库」**。"""
+    html = _client_for(env, tmp_path).get("/").text
+    assert 'class="first-run"' not in html
+
+
+def test_the_remove_modal_is_not_a_native_confirm(client):
+    """移除确认是个真模态，**不是浏览器原生 `confirm()`**。
+
+    `quitService` 那个原生 confirm 放不下清单和勾选框，样式跟其余界面
+    也是两套。这条钉三件事：用的是 `.modal.notice` 那套、清单容器在、
+    「移除」**默认禁用**（勾选框没勾之前点不动）。
+    """
+    # ⚠️ **取 `/`，不是 `/settings`。** 移除模态加在 `base.html` 里，
+    # 而 `/settings` 返回的是 `_settings.html` 那个**片段**，没有
+    # `{% extends %}`，整页骨架一个都不带。
+    html = client.get("/").text
+    assert 'id="remove-overlay"' in html
+    assert 'id="remove-counts"' in html              # 「先给数量、再给警告」
+    assert 'id="remove-ok"' in html                  # 原生 confirm 放不下勾选框
+    assert 'id="remove-go" disabled' in html         # 没勾之前点不动
+
+    # `class="modal notice"` 单断言是**恒真**的：`base.html` 里那个「服务已停」
+    # 通知本来就带这对 class，哪页都命中。必须限定在移除模态自己那块里，
+    # 否则这条断言永远不会红，也就永远没在测东西。
+    pos = html.index('id="remove-overlay"')
+    assert 'class="modal notice"' in html[pos:]      # 跟「服务已停」同一套
+
+
+# ---------- 未初始化时置灰两个入口 ----------
+
+def test_sidebar_greys_out_the_push_entries_before_init(client):
+    """需求表第 1 条：未初始化时投递/整理入口置灰。
+
+    **只是界面礼貌**——CLI 和接入指南都绕开界面，真拦截在 `vault_guard`
+    （`tests/api/test_busy.py` 那边钉着）。这里只钉模板真的渲染出了那个状态。
+    """
+    html = client.get("/").text
+    assert html.count('is-disabled') == 2          # 记一条 + 巡检，一个不多
+    assert 'aria-disabled="true"' in html
+
+
+def test_sidebar_is_not_greyed_after_init(initialized_vault, env, tmp_path):
+    """建好之后再进来，两个入口得能点。
+
+    ⚠️ 上面那条的 `count == 2` 而不是 `>= 2`：**置灰错的面板比不置灰更糟**
+    ——把 ai对话 或日志那几页也灰掉，首屏那张引导卡就没了落脚处
+    （`test_pages_still_open_before_init` 会红）。这个数就是在防「顺手全灰了」。
+    """
+    assert "is-disabled" not in _client_for(env, tmp_path).get("/").text

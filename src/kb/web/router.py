@@ -287,6 +287,10 @@ def build_router(
             # 未初始化时是空串，不是 `None`——侧栏要显示的是「没有」，
             # 不是一个 Python 字面量。
             "vault": str(vault_path) if vault_path else "",
+            # 首屏那张引导卡看它，侧栏两处「未初始化就置灰」也看它。
+            # 判据用 `lifecycle.vault_ready`——全仓唯一那一份（`/setup/state`、
+            # `/setup/init` 的闸、`settings_context` 都调它）。
+            "vault_ready": vault_ready(vault_path),
             "skin": get_cfg().skin,
             "skins": skins.options(),
             **extra,

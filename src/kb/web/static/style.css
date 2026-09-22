@@ -1554,3 +1554,59 @@ button.secondary.danger:hover {
 }
 
 .wizard-foot { flex: 1; }
+
+/* ---- 未初始化时置灰的两个入口 ---- */
+
+/* **只是界面礼貌**——真拦截在端点（`vault_guard` 回 409），因为 CLI 和
+   接入指南里的会话层 AI 都绕过界面。 */
+.side-btn.is-disabled,
+.side-action.is-disabled {
+  opacity: .45;
+  cursor: not-allowed;
+}
+/* 悬停不给「可点」的反馈，不然置灰是骗人的 */
+.side-btn.is-disabled:hover,
+.side-action.is-disabled:hover {
+  background: none;
+  color: inherit;
+  text-decoration: none;
+}
+.side-btn.is-disabled:hover .icon,
+.side-action.is-disabled:hover .icon { color: var(--faint); }
+
+/* ---- 首屏引导卡（未初始化时） ---- */
+
+.first-run {
+  border: 1px solid var(--accent);
+  background: var(--accent-soft);
+  border-radius: 8px;
+  padding: 16px 18px;
+  margin-bottom: 14px;
+}
+.first-run h2 {
+  color: var(--ink); font-size: 13px; font-weight: 600;
+  margin: 0 0 8px;
+}
+.first-run p {
+  color: var(--ink); font-size: 11px; line-height: 1.6;
+  margin: 0 0 14px;
+}
+/* 这行 `p` 在 `chat.html` 里，**不在 `.settings-panes` 也不在 `.modal.notice`
+   里面**——上面那两条 `.hint` 规则一条都命中不到它。只给 `margin-top` 的话，
+   颜色和字号会落到浏览器默认值（黑字 16px），跟页面其它小字不是一套。
+   所以这里给全，写法照 `.settings-panes .hint` 那条。 */
+.first-run-hint { margin-top: 10px; color: var(--faint); font-size: 11.5px; }
+
+/* ---- 移除确认 ---- */
+
+.remove-counts {
+  color: var(--ink); font-size: 12px; font-weight: 600;
+  margin: 0 0 6px;
+}
+.remove-confirm {
+  display: flex; align-items: center; gap: 8px;
+  font-size: 11px; cursor: pointer;
+  margin: 14px 0;
+}
+.remove-confirm input { margin: 0; accent-color: var(--danger); }
+.modal-actions { display: flex; gap: 8px; justify-content: flex-end; }
