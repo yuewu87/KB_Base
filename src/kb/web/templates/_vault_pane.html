@@ -16,6 +16,24 @@
               onclick="openRemove()">移除知识库…</button>
     </div>
   </div>
+  {# **库的位置要能改。** 用户当初的原话就是「知识库路径要能填」（Q108 的
+     问题那一段），而这一组改成自绘之后那个输入框整个没了——`settings.py`
+     里 `KB_VAULT_PATH` 还是 `text`、`editable_keys()` 也还说它能改，契约和
+     界面各说各话。这里把它放回来：它有 `name`，走 `saveSettings` 那条路，
+     保存时 `settings.validate` 会验「那儿到底是不是一个已建好的库」
+     （没有 `.git` 的一律拒）——**放开的是输入框，不是判断**。
+
+     和上面「迁移到别处」的分工：迁移是**搬**（把当前这个库整个搬过去、
+     源删掉），这里是**换指向**（当前这个库留在原地，服务改看另一个）。 #}
+  <div class="field">
+    <label for="f-KB_VAULT_PATH">库的位置</label>
+    <input id="f-KB_VAULT_PATH" name="KB_VAULT_PATH" class="mono-path"
+           value="{{ vault_path }}" data-init="{{ vault_path }}">
+    <p class="hint">
+      换到另一个<b>已经建好的库</b>就改这儿，保存时会验那儿有没有 `.git`。
+      要搬走当前这个库、连位置一起换，用上面的「迁移到别处」。
+    </p>
+  </div>
   <p class="hint">
     要改模型配置或日志级别，去左边对应的那一栏。
     要加领域，在资源管理器里给库建个一级文件夹就行——服务下次就认。
@@ -82,25 +100,36 @@
       <div class="wizard-body">
         <p class="wizard-title">模型配置</p>
         <p class="hint">整理笔记要调模型，先把钥匙给它。</p>
+        {# **段①的字段来自 `settings.GROUPS` 里那一组**（`model_fields`），
+           不是这里手抄三个 `id="w-KB_LLM_*"`。手抄的话，往「模型配置」加
+           第四个字段时设置窗那栏会有、**这里不会有**——向导问的和服务实际
+           要的成了两份清单；改键名更静默（`getElementById` 返回 `null`，
+           `.value` 当场 TypeError，被 catch 包成「初始化失败：TypeError…」，
+           看着像后端的问题）。
+           `data-model-key` 是给 JS 收值用的（`_wizardModelValues`），
+           于是 JS 里那两份字面量数组也一并收掉了。
+           布局照旧：非密钥并排一行，密钥整行、右边挂着「测试连接」。 #}
         <div class="field-row">
-          <div class="field">
-            <label for="w-KB_LLM_MODEL">模型名</label>
-            <input id="w-KB_LLM_MODEL" value="{{ llm_model }}">
-          </div>
-          <div class="field">
-            <label for="w-KB_LLM_BASE_URL">API 地址</label>
-            <input id="w-KB_LLM_BASE_URL" value="{{ llm_base_url }}">
-          </div>
+          {% for f in model_fields if f.kind != 'secret' %}
+            <div class="field">
+              <label for="w-{{ f.key }}">{{ f.label }}</label>
+              <input id="w-{{ f.key }}" value="{{ f.value }}"
+                     data-model-key="{{ f.key }}">
+            </div>
+          {% endfor %}
         </div>
-        <div class="field">
-          <label for="w-KB_LLM_API_KEY">API Key</label>
-          <div class="field-row">
-            <input id="w-KB_LLM_API_KEY" type="password"
-                   value="" placeholder="留空表示不改" autocomplete="off">
-            <button type="button" class="secondary"
-                    onclick="testWizardConnection(this)">测试连接</button>
+        {% for f in model_fields if f.kind == 'secret' %}
+          <div class="field">
+            <label for="w-{{ f.key }}">{{ f.label }}</label>
+            <div class="field-row">
+              <input id="w-{{ f.key }}" type="password"
+                     value="" placeholder="留空表示不改" autocomplete="off"
+                     data-model-key="{{ f.key }}">
+              <button type="button" class="secondary"
+                      onclick="testWizardConnection(this)">测试连接</button>
+            </div>
           </div>
-        </div>
+        {% endfor %}
       </div>
     </div>
 

@@ -381,12 +381,21 @@
       }
     }
 
-    function testWizardConnection(btn) {
+    // **按 `data-model-key` 收，不写死键名清单。** 写死的那两份数组跟段①
+    // 的 `<input id="w-KB_LLM_*">` 是一对：往「模型配置」加一个字段时，
+    // 漏改任何一边都是静默错——`getElementById('w-' + k)` 返回 null，
+    // `.value` 当场 TypeError，被 catch 包成「初始化失败：TypeError…」。
+    // 现在字段清单只有一处（`settings.GROUPS`），模板照着渲染、
+    // `data-model-key` 带着键名过来。
+    function _wizardModelValues() {
       const values = {};
-      ['KB_LLM_MODEL', 'KB_LLM_BASE_URL', 'KB_LLM_API_KEY'].forEach(function (k) {
-        values[k] = document.getElementById('w-' + k).value;
-      });
-      _testConnection(btn, values, _wizardMsg);
+      document.querySelectorAll('#wizard [data-model-key]')
+        .forEach(function (el) { values[el.dataset.modelKey] = el.value; });
+      return values;
+    }
+
+    function testWizardConnection(btn) {
+      _testConnection(btn, _wizardModelValues(), _wizardMsg);
     }
 
     async function checkPath(btn) {
@@ -464,10 +473,11 @@
         _wizardMsg('至少勾一个领域——一个都没有的话，投进来的每一条都会掉进「待归类」', false);
         return;
       }
+      // 留空的**不提交**——「留空 = 不改」是密钥的语义，而 `/setup/init`
+      // 那边也是这么处理的（`known.update({k: v for k, v in values.items() if v})`）。
       const values = {};
-      ['KB_LLM_MODEL', 'KB_LLM_BASE_URL', 'KB_LLM_API_KEY'].forEach(function (k) {
-        const v = document.getElementById('w-' + k).value;
-        if (v) values[k] = v;
+      Object.entries(_wizardModelValues()).forEach(function (pair) {
+        if (pair[1]) values[pair[0]] = pair[1];
       });
       btn.disabled = true;
       _wizardMsg('正在建库…', true);
@@ -500,6 +510,10 @@
         // （`confirmRemove` / `openMigrate`）也都是「alert 说完 → reload」。
         const done = '建好了：' + (data.actions || []).join('、');
         alert(done);
+        // **整页重载**，而不是 `openSettings()` + 切到「知识库」那一栏：
+        // 首屏那张引导卡、侧栏两个灰掉的入口都是服务端按 `vault_ready`
+        // 渲染的，换设置窗的 innerHTML 一格都不会动它们。重载之后消息没处
+        // 落，所以用 `alert`——同文件另外两个动作也是这个套路。
         location.reload();
       } catch (e) {
         _wizardMsg('初始化失败：' + e, false);
@@ -508,18 +522,21 @@
       }
     }
 
-    function showGroupByName(name) {
+    // **按稳定键定位，不比对显示文字。** 原先 `.find(b => b.textContent.trim()
+    // === '知识库')`——分组一改名 `.find` 就返回 undefined，而 `if (nav)`
+    // 把这件事**静默吞掉**：初始化成功之后用户停在第「模型配置」那一栏，
+    // 看不见自己刚建好的库，底部却挂着「建好了：…」。
+    function showGroupByKey(key) {
       const modal = document.getElementById('settings-modal');
-      const nav = Array.from(modal.querySelectorAll('.nav-item'))
-        .find(function (b) { return b.textContent.trim() === name; });
+      const nav = modal.querySelector('[data-group-key="' + key + '"]');
       if (nav) showGroup(nav);
     }
 
     // 首屏引导卡那颗按钮。**跳的就是设置窗那条龙**（`openSettings` +
-    // `showGroupByName`），不是另开一个向导——两处必须是同一屏。
+    // `showGroupByKey('vault')`），不是另开一个向导——两处必须是同一屏。
     async function startInit() {
       await openSettings();
-      showGroupByName('知识库');
+      showGroupByKey('vault');
     }
 
     // ---- 知识库的三个动作（那条龙「已初始化」态上的按钮） ----

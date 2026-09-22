@@ -48,27 +48,33 @@ class Field:
 
 @dataclass(frozen=True)
 class Group:
+    key: str                        # **稳定标识**，给模板与 JS 定位用。
+    # ↑ 和 `name` 分开是因为 `name` 是**给人看的**、随时可能改；让界面拿显示
+    #   文字当标识的话，改一次名字就会有一处悄悄失灵——「设置窗那条龙不见了」
+    #   这种故障就是「长得像坏了，其实是找不到」。
     name: str
     fields: tuple[Field, ...] = field(default_factory=tuple)
 
 
 GROUPS: tuple[Group, ...] = (
-    Group("模型配置", (
+    Group("model", "模型配置", (
         Field("KB_LLM_MODEL", "模型名", "text",
               help="换完点「测试连接」验一下，不用重启"),
         Field("KB_LLM_BASE_URL", "API 地址", "text"),
         Field("KB_LLM_API_KEY", "API Key", "secret",
               help="掩码显示。留空表示不改"),
     )),
-    Group("知识库", (
+    Group("vault", "知识库", (
         # 2026-09-22 从 `readonly` 放开。当初设成只读是本机被改废过的教训，
         # 现在敢放开，靠的是 `validate` 里那条路径检查（目标必须是个已初始化
         # 的库）+「迁移」这个显式动作——**放开的是输入框，不是判断**。
         Field("KB_VAULT_PATH", "vault 路径", "text",
               help="笔记本体存的地方，是个独立的 git 仓库。"
-                   "要搬去别处用下面的「迁移到别处」，不要在这儿直接改"),
+                   "换到另一个**已经建好的**库就改这儿（保存时会验有没有 "
+                   "`.git`）；要连位置一起搬走、把当前这个库挪过去，用"
+                   "「迁移到别处」"),
     )),
-    Group("服务", (
+    Group("service", "服务", (
         Field("KB_PORT", "端口", "readonly",
               help="改了地址就变，你收藏的书签就废了"),
         Field("KB_LOG_LEVEL", "日志级别", "choice",
@@ -83,7 +89,7 @@ GROUPS: tuple[Group, ...] = (
         Field("KB_LOG_KEEP_DAYS", "服务侧日志保留（天）", "int", default="90",
               help="更早的启动时清掉。下次启动服务时生效"),
     )),
-    Group("外观", (
+    Group("skin", "外观", (
         # 名字与顺序要和 `kb.web.skins` 对得上（有测试对着它核）。
         # **入口虽然也在左栏底部，配置项仍然摆在这儿**——这一页是「所有能改的
         # 配置」的清单，皮肤藏在别处会让人找不到。

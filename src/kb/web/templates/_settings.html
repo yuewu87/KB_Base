@@ -8,8 +8,12 @@
 <div class="settings-body">
   <nav class="settings-nav">
     {% for g in groups %}
+      {# `data-group-key` 是**稳定标识**——JS 靠它定位分组（`showGroupByKey`），
+         不拿按钮上那串显示文字去 `find()`。显示名是给人看的，改一次名字
+         不该让「初始化完停在哪一栏」悄悄失灵。 #}
       <button type="button" class="nav-item {{ 'active' if loop.first }}"
               data-group="{{ loop.index0 }}"
+              data-group-key="{{ g.key }}"
               onclick="showGroup(this)">{{ g.name }}</button>
     {% endfor %}
   </nav>
@@ -26,11 +30,12 @@
         {# 「知识库」是唯一一组自己画的：它要**一屏两态**（未初始化 = 一条龙，
            已初始化 = 状态 + 三个动作）。通用字段循环表达不了这个，硬塞进去
            会把模板变成一堆 if。 #}
-        {# **`'知识库'` 这三个字要和 `settings.py` 的 `Group("知识库", …)`
-           逐字对得上。** 对不上时不会报错，只是这一组悄悄退回通用字段循环
-           （一个可改的路径框），而 `test_settings_shows_the_wizard_before_init`
-           找不到 `id="wizard"` 会红——那条测试守着的就是这个。别顺手给分组改名。 #}
-        {% if g.name == '知识库' %}
+        {# 认的是**稳定键** `vault`，不是显示名「知识库」——`Group` 上那个
+           `key` 字段就是为这个加的分开写：显示名随时可以改，改了不该让这一组
+           悄悄退回通用字段循环（一个可改的路径框），而
+           `test_settings_shows_the_wizard_before_init` 找不到 `id="wizard"`
+           会红。 #}
+        {% if g.key == 'vault' %}
           {% include "_vault_pane.html" %}
         {% else %}
         {% for f in g.fields %}

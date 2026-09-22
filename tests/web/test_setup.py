@@ -647,6 +647,60 @@ def test_settings_lists_the_domains_from_disk(initialized_vault, env, tmp_path):
     assert "新领域" in html              # 人工建的也得认
 
 
+def test_the_wizard_renders_the_model_fields_from_settings(client):
+    """段①的字段**由 `settings.GROUPS` 渲染**，不是模板手抄三个 id。
+
+    手抄的话，往「模型配置」加第四个字段时设置窗那栏会有、段①不会有——
+    向导问的和服务实际要的成了两份清单；改键名更静默（`getElementById`
+    返回 `null`，`.value` 当场 TypeError，被 catch 包成「初始化失败：
+    TypeError…」，看着像后端的问题）。JS 那边也靠 `data-model-key` 收值，
+    不再写死键名数组。
+    """
+    from kb.core import settings
+
+    html = client.get("/settings").text
+    model_keys = [f.key for f in next(
+        g for g in settings.GROUPS if g.key == "model"
+    ).fields]
+
+    assert model_keys                      # 那一组不是空的（否则下面恒真）
+    for key in model_keys:
+        assert f'id="w-{key}"' in html, key
+        assert f'data-model-key="{key}"' in html, key
+
+
+def test_the_settings_nav_uses_stable_group_keys(client):
+    """分组靠**稳定键**定位，不靠显示文字。
+
+    原先 JS 是 `.find(b => b.textContent.trim() === '知识库')`——分组一改名
+    `.find` 返回 undefined，而 `if (nav)` 把这件事静默吞掉：初始化成功之后
+    用户停在「模型配置」那一栏，看不见自己刚建好的库，底部却挂着
+    「建好了：…」。模板那边也有一份字面量（`{% if g.name == '知识库' %}`）。
+    """
+    from kb.core import settings
+
+    html = client.get("/settings").text
+    for group in settings.GROUPS:
+        assert f'data-group-key="{group.key}"' in html, group.key
+    assert "showGroupByKey" in client.get("/").text
+
+
+def test_the_initialized_card_lets_you_change_the_vault_path(
+        initialized_vault, env, tmp_path):
+    """**库的位置要能改**——用户当初的原话就是「知识库路径要能填」。
+
+    这一组改成自绘之后那个输入框整个没了，而 `settings.py` 里
+    `KB_VAULT_PATH` 还是 `text`、`editable_keys()` 也还说它能改——
+    契约和界面各说各话。这条钉它真的回来了：有 `name`（走 `saveSettings`
+    那条路）、带 `data-init`（没动过的不会被当成一次修改）。
+    """
+    html = _client_for(env, tmp_path).get("/settings").text
+
+    assert 'id="f-KB_VAULT_PATH"' in html
+    assert 'name="KB_VAULT_PATH"' in html
+    assert f'data-init="{initialized_vault}"' in html
+
+
 def test_the_wizard_prefills_the_configured_path(env, tmp_path):
     """`.env` 里已经配着路径、但那儿不是库（库被挪走 / 盘符没挂）时，
     **设置窗得把那串路径显示出来**。

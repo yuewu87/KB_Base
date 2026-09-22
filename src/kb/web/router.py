@@ -85,6 +85,14 @@ class MigrateBody(BaseModel):
     target: str = ""
 
 
+def _model_group() -> settings.Group:
+    """「模型配置」那一组。**它的 key 只在这里写一次。**
+
+    一条龙的段①靠它渲染——键名手抄四份的那条记档就是从这里收掉的。
+    """
+    return next(g for g in settings.GROUPS if g.key == "model")
+
+
 def settings_context(env_path: Path, cfg: Config) -> dict:
     """给模板的：四组字段 + 它们当前的值（密钥掩码）。
 
@@ -132,6 +140,10 @@ def settings_context(env_path: Path, cfg: Config) -> dict:
 
     groups = [
         {
+            # 稳定标识：模板拿它认组（`{% if g.key == 'vault' %}`）、JS 拿它
+            # 定位导航按钮。**别拿 `g.name` 当标识**——那是给人看的，改一次
+            # 名字就会有一处悄悄失灵，而故障长成「这一组不见了」。
+            "key": group.key,
             "name": group.name,
             "fields": [
                 {
@@ -149,6 +161,7 @@ def settings_context(env_path: Path, cfg: Config) -> dict:
     ]
 
     groups.append({
+        "key": "about",
         "name": "关于",
         "fields": [
             {
@@ -177,10 +190,23 @@ def settings_context(env_path: Path, cfg: Config) -> dict:
         # 路径字符串与领域**从磁盘读，不从配置读**——领域的唯一真源始终是
         # 磁盘（Q95 那条）。判据与防 500 的那道守卫都在 `lifecycle.vault_view`。
         **vault_view(cfg.vault_path),
-        # 一条龙的段①要预填模型名与地址。**密钥不预填**（掩码都不给）：
-        # 「留空 = 不改」是它的语义，预填成掩码等于让人一保存把 key 覆盖掉。
-        "llm_model": values.get("KB_LLM_MODEL", ""),
-        "llm_base_url": values.get("KB_LLM_BASE_URL", ""),
+        # 一条龙的段①**由 `settings.GROUPS` 里那一组渲染**，不是模板手抄
+        # 三个 `id="w-KB_LLM_*"`。手抄的话，往「模型配置」加第四个字段时
+        # 设置窗那栏会有、**段①不会有**——向导问的和服务实际要的成了两份
+        # 清单；改键名更静默（`getElementById('w-' + k)` 返回 `null`，
+        # `.value` 当场 TypeError，被 catch 包成「初始化失败：TypeError…」，
+        # 看着像后端的问题）。
+        "model_fields": [
+            {
+                "key": f.key,
+                "label": f.label,
+                "kind": f.kind,
+                # **密钥不预填**（掩码都不给）：「留空 = 不改」是它的语义，
+                # 预填成掩码等于让人一保存把 key 覆盖掉。
+                "value": "" if f.kind == "secret" else values.get(f.key, ""),
+            }
+            for f in _model_group().fields
+        ],
         # 段③那九个复选框。清单是常量、不进 `.env`——勾选的作用只是建出目录，
         # 建完就不再被读第二次（见 `DOMAIN_CANDIDATES` 那段注释）。
         "domain_candidates": DOMAIN_CANDIDATES,
