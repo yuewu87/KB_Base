@@ -665,28 +665,29 @@ code {
   background: var(--line);
 }
 
-/* 被跳过的步骤**挂在主线的旁边**，不占主线。
+/* 被跳过的步骤：**节点不动，是那根连接线从它旁边绕过去。**
 
-   用户 2026-09-23：「不要写『没跑』，很丑，改为路径从绕过去，不断」。
-   所以：那条链是一根**不断开的直线**，路径从这一步旁边绕过去，
-   被跳过的步骤挂在右边、由一小段横线接回主线。
-   **那根横线不能省**——省了就是一个孤零零的圈浮在旁边，看着像排版错了；
-   有了它才读得出「这一步在链上，只是没走那条路」。
+   用户 2026-09-23 的原话是「不要写『没跑』，很丑，改为路径从绕过去，不断」，
+   并画了张示意图：圆圈还在轴线上，线从它右边拐出去、绕一小段、再接回下面
+   那个圆圈。所以这里画的是个**三边方框**（上、右、下三条边，**左边不封口**）
+   ——左边那个口正好就是主线上下两段竖线接进来的地方。
 
-   几何：主线在 `margin-left: 6.5px` 处，所以整行右推 20px、
-   横线从 6.5px 画到 20px。**改 `.chain-line` 的缩进时这里要跟着改。 */
-.chain-step.skipped {
-  padding-left: 20px;
-  position: relative;
-}
+   几何：`.chain-line` 的轴线在 `left: 6.5px`（宽 1px，中心 7px），方框就从
+   7px 起、往右绕 10px；节点本身占 0..14px（居中 7px）、标签从 22px 起，
+   **够得着，不打架**。改 `.chain-line` 的缩进或 `.mark` 的宽度时这里要跟着改。
+
+   （第一版做反了：把节点推到了线的右边。图里节点是**不动**的。） */
+.chain-step.skipped { position: relative; }
 .chain-step.skipped::before {
   content: "";
   position: absolute;
-  left: 6.5px;
-  top: 50%;
-  width: 13.5px;
-  height: 1px;
-  background: var(--line);
+  left: 7px;
+  top: 0;
+  width: 10px;
+  height: 100%;
+  border-top: 1px solid var(--line);
+  border-right: 1px solid var(--line);
+  border-bottom: 1px solid var(--line);
 }
 
 /* ---- 侧栏气泡：手机聊天式 ----
@@ -1339,39 +1340,39 @@ button.side-btn {
   --shadow-lift: 0 2px 6px rgba(0, 0, 0, .48), 0 12px 28px rgba(0, 0, 0, .42);
 }
 [data-skin="garnet"] {   /* 石榴红雾粉桃 */
-  color-scheme: dark;
-  --paper: #410d14;
-  --surface: #4f0f19;
-  --ink: #fbe9ea;
-  --line: #681420;
-  --accent: #f1dddf;
-  --accent-soft: #5a3339;
-  --muted: #c5a9ac;
-  --faint: #9e7b7f;
-  --ink-soft: #ddc6c8;
-  --faint-dim: #886165;
-  --line-soft: #5d121d;
-  --line-strong: #7a2e38;
-  --divider: #dfc6c9;
-  --accent-mid: #f4e4e6;
-  --accent-tint: #451118;
-  --accent-line: #69444a;
-  --accent-ring: rgba(244, 228, 230, 0.28);
-  --accent-ink: #f1dddf;
+  color-scheme: light;
+  --paper: #FDF8F8;
+  --surface: #FFFFFF;
+  --ink: #33191E;
+  --line: #F1DDDF;
+  --accent: #E72D48;
+  --accent-soft: #FBE4E7;
+  --muted: #6e5a5d;
+  --faint: #98888b;
+  --ink-soft: #533d41;
+  --faint-dim: #b0a3a5;
+  --line-soft: #f7eced;
+  --line-strong: #dac5c8;
+  --divider: #543e42;
+  --accent-mid: #ea4a62;
+  --accent-tint: #fdf4f4;
+  --accent-line: #f9d2d7;
+  --accent-ring: rgba(234, 74, 98, 0.12);
+  --accent-ink: #da2c45;
   --on-accent: #0a0a0c;
-  --on-danger: #0a0a0c;
-  --journal-soft: #662c35;
-  --journal-line: #93666c;
-  --terminal-void: #24070b;
-  --terminal-text: #e5d8da;
-  --scrim: rgba(0, 0, 0, .62);
-  --sweep-gold: #f1dddf;
-  --sweep-gold-deep: #f3e1e3;
-  --sweep-gold-wash: #662c35;
-  --danger: #d4736f;
-  --danger-hover: #e08a86;
-  --shadow: 0 1px 2px rgba(0, 0, 0, .40), 0 4px 12px rgba(0, 0, 0, .32);
-  --shadow-lift: 0 2px 6px rgba(0, 0, 0, .48), 0 12px 28px rgba(0, 0, 0, .42);
+  --on-danger: #ffffff;
+  --journal-soft: #fdeef0;
+  --journal-line: #f8c4cc;
+  --terminal-void: #281417;
+  --terminal-text: #d2ccce;
+  --scrim: rgba(51, 25, 30, 0.38);
+  --sweep-gold: #d86a59;
+  --sweep-gold-deep: #b5594b;
+  --sweep-gold-wash: #fbf0ee;
+  --danger: #8c3b3b;
+  --danger-hover: #a24646;
+  --shadow: 0 1px 2px rgba(51, 25, 30, 0.04), 0 4px 12px rgba(51, 25, 30, 0.045);
+  --shadow-lift: 0 2px 6px rgba(51, 25, 30, 0.07), 0 12px 28px rgba(51, 25, 30, 0.07);
 }
 [data-skin="neon"] {   /* 极光紫荧光绿 */
   color-scheme: dark;
