@@ -51,7 +51,20 @@ Windows 下 `text=True` 按本地编码（GBK）解码，而 git 的输出（中
 
 **`git add` 只要有一个 pathspec 不匹配就整体放弃**，一个文件都进不去。所以给 `git add` 传路径前必须先过滤掉 git 处理不了的（既不在磁盘上、也没被跟踪的）。
 
-**`.bat` 文件必须写成纯 ASCII。** `cmd.exe` 按系统 OEM 代码页（中文 Windows 上是 GBK）逐字节读批处理文件，UTF-8 的中文注释会被误解码、`REM` 行提前断裂，**后半截当成命令执行**。要保留中文注释就得把文件存成 GBK——但那样用 UTF-8 编辑器一改又坏，所以本项目一律 ASCII，中文说明放文档里。
+**编码按文件类型定，别凭感觉。** Windows 上永远有一处在按系统码页（`chcp` = 936，GBK）走——**不是「有时候要切编码」，是每一处都得自己声明**：
+
+| 写什么 | 用什么 | 为什么 |
+|---|---|---|
+| `.bat` | **纯 ASCII** | `cmd.exe` 按系统 OEM 码页（GBK）逐字节读。UTF-8 的中文**不是「显示乱码」那么轻**——字节错位会**吞掉换行符**，下一行并进上一行：注释把下一行的代码整行吃掉，或者乱码跑出去被当成命令执行 |
+| `.ps1` | **纯 ASCII**；非要中文就存 **UTF-8 带 BOM** | Windows PowerShell 5.1 无 BOM 时按系统 ANSI 码页（GBK）读，症状同上；**认了 BOM 它才按 UTF-8 读** |
+| `.py` | 随便，中文照写 | Python 3 源码默认按 UTF-8 读（PEP 3120）——**唯一自动就对的一处** |
+| `open()` 读写的文件 | 显式 `encoding="utf-8"` | 不给就用 `locale`（cp936），读 UTF-8 文件当场 `UnicodeDecodeError` |
+| `subprocess` 的输出 | 显式 `encoding="utf-8", errors="replace"` | 见本节第 1 条 |
+| Python 往管道写 | 调用侧带 `PYTHONIOENCODING=utf-8` | 管道里 `sys.stdout.encoding` 是 **gbk**，下游按 UTF-8 读就是乱码 |
+
+**`.bat` 为什么不干脆存 GBK**：GBK 能跑（实测过），但**守不住**——用 UTF-8 编辑器打开再存一次就变回去了。ASCII 两种解码器读出来一样，没这个问题。
+
+实测数据与机制（含「错位吞换行符」的字节级证据）见 `docs/04_踩坑与经验.md` 第 37–39 条。
 
 ## 常用命令
 
