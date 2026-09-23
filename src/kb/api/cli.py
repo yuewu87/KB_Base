@@ -51,6 +51,28 @@ def default_project() -> str | None:
 
 # ------------------------------------------------------------ 命令
 
+# **终端文案不写 Markdown**——`**加粗**` 和反引号在这儿只会原样露出来，
+# 文档里那套写法是给渲染器看的。下面这两行是真要读到人眼里去的。
+NO_PROJECT_MESSAGE = (
+    "当前目录不在 git 仓库里，取不到项目名——这里停下，不拿目录名顶替"
+    "（/tmp 会记成 Temp 那种）。两条路：\n"
+    "  · cd 进你的项目再投（正文用 --file 传绝对路径就行，不用 cd 出去）\n"
+    "  · 这条确实不挂项目，写 --project \"\""
+)
+
+
+def resolve_project(given: str | None) -> str | None:
+    """这次投递挂哪个项目。**定不下来返回 `None`，由调用方去问。**
+
+    `--project ""` 是**明确不挂项目**，不是「没给」——网页投递本来就是
+    项目留空（`/new` 那条），所以那是个合法状态。所以这个函数挡的是「猜」，
+    不是「不挂」。
+    """
+    if given is not None:
+        return given or None
+    return default_project()
+
+
 def cmd_push(args) -> int:
     cfg = load_config()
     content = read_content(args).strip()
@@ -58,7 +80,10 @@ def cmd_push(args) -> int:
         print("正文为空。用 --content / --file 传入，或从 stdin 管道输入。", file=sys.stderr)
         return 2
 
-    project = args.project if args.project is not None else default_project()
+    project = resolve_project(args.project)
+    if args.project is None and project is None:
+        print(NO_PROJECT_MESSAGE, file=sys.stderr)
+        return 2
 
     with make_client(cfg) as client:
         resp = client.post(
@@ -71,7 +96,10 @@ def cmd_push(args) -> int:
             },
         )
         resp.raise_for_status()
-        print(f"已收，id={resp.json()['id']}")
+        # **项目名要印出来。** 记错了当场看得见——原先只印 id，项目名藏在
+        # frontmatter 里，得 `kb inbox` 才看得到，这正是那句「回退到目录名」
+        # 能一路静默下去的原因：没有任何一步把它显示给人看。
+        print(f"已收，id={resp.json()['id']}，项目 {project or '（无）'}")
     return 0
 
 

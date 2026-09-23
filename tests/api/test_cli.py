@@ -124,11 +124,61 @@ def test_default_project_uses_git_root(tmp_path, monkeypatch):
     assert project_name_from_cwd(deep) == tmp_path.name
 
 
-def test_default_project_falls_back_to_cwd(tmp_path):
-    """非 git 仓库回退到 cwd 的 basename，而不是返回 None。"""
+def test_default_project_is_none_outside_a_repo(tmp_path):
+    """**非 git 仓库不再拿目录名顶替——返回 `None`。**
+
+    原先回退到 `cwd.name`，于是从临时目录里投递会把项目记成 `Temp`：
+    投递成功、不报错、不提示，直到哪天在库里看见一篇项目叫 `Temp` 的笔记
+    才发现——正是这个项目一贯要消灭的「看起来一切正常」。
+
+    项目自己的规矩是「静默回退可以，但**得让人一看就知道不对**」
+    （`_log_level` 那条：坏配置用默认值跑着，设置窗里会显示默认值）。
+    而项目名印在 frontmatter 里，没人会去看——**「看得见」这个前提不成立**，
+    所以这里改成不猜。
+    """
     from kb.core.vault import project_name_from_cwd
 
-    assert project_name_from_cwd(tmp_path) == tmp_path.name
+    assert project_name_from_cwd(tmp_path) is None
+
+
+def test_push_outside_a_repo_is_rejected(fake_server, monkeypatch, tmp_path, capsys):
+    """**取不到项目名就停下，不猜。**
+
+    判据是「不在任何 git 仓库里」——这一条**机械可判**；而「`Temp` 是不是
+    真项目名」判不了。所以能机械判的那条当闸，判不了的那条不该由代码猜。
+    """
+    monkeypatch.chdir(tmp_path)          # tmp_path 不是 git 仓库
+
+    assert cli.main(["push", "--content", "内容"]) != 0
+
+    err = capsys.readouterr().err
+    assert "--project" in err                        # 说清两条出路
+    assert "cd" in err
+    assert not list_drafts(fake_server.vault_path)   # **一条都没写进去**
+
+
+def test_push_accepts_an_explicitly_empty_project(fake_server, capsys):
+    """`--project ""` ＝**明确不挂项目**，不是「没给」。
+
+    网页投递本来就是项目留空（`/new` 那条），所以这是个**合法状态**——
+    非仓库时报错挡的是「猜」，不是「不挂」。
+    """
+    assert cli.main(["push", "--content", "内容", "--project", ""]) == 0
+
+    drafts = list_drafts(fake_server.vault_path)
+    assert not read_draft(drafts[0]).project
+
+
+def test_push_reports_the_project_it_used(fake_server, capsys):
+    """投递成功要把**项目名印出来**——记错了当场看得见。
+
+    原先只印一句 `已收，id=...`，项目名藏在 frontmatter 里，得 `kb inbox`
+    才看得到（`[KN_Base]` 那个方括号）。而这正是这次那句「回退到目录名」
+    能一路静默下去的原因：**没有任何一步把它显示给人看**。
+    """
+    assert cli.main(["push", "--content", "内容", "--project", "电商后台"]) == 0
+
+    assert "电商后台" in capsys.readouterr().out
 
 
 # ---------- 端到端（假服务）----------
@@ -146,9 +196,16 @@ def test_push_then_inbox_then_organize(fake_server, capsys):
     assert (fake_server.vault_path / "计算机" / "并发写锁.md").exists()
 
 
-def test_push_defaults_project_from_cwd(fake_server, monkeypatch, tmp_path):
-    """不传 --project 时用当前目录推断，而不是留空。"""
-    monkeypatch.chdir(tmp_path)
+def test_push_defaults_project_from_the_git_root(fake_server, monkeypatch, tmp_path):
+    """在 git 仓库里不传 `--project` 时，仍然**取仓库根的目录名**。
+
+    停在子目录也要取到根——那样 basename 会取成 `src`。
+    """
+    subprocess.run(["git", "init", "-b", "main"], cwd=tmp_path, capture_output=True)
+    deep = tmp_path / "src"
+    deep.mkdir()
+    monkeypatch.chdir(deep)
+
     cli.main(["push", "--content", "内容"])
 
     drafts = list_drafts(fake_server.vault_path)

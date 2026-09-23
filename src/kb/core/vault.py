@@ -265,10 +265,20 @@ def mark_superseded(path: Path, by: str) -> None:
 
 
 def project_name_from_cwd(cwd: Path) -> str | None:
-    """取 git 仓库根的目录名作为项目名（Q30）。
+    """取 git 仓库根的目录名作为项目名（Q30）。**不在仓库里返回 `None`。**
 
     用 git 根而非 cwd 本身——agent 可能停在子目录（如 `src/kb/core/`），
-    那样 basename 会取到 `core`。非 git 仓库回退到 cwd 的 basename。
+    那样 basename 会取到 `core`。
+
+    **非 git 仓库不再回退到 `cwd.name`**（2026-09-23 改，用户拍板）。
+    原先回退，于是从临时目录投递会把项目记成 `Temp`——投递成功、不报错、
+    不提示，直到哪天在库里看见一篇项目叫 `Temp` 的笔记才发现。
+    项目自己的规矩是「静默回退可以，但**得让人一看就知道不对**」
+    （`config._log_level` 那条：坏配置拿默认值跑着，**设置窗里会显示默认值**）；
+    而项目名印在 frontmatter 里没人会看，**那个前提不成立**。
+
+    所以判据是「在不在 git 仓库里」——**这一条机械可判**；而「`Temp` 是不是
+    真项目名」判不了。能机械判的当闸，判不了的别猜。拿 `None` 的调用方去问人。
     """
     try:
         # 返回值不能叫 `proc`——那会遮住上面 import 进来的 `kb.proc`
@@ -287,7 +297,7 @@ def project_name_from_cwd(cwd: Path) -> str | None:
             return Path(done.stdout.strip()).name
     except (OSError, subprocess.SubprocessError):
         pass
-    return cwd.name or None
+    return None
 
 
 # ---------------------------------------------------------------- 索引页（Q56）
