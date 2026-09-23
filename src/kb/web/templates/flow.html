@@ -51,14 +51,16 @@
                 </svg>
                 <span>{{ step }}</span>
               {% elif state == 'skipped' %}
+                {# **不写「（没跑）」**（用户 2026-09-23：「很丑」）。
+                   「这一步没走」靠**它挂在主线的旁边**表达：那条链是一条不断的
+                   直线，路径从它旁边绕过去；被跳过的这一步挂在右边、由一小段
+                   横线接着。文案只留在 title 里（读屏读得到）。 #}
                 <svg class="mark" viewBox="0 0 16 16" role="img">
-                  <title>{{ step }}：这一步没跑（流程越过了它，不是卡住）</title>
-                  <circle cx="8" cy="8" r="6.3" fill="none" stroke="currentColor"
-                          stroke-width="1.4" stroke-dasharray="2.5 2"/>
-                  <path d="M5.6 8h4.8" fill="none" stroke="currentColor"
-                        stroke-width="1.4" stroke-linecap="round"/>
+                  <title>{{ step }}：这一步没走，流程从旁边过去了</title>
+                  <circle cx="8" cy="8" r="5.4" fill="none" stroke="currentColor"
+                          stroke-width="1.4"/>
                 </svg>
-                <span>{{ step }}（没跑）</span>
+                <span>{{ step }}</span>
               {% else %}
                 <svg class="mark" viewBox="0 0 16 16" role="img">
                   <title>{{ step }}：还没走到</title>

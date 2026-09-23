@@ -665,6 +665,30 @@ code {
   background: var(--line);
 }
 
+/* 被跳过的步骤**挂在主线的旁边**，不占主线。
+
+   用户 2026-09-23：「不要写『没跑』，很丑，改为路径从绕过去，不断」。
+   所以：那条链是一根**不断开的直线**，路径从这一步旁边绕过去，
+   被跳过的步骤挂在右边、由一小段横线接回主线。
+   **那根横线不能省**——省了就是一个孤零零的圈浮在旁边，看着像排版错了；
+   有了它才读得出「这一步在链上，只是没走那条路」。
+
+   几何：主线在 `margin-left: 6.5px` 处，所以整行右推 20px、
+   横线从 6.5px 画到 20px。**改 `.chain-line` 的缩进时这里要跟着改。 */
+.chain-step.skipped {
+  padding-left: 20px;
+  position: relative;
+}
+.chain-step.skipped::before {
+  content: "";
+  position: absolute;
+  left: 6.5px;
+  top: 50%;
+  width: 13.5px;
+  height: 1px;
+  background: var(--line);
+}
+
 /* ---- 侧栏气泡：手机聊天式 ----
 
    **限定在 `.chat-history` 里面**：`ai对话` 页主区那串对话气泡用的是同一个
