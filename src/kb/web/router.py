@@ -40,7 +40,7 @@ from kb.core.lifecycle import (
     vault_ready,
     vault_view,
 )
-from kb.core.vault import list_drafts, list_notes
+from kb.core.vault import counts
 from kb.core.vault_setup import DEFAULT_DOMAINS, DOMAIN_CANDIDATES, init_vault
 from kb.llm.base import LLM, LLMError
 from kb.logging_setup import LOG_DIR
@@ -646,8 +646,8 @@ def build_router(
         # `.env`。也不能只把 `exists()` 换成 `is_dir()`：一个普通目录会被数出
         # 一堆「笔记」吓用户，而 `remove_vault` 根本不会碰它。
         if vault_ready(vault_path):
-            notes = len(list_notes(vault_path))
-            drafts = len(list_drafts(vault_path))
+            counted = counts(vault_path)
+            notes, drafts = counted["notes"], counted["drafts"]
         chats = 0
         chats_dir = data_dir / "chats"
         if chats_dir.is_dir():
