@@ -23,6 +23,7 @@ from pathlib import Path
 
 from kb.core.actions import describe_actions, run_action
 from kb.core.chat_store import load_chat, new_chat_id, save_chat
+from kb.core.vault import counts
 from kb.llm.base import LLM, LLMError
 
 MAX_ROUNDS = 4
@@ -34,7 +35,22 @@ class ChatError(ValueError):
     """模型输出不可用。"""
 
 
-def build_system_prompt() -> str:
+def _size_line(vault_root: Path | None) -> str:
+    """系统提示里那行「库有多大」。
+
+    **没库时说实话**，不写「0 篇笔记」——那个看着像库坏了，而「还没有知识库」
+    用户一眼就懂下一步该干什么。
+
+    ⚠️ **每轮现算**，不缓存：一轮对话里用户可能刚投了一条，下一轮那个数就该变。
+    代价是一次目录扫描（只走目录、不读正文），几十篇是瞬间的事。
+    """
+    if vault_root is None:
+        return "还没有知识库"
+    counted = counts(vault_root)
+    return f"{counted['notes']} 篇笔记 · {counted['drafts']} 条待整理"
+
+
+def build_system_prompt(vault_root: Path | None) -> str:
     return f"""你是知识库助手，替用户处理他的个人知识库。
 
 **只输出 JSON，不要输出任何其他文字，不要用代码块包裹。**
@@ -44,6 +60,10 @@ def build_system_prompt() -> str:
   "action": "要执行的动作名，不需要就填 null",
   "params": {{"参数名": "值"}}
 }}
+
+## 当前库
+
+{_size_line(vault_root)}
 
 ## 你能做的动作
 
@@ -115,7 +135,7 @@ def run_turn(
     """
     messages = list(history)
     messages.append({"role": "user", "content": user_message})
-    system = build_system_prompt()
+    system = build_system_prompt(vault_root)
 
     for round_no in range(1, MAX_ROUNDS + 1):
         try:
