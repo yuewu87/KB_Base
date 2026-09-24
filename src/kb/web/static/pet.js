@@ -6,21 +6,25 @@
 // ⚠️ **颜色一律走 style.css 里的变量**，这里不碰颜色。style.css 有「变量块
 // 之外不许出现十六进制」的防回潮测试守着，桌宠的样式同样归它管。
 (function () {
+  // **两个元素都得在才继续。** 只判 `pet` 的话，将来哪个页面写了 `#pet`
+  // 却漏了 `#pet-bubble`，下面 `bubble.textContent` 那一串就在加载期当场抛错、
+  // 整个文件停住——桌宠连拖都拖不动。而页面上只表现为「它不动了」，
+  // 看不出是缺了个 div。
   var pet = document.getElementById('pet');
-  if (!pet) return;                    // 页面里没有就安静退出
+  var bubble = document.getElementById('pet-bubble');
+  if (!pet || !bubble) return;
 
   var BUBBLE_GAP = 8;                  // 气泡离桌宠多少
-  var SIZE = 46;                       // 与 style.css 里的 .pet 尺寸一致
   var POS_KEY = 'kn.pet.pos';          // 位置存在 localStorage 的哪个键
   var EDGE = 24;                       // 初始位置离右下角多少
   var FLING_MIN = 2500;                // px/s，松手速度低于它就不飞
+  var FLING_IDLE_MS = 100;             // 松手前静了这么久就不算「甩」
   var FRICTION = 0.985;                // 每帧衰减
   var BOUNCE = 0.62;                   // 撞边保留多少速度
   var STOP_AT = 0.02;                  // px/ms，低于它就停
   var DRAG_SLOP = 5;                   // 位移小于它算「点击」
   var HIDE_AFTER = 4000;               // 气泡多久自己收（毫秒）
 
-  var bubble = document.getElementById('pet-bubble');
   var hideTimer = null;
 
   function showBubble(text, bad) {
@@ -125,8 +129,12 @@
   var vx = 0, vy = 0;                  // px/ms
   var raf = null;
 
-  function maxX() { return window.innerWidth - SIZE; }
-  function maxY() { return window.innerHeight - SIZE; }
+  // **尺寸从元素上读，不写死。** 写死 46 的话，style.css 里那个
+  // `width/height: 46px` 和这里就成了同一个数的两处真相——改一处漏一处，
+  // 而且漏了不会有任何东西报错。`offsetWidth` 是布局值，**不受果冻那个
+  // `transform: scale()` 影响**，动画中途取也是 46。
+  function maxX() { return window.innerWidth - pet.offsetWidth; }
+  function maxY() { return window.innerHeight - pet.offsetHeight; }
   function clamp(v, lo, hi) { return Math.min(Math.max(v, lo), hi); }
 
   function moveTo(x, y) {
@@ -165,13 +173,16 @@
   pet.addEventListener('pointerdown', function (e) {
     if (raf) { cancelAnimationFrame(raf); raf = null; }
     hideBubble();
-    pet.setPointerCapture(e.pointerId);
     pet.classList.add('dragging');
     vx = vy = 0;
     drag = {
       sx: e.clientX, sy: e.clientY, ox: pet.offsetLeft, oy: pet.offsetTop,
       px: e.clientX, py: e.clientY, last: performance.now(), moved: false,
     };
+    // **捕获放在状态摆好之后**：它若抛（`NotFoundError`），前面那些照旧生效，
+    // 这一次拖动最坏只是「没捕获」；放在前面的话它一抛后面整段都不执行，
+    // 这一次拖动会静默降级成「只能点」。
+    pet.setPointerCapture(e.pointerId);
     e.preventDefault();
   });
 
@@ -195,12 +206,30 @@
   pet.addEventListener('pointerup', function () {
     pet.classList.remove('dragging');
     var moved = drag && drag.moved;
+    // **松手前静了多久。** `vx/vy` 只在 `pointermove` 里更新——指针一停住，
+    // 浏览器就不再派发事件，速度会**冻结在停住前那个值**。不判这一下，
+    // 「快速拖过去 → 停住对准 → 松手」会拿几百毫秒前那个速度飞出去，
+    // 而真实的松手速度其实是 0（看上去就是「我没甩它，它自己跑了」）。
+    var idle = drag ? performance.now() - drag.last : 0;
     drag = null;
 
     if (!moved) { onPetClick(); savePos(); return; }
 
     var pxPerSec = Math.hypot(vx, vy) * 1000;
-    if (pxPerSec >= FLING_MIN) { fling(); } else { vx = vy = 0; }
+    if (idle > FLING_IDLE_MS || pxPerSec < FLING_MIN) { vx = vy = 0; } else { fling(); }
+    savePos();
+  });
+
+  // **被打断也要收尾。** 指针被系统接管时（触摸端的系统手势、捕获丢失、
+  // 元素被移除）**只有 `pointercancel`，不会有 `pointerup`**。不收尾的话
+  // `drag` 一直非空——之后**没按着键**的 `pointermove` 也会让桌宠跟着光标跑，
+  // `dragging` 那个抓手光标也一直留在身上，得再点一下才复位。
+  //
+  // 被打断就**停在原地**、不弹射：这一次拖动本来就没正常结束。
+  pet.addEventListener('pointercancel', function () {
+    pet.classList.remove('dragging');
+    drag = null;
+    vx = vy = 0;
     savePos();
   });
 

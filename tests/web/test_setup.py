@@ -1,6 +1,7 @@
 """知识库生命周期的端点。走真 `init_vault` 的库，不是手搓的半骨架。"""
 
 import shutil
+from pathlib import Path
 
 import pytest
 from fastapi.testclient import TestClient
@@ -898,3 +899,45 @@ def test_pet_js_is_served(client):
     r = client.get("/static/pet.js")
     assert r.status_code == 200
     assert "getElementById('pet')" in r.text
+
+
+# ---------- 桌宠的静态文件 ----------
+#
+# 上面两条查的是「页面里有没有」；下面两条**直接读文件**，挡的是另一类漏法。
+
+_STATIC = Path(__file__).resolve().parents[2] / "src" / "kb" / "web" / "static"
+
+
+def test_the_pet_style_block_is_really_there():
+    """`.pet` 那段样式在 `style.css` 里，而且是 `position: fixed`。
+
+    **这条挡的是本项目唯一那种「页面看着正常、测试全绿、功能其实没了」。**
+    把 `style.css` 末尾那整块 `.pet` 删掉，上面两条照样过——`id="pet"` 还在
+    HTML 里、`pet.js` 还在被引——但桌宠会退化成一个没有样式、留在文档流里的
+    方块挂在页面最底下，`pet.js` 那套 `offsetLeft` 坐标随之全部失去意义。
+    **页面上不会报任何错。**
+
+    读文件断言的写法照抄 `test_skins.py` 那批（它们也是直接读 `style.css`）。
+    """
+    css = (_STATIC / "style.css").read_text(encoding="utf-8")
+    start = css.index("\n.pet {")
+    block = css[start:css.index("}", start)]
+    assert "position: fixed" in block
+    # 层级是设计定死的：`.sidebar` 20 / 桌宠 40 / `.overlay` 50 / `.skin-menu` 60。
+    # 40 压着侧栏、被后面两个压着——桌宠飘到设置窗或皮肤浮层上面会挡事。
+    assert "z-index: 40" in block
+
+
+def test_the_fling_threshold_is_the_tuned_value():
+    """弹射阈值钉在 2500 px/s。
+
+    **这个数是用户在可交互原型里拿滑杆调出来的**（原型带「上一次松手：
+    XXX px/s」的实时读数，他甩了几下定的），不是随手写的常数——随手拖通常
+    几百、刻意一甩两三千，所以 2500 意味着「得刻意快甩」。出处见
+    `docs/03_问题记录.md` 里桌宠那条 Q。
+
+    钉住它的理由：**这个数在页面上看不出来**。改成 250 照样跑、照样好看，
+    只有甩下去才知道手感变了。
+    """
+    js = (_STATIC / "pet.js").read_text(encoding="utf-8")
+    assert "FLING_MIN = 2500" in js
