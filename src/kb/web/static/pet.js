@@ -178,7 +178,9 @@
   pet.addEventListener('pointermove', function (e) {
     if (!drag) return;
     var dx = e.clientX - drag.sx, dy = e.clientY - drag.sy;
-    if (Math.abs(dx) > DRAG_SLOP || Math.abs(dy) > DRAG_SLOP) drag.moved = true;
+    // **判合位移，不是单轴。** 按单轴判的话，斜着拖 4px/4px（合位移 5.7px）
+    // 会被算成「没挪动」= 一次点击——明明拖了。
+    if (Math.hypot(dx, dy) > DRAG_SLOP) drag.moved = true;
 
     moveTo(clamp(drag.ox + dx, 0, maxX()), clamp(drag.oy + dy, 0, maxY()));
 
@@ -203,8 +205,12 @@
   });
 
   window.addEventListener('resize', function () {
-    // ⚠️ 取 `offsetTop`，**不是 `offsetY`**：`offsetY` 在 `position: fixed`
-    // 的元素上不是相对视口的距离，拿它算会跑到屏幕外面去。
+    // ⚠️ **整套坐标都建立在「`position: fixed` 元素的 `offsetLeft/offsetTop`
+    // 是相对视口的」之上**（这里、拖动起点、弹射基准、存档都靠它）。
+    // 这是 offsetParent 为 null 时的行为——`html` / `body` / `.shell` 只要
+    // 哪一个沾上 `transform` / `filter` / `will-change` / `contain`，
+    // offsetParent 就不再是 null，坐标会整体偏掉，而**页面上不会报任何错**。
+    // 加这类样式之前先想想这里。
     moveTo(clamp(pet.offsetLeft, 0, maxX()), clamp(pet.offsetTop, 0, maxY()));
   });
 })();
