@@ -1629,7 +1629,7 @@ button.secondary.danger:hover {
 
    **层级 40，和桌宠同一层。** 全站现成的层级：`.sidebar` 20 / 手机与桌宠 40 /
    `.overlay` 50 / `.skin-menu` 60。手机和桌宠不靠 z-index 分高下——手机滑出来时
-   会把它**顶开**（见 `pet.js` 里 `kb:phone` 那段），两者根本不重叠。
+   会把它**弹开**（见 `pet.js` 里 `kb:phone` 那段），两者根本不重叠。
 
    ⚠️ **别给 `.shell` / `body` / `html` 加 `transform` / `filter` / `will-change` /
    `contain`。** 桌宠那套坐标（`offsetLeft/offsetTop` 相对视口）靠的就是
