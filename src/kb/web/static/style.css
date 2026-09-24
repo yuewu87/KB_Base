@@ -1651,3 +1651,59 @@ button.secondary.danger:hover {
 }
 .remove-confirm input { margin: 0; accent-color: var(--danger); }
 .modal-actions { display: flex; gap: 8px; justify-content: flex-end; }
+
+/* ---- 悬浮桌宠 ----
+
+   全站每一页都在，位置记在 localStorage。形象跟左上角那个 KB 标一致
+   （圆角方块 + 强调色底），但它还要 fixed 定位、拖拽光标、果冻动画，
+   所以不复用 `.brand-mark` 那个类，另写一套。
+
+   **层级必须是 40。** 全站现成的层级（已核过 style.css）：`.sidebar` 20、
+   `.overlay`（设置窗、移除确认、服务已停）50、`.skin-menu`（皮肤浮层）60。
+   40 压着侧栏、被后面两个压着——桌宠飘在设置窗或皮肤浮层上面会挡事。 */
+
+.pet {
+  position: fixed;
+  z-index: 40;
+  width: 46px; height: 46px;
+  border-radius: 13px;
+  background: var(--accent);
+  color: var(--on-accent);
+  display: grid; place-items: center;
+  font-size: 15px; font-weight: 700; letter-spacing: -.02em;
+  cursor: grab;
+  touch-action: none;                /* 触摸拖动时别让浏览器跟着滚 */
+  user-select: none;
+  box-shadow: var(--shadow-lift);
+  transform-origin: 50% 50%;
+}
+
+.pet.dragging { cursor: grabbing; }
+
+/* 果冻：点一下的反馈。振幅取的是原型里「弹」那一档（用户在原型里选的）。 */
+.pet.jelly { animation: pet-jelly .7s cubic-bezier(.3, 1.9, .5, 1); }
+@keyframes pet-jelly {
+  0%   { transform: scale(1, 1); }
+  20%  { transform: scale(1.38, .66); }
+  42%  { transform: scale(.74, 1.30); }
+  62%  { transform: scale(1.20, .84); }
+  82%  { transform: scale(.94, 1.07); }
+  100% { transform: scale(1, 1); }
+}
+
+.pet-bubble {
+  position: fixed;
+  z-index: 41;                        /* 压着桌宠，但仍在 .overlay 下面 */
+  max-width: 230px;
+  padding: 8px 11px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--surface);
+  color: var(--ink);
+  font-size: 12.5px;
+  line-height: 1.6;
+  box-shadow: var(--shadow-lift);
+  pointer-events: auto;               /* 悬停暂停计时靠它 */
+}
+.pet-bubble[hidden] { display: none; }
+.pet-bubble.bad { color: var(--danger); }

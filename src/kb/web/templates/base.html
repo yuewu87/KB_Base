@@ -5,6 +5,9 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>{% block title %}KN_Base{% endblock %}</title>
   <link rel="stylesheet" href="/static/style.css">
+  {# 桌宠：本项目第一个独立 .js。`defer` 保证它在 DOM 解析完之后才跑，
+     而 `pet.js` 里第一句就是 `getElementById('pet')`。 #}
+  <script src="/static/pet.js" defer></script>
 </head>
 <body>
   <div class="shell">
@@ -205,6 +208,11 @@
       </div>
     </div>
   </div>
+
+  {# 悬浮桌宠。**摆在所有 `.overlay` 之后**是为了层级好调（见 style.css 里
+     那条 z-index 注释）；它是 `position: fixed`，在文档里的位置不影响显示。 #}
+  <div class="pet" id="pet" title="点一下看库的大小">KB</div>
+  <div class="pet-bubble" id="pet-bubble" hidden></div>
 
   <script>
     // 设置窗：fetch 片段塞进遮罩层。不从每个页面各背一份隐藏的窗口标记——

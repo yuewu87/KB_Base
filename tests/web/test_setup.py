@@ -878,3 +878,23 @@ def test_sidebar_is_not_greyed_after_init(initialized_vault, env, tmp_path):
     它照样绿——别以为那边还兜着一层。
     """
     assert "is-disabled" not in _client_for(env, tmp_path).get("/").text
+
+
+# ---------- 桌宠 ----------
+
+def test_the_page_carries_the_pet(client):
+    """每页都要有桌宠那个元素，而且要引到 `pet.js`。
+
+    分成两条断言是因为**漏哪一样它都不动**：少了 div，脚本找不到东西挂；
+    少了 script，div 就是个不会动的方块。而这两种漏法页面上都不会报错。
+    """
+    html = client.get("/").text
+    assert 'id="pet"' in html
+    assert '<script src="/static/pet.js" defer></script>' in html
+
+
+def test_pet_js_is_served(client):
+    """`static/pet.js` 真能被取到——**本项目第一个独立 `.js`**。"""
+    r = client.get("/static/pet.js")
+    assert r.status_code == 200
+    assert "getElementById('pet')" in r.text
