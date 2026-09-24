@@ -11,6 +11,12 @@
 
   var BUBBLE_GAP = 8;                  // 气泡离桌宠多少
   var SIZE = 46;                       // 与 style.css 里的 .pet 尺寸一致
+  var POS_KEY = 'kn.pet.pos';          // 位置存在 localStorage 的哪个键
+  var EDGE = 24;                       // 初始位置离右下角多少
+  var FLING_MIN = 2500;                // px/s，松手速度低于它就不飞
+  var FRICTION = 0.985;                // 每帧衰减
+  var BOUNCE = 0.62;                   // 撞边保留多少速度
+  var STOP_AT = 0.02;                  // px/ms，低于它就停
   var DRAG_SLOP = 5;                   // 位移小于它算「点击」
   var HIDE_AFTER = 4000;               // 气泡多久自己收（毫秒）
 
@@ -74,19 +80,131 @@
       .catch(function (e) { showBubble('数不出来（' + e + '）', true); });
   }
 
-  // **初始位置：右下角，离两边各 24px。**
+  function savePos() {
+    try {
+      localStorage.setItem(
+        POS_KEY, JSON.stringify({ x: pet.offsetLeft, y: pet.offsetTop })
+      );
+    } catch (e) {
+      // **隐私模式下 localStorage 会抛。** 位置记不住是小事，别让它把整个
+      // 桌宠搞死——那不就成了「点了一下什么都没发生」。
+    }
+  }
+
+  function loadPos() {
+    try {
+      var raw = localStorage.getItem(POS_KEY);
+      if (!raw) return null;
+      var p = JSON.parse(raw);
+      return (typeof p.x === 'number' && typeof p.y === 'number') ? p : null;
+    } catch (e) {
+      return null;
+    }
+  }
+
+  function startPos() {
+    var saved = loadPos();
+    if (saved) return { x: clamp(saved.x, 0, maxX()), y: clamp(saved.y, 0, maxY()) };
+    return { x: maxX() - EDGE, y: maxY() - EDGE };   // 初始右下角
+  }
+
+  // **初始位置：右下角，离两边各 24px**；有存过的就沿用存过的。
   //
   // ⚠️ **`position: fixed` 的元素不给 left/top 会停在文档流里那个位置**——
   // 也就是它写成 HTML 的那个地方（几个 `.overlay` 后面），页面上会看着像
-  // 飘在半空。所以这一句不能省。位置持久化在 Task 5 接上，那时它换成
-  // 从 `localStorage` 读。
-  pet.style.left = (window.innerWidth - SIZE - 24) + 'px';
-  pet.style.top = (window.innerHeight - SIZE - 24) + 'px';
+  // 飘在半空。所以这一句不能省。
+  var start = startPos();
+  moveTo(start.x, start.y);
 
-  // 拖动那半在 Task 5 接上；这一版先只做点击。
-  pet.addEventListener('click', onPetClick);
+  // ---- 拖动 / 弹射 / 反弹 ----
+  //
+  // **点击和拖动靠位移分**：`pointerdown` 到 `pointerup` 之间挪了不到
+  // `DRAG_SLOP` 像素就算点击。不分的话，拖完松手会顺带弹一次气泡——
+  // 那正是「拖开它别挡着我看东西」的时候最不想要的。
+  var drag = null;                     // {sx, sy, ox, oy, px, py, last, moved}
+  var vx = 0, vy = 0;                  // px/ms
+  var raf = null;
+
+  function maxX() { return window.innerWidth - SIZE; }
+  function maxY() { return window.innerHeight - SIZE; }
+  function clamp(v, lo, hi) { return Math.min(Math.max(v, lo), hi); }
+
+  function moveTo(x, y) {
+    pet.style.left = x + 'px';
+    pet.style.top = y + 'px';
+    if (!bubble.hidden) placeBubble();
+  }
+
+  function fling() {
+    if (raf) return;
+    raf = requestAnimationFrame(function step() {
+      raf = null;
+      var x = pet.offsetLeft + vx * 16;
+      var y = pet.offsetTop + vy * 16;
+
+      // 撞视口边就反弹，保留 BOUNCE 那部分速度
+      if (x <= 0) { x = 0; vx = -vx * BOUNCE; }
+      if (x >= maxX()) { x = maxX(); vx = -vx * BOUNCE; }
+      if (y <= 0) { y = 0; vy = -vy * BOUNCE; }
+      if (y >= maxY()) { y = maxY(); vy = -vy * BOUNCE; }
+
+      vx *= FRICTION; vy *= FRICTION;
+      moveTo(x, y);
+
+      if (Math.abs(vx) < STOP_AT && Math.abs(vy) < STOP_AT) {
+        vx = vy = 0;
+        // **停在哪儿就记哪儿。** 少了这一句，记下的永远是「松手那一刻」的
+        // 位置——飞出老远才停下的，刷新一下会跳回半路。
+        savePos();
+        return;
+      }
+      raf = requestAnimationFrame(step);
+    });
+  }
+
+  pet.addEventListener('pointerdown', function (e) {
+    if (raf) { cancelAnimationFrame(raf); raf = null; }
+    hideBubble();
+    pet.setPointerCapture(e.pointerId);
+    pet.classList.add('dragging');
+    vx = vy = 0;
+    drag = {
+      sx: e.clientX, sy: e.clientY, ox: pet.offsetLeft, oy: pet.offsetTop,
+      px: e.clientX, py: e.clientY, last: performance.now(), moved: false,
+    };
+    e.preventDefault();
+  });
+
+  pet.addEventListener('pointermove', function (e) {
+    if (!drag) return;
+    var dx = e.clientX - drag.sx, dy = e.clientY - drag.sy;
+    if (Math.abs(dx) > DRAG_SLOP || Math.abs(dy) > DRAG_SLOP) drag.moved = true;
+
+    moveTo(clamp(drag.ox + dx, 0, maxX()), clamp(drag.oy + dy, 0, maxY()));
+
+    // 速度按「上一次 move 到这一次」算，不是从按下的那点算起
+    var now = performance.now();
+    var dt = Math.max(now - drag.last, 1);
+    vx = (e.clientX - drag.px) / dt;
+    vy = (e.clientY - drag.py) / dt;
+    drag.px = e.clientX; drag.py = e.clientY; drag.last = now;
+  });
+
+  pet.addEventListener('pointerup', function () {
+    pet.classList.remove('dragging');
+    var moved = drag && drag.moved;
+    drag = null;
+
+    if (!moved) { onPetClick(); savePos(); return; }
+
+    var pxPerSec = Math.hypot(vx, vy) * 1000;
+    if (pxPerSec >= FLING_MIN) { fling(); } else { vx = vy = 0; }
+    savePos();
+  });
 
   window.addEventListener('resize', function () {
-    if (!bubble.hidden) placeBubble();
+    // ⚠️ 取 `offsetTop`，**不是 `offsetY`**：`offsetY` 在 `position: fixed`
+    // 的元素上不是相对视口的距离，拿它算会跑到屏幕外面去。
+    moveTo(clamp(pet.offsetLeft, 0, maxX()), clamp(pet.offsetTop, 0, maxY()));
   });
 })();
