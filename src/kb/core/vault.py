@@ -224,7 +224,21 @@ def counts(vault_root: Path) -> dict[str, int]:
     **目录不存在时返回 0 不抛**：`list_notes` / `list_drafts` 对不存在的目录
     本来就返回 `[]`。这个函数会被每一条对话和 `/setup/state`（每个页面首屏）
     调到，抛出去就是整块界面死掉。
+
+    **路径存在但是个文件时同样返回 0**：见下面那道 `is_dir()` 守卫。
     """
+    # **`is_dir()` 这道守卫不能省。** `list_domains` 判的是 `exists()` 再
+    # `iterdir()`——`.env` 里 `KB_VAULT_PATH` 打错一个字符指到一个已有的**文件**
+    # 上时，`exists()` 为真、`iterdir()` 当场抛 `NotADirectoryError`。
+    #
+    # 对话端点用的 `vault_guard` → `require_vault` **只判「配没配」，不判是不是
+    # 真知识库**，所以那儿拦不住；而 `counts` 会被每一轮对话调到，抛出去就是
+    # 整个对话 500。
+    #
+    # （`router._counts` 另有一道 `vault_ready` 守卫，那是为了「别把一个普通
+    # 目录数成一堆笔记吓用户」——那是另一个判断，不是这条的重复。）
+    if not vault_root.is_dir():
+        return {"notes": 0, "drafts": 0}
     return {
         "notes": len(list_notes(vault_root)),
         "drafts": len(list_drafts(vault_root)),

@@ -300,3 +300,17 @@ def test_counts_on_a_dir_that_is_not_a_vault(tmp_path):
     （`/setup/state` 是每个页面首屏都要打的端点）。
     """
     assert counts(tmp_path / "还没有这个目录") == {"notes": 0, "drafts": 0}
+
+
+def test_counts_does_not_crash_when_the_path_is_a_file(tmp_path):
+    """路径存在但是个**文件**时返回 0，**不抛**。
+
+    `.env` 里 KB_VAULT_PATH 打错一个字符指到一个已有的文件上，走的就是这条：
+    `list_domains` 判 `exists()` 为真、接着 `iterdir()` 抛 `NotADirectoryError`。
+    而 `/setup/state` 是每个页面首屏都要打的端点、`counts` 还被**每一轮对话**
+    调到——抛出去就是整块界面死掉。
+    """
+    a_file = tmp_path / "其实是个文件"
+    a_file.write_text("x", encoding="utf-8")
+
+    assert counts(a_file) == {"notes": 0, "drafts": 0}
