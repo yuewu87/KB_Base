@@ -1638,7 +1638,7 @@ button.secondary.danger:hover {
 .phone {
   position: fixed;
   top: 14px; bottom: 14px; right: 0;
-  width: 250px;
+  width: 320px;
   z-index: 40;
   padding: 12px 12px 10px;
   display: flex; flex-direction: column;

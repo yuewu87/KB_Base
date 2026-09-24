@@ -59,7 +59,8 @@
   // ⚠️ 报的是**展开后的**位置（`innerWidth - offsetWidth`），不是当前动画到哪，
   // 好让桌宠和手机同时开始动；不这样的话手机会先压上去、桌宠再弹开，看着像穿模。
   //
-  // `offsetWidth` 是**布局宽**，不受 `transform` 影响，动画中途取也是 250。
+  // `offsetWidth` 是**布局宽**，不受 `transform` 影响——抽屉滑到一半时取，
+  // 拿到的也是它最终那个宽度，不是当下露出来的那一截。
   function setOpen(open) {
     phone.classList.toggle('open', open);
     if (handle) handle.setAttribute('aria-expanded', open ? 'true' : 'false');
