@@ -1732,3 +1732,10 @@ button.secondary.danger:hover {
   text-transform: uppercase;
   color: var(--faint);
 }
+
+/* 手机把桌宠顶开那一下。**只在推开的时候挂上**（`pet.js` 加类、300ms 后摘掉），
+   平时不能有——拖动要跟手、弹射是自己的物理循环，挂着 `transition` 两者都会
+   拖泥带水。
+
+   振幅带一点过冲：用户原话是「会被**弹**开」。 */
+.pet.pushing { transition: left .3s cubic-bezier(.22, 1.4, .36, 1); }

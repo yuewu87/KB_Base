@@ -23,6 +23,7 @@
   var BOUNCE = 0.62;                   // 撞边保留多少速度
   var STOP_AT = 0.02;                  // px/ms，低于它就停
   var DRAG_SLOP = 5;                   // 位移小于它算「点击」
+  var PUSH_GAP = 14;                   // 被手机顶开后，离它左边缘留多少
   var HIDE_AFTER = 4000;               // 气泡多久自己收（毫秒）
 
   var hideTimer = null;
@@ -182,6 +183,19 @@
 
   pet.addEventListener('pointerdown', function (e) {
     if (raf) { cancelAnimationFrame(raf); raf = null; }
+
+    // **推开那一下可能正走到一半。** 先把当前的**实际**位置钉住、再摘掉过渡，
+    // 否则摘 class 的瞬间它会跳到终点（`transition` 一没，元素直接落到
+    // `left` 的目标值上）。`getBoundingClientRect` 给的是视口坐标，
+    // 跟 `position: fixed` 元素上 `left` 的含义一致。
+    if (pet.classList.contains('pushing')) {
+      var at = pet.getBoundingClientRect();
+      pet.classList.remove('pushing');
+      pet.style.left = at.left + 'px';
+      pet.style.top = at.top + 'px';
+    }
+    clearTimeout(pushTimer);
+
     hideBubble();
     pet.classList.add('dragging');
     vx = vy = 0;
@@ -241,6 +255,34 @@
   //
   // 被打断就**停在原地**、不弹射：这一次拖动本来就没正常结束。
   pet.addEventListener('pointercancel', endDrag);
+
+  // ---- 手机滑出来时把自己顶开 ----
+  //
+  // 用户原话：「手机弹出时桌宠会被弹开，也就是类似有碰撞体积，他们在同一层级」。
+  // 所以**不是盖住、也不是穿过**——手机推开多少，桌宠就让开多少。
+  //
+  // **收回去的时候不动它**：留在被推到的地方。追着手机跑回去的话，
+  // 一开一关它就在那儿来回抽。
+  //
+  // 手机那边只报「我开了没、我左边缘在哪」（`phone.js` 里的 `kb:phone`），
+  // 剩下全归这里算——两个文件之间只有这一个接口，谁也不 import 谁。
+  var pushTimer = null;
+
+  window.addEventListener('kb:phone', function (e) {
+    if (!e.detail.open) return;                       // 收回去不追
+    var want = e.detail.left - PUSH_GAP - pet.offsetWidth;
+    if (pet.offsetLeft <= want) return;               // 没挨上，别动它
+
+    if (raf) { cancelAnimationFrame(raf); raf = null; }   // 别和弹射抢
+    vx = vy = 0;
+
+    pet.classList.add('pushing');                     // 那一下的过渡（见 style.css）
+    clearTimeout(pushTimer);
+    moveTo(clamp(want, 0, maxX()), pet.offsetTop);
+    savePos();
+    // 过一会儿把类摘掉：留着的话，用户拖它的时候会拖着一条延迟
+    pushTimer = setTimeout(function () { pet.classList.remove('pushing'); }, 320);
+  });
 
   window.addEventListener('resize', function () {
     // ⚠️ **整套坐标都建立在「`position: fixed` 元素的 `offsetLeft/offsetTop`
