@@ -1025,3 +1025,19 @@ def test_the_phone_bubble_has_a_tail():
     """
     css = (_STATIC / "style.css").read_text(encoding="utf-8")
     assert ".phone-view .bubble::after" in css
+
+
+def test_the_phone_home_screen_can_actually_be_hidden():
+    """`.phone-home` 必须有一条 `[hidden]` 兜底规则。
+
+    **这条挡的是一个真发生过的 bug。** `.phone-home` 上写了 `display: flex`，
+    而**作者样式里的 `display` 稳压 UA 样式表的 `[hidden] { display: none }`**
+    （与特异度无关，作者规则永远赢）——于是 `phone.js` 里那句
+    `homeScreen.hidden = true` 一点效果都没有：点进应用之后主页还杵在上面，
+    `home` 看着像没反应。
+
+    项目里同一个坑已经踩过三次（`.overlay` / `.skin-menu` / `.skin-msg` /
+    `.pet-bubble` 都写了显式兜底），这是第四处。
+    """
+    css = (_STATIC / "style.css").read_text(encoding="utf-8")
+    assert ".phone-home[hidden]" in css

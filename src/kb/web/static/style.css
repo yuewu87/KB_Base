@@ -1683,6 +1683,15 @@ button.secondary.danger:hover {
   display: flex; flex-wrap: wrap; gap: 10px;
   align-content: flex-start;
 }
+/* **这条不能省**：`.phone-home` 自己有 `display: flex`，而作者样式里的
+   `display` 稳压 UA 的 `[hidden] { display: none }`（与特异度无关）——
+   不补这一句，`phone.js` 里那句 `homeScreen.hidden = true` 就是个空操作，
+   点进应用之后主页还杵在上面、`home` 键看着像没反应。
+
+   同一个坑这个文件里已经踩过三次（`.overlay[hidden]` / `.skin-menu[hidden]` /
+   `.skin-msg[hidden]`，还有后来的 `.pet-bubble[hidden]`），那几处旁边都写着
+   同一条道理。 */
+.phone-home[hidden] { display: none; }
 .phone-app {
   width: 62px; height: 62px;
   border: 1px solid var(--line-strong);

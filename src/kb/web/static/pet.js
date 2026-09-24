@@ -280,6 +280,19 @@
     clearTimeout(pushTimer);
     moveTo(clamp(want, 0, maxX()), pet.offsetTop);
     savePos();
+    // **状态气泡要跟着走。** 上面那次 `moveTo` 顺带摆了一次气泡，但它读到的是
+    // **推走前**的位置（CSS 过渡刚起步）。不补这一段的话，气泡会留在原地、
+    // 桌宠自己滑走；而气泡的 `z-index`（41）比手机（40）高，它会浮在手机上面
+    // 最长 4 秒——看着就是「气泡掉在半空」。
+    //
+    // 过渡是 CSS 驱动的，`getBoundingClientRect` 每帧都给得出当前真实位置，
+    // 所以照着一个短循环摆就行，用不着去算缓动曲线。
+    var followUntil = performance.now() + 320;
+    (function follow() {
+      if (bubble.hidden) return;                 // 本来没开着，不用管
+      placeBubble();
+      if (performance.now() < followUntil) requestAnimationFrame(follow);
+    })();
     // 过一会儿把类摘掉：留着的话，用户拖它的时候会拖着一条延迟
     pushTimer = setTimeout(function () { pet.classList.remove('pushing'); }, 320);
   });
