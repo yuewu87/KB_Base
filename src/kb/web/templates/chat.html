@@ -85,15 +85,10 @@
     });
   </script>
 
-  <aside class="chat-history">
-    <a class="new-chat" href="/?new=1">
-      <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor"
-           stroke-width="1.8" stroke-linecap="round" aria-hidden="true">
-        <path d="M12 5v14M5 12h14"/>
-      </svg>
-      开始新会话
-    </a>
-    <h2>会话历史</h2>
+  {# ⚠️ 「新会话」是个**动作**，不是内容面板——它是 `<a href>` 跳转，
+     靠 `href` 不为 None 表达（见 `_phone.html` 顶上那段说明）。
+     这是四个页面里唯一一个「应用 = 动作」的地方，别当 bug 修。 #}
+  {% set chats_body %}
     {% if not chats %}<p class="muted">还没有会话。</p>{% endif %}
     {% for c in chats %}
       <a class="chat-item {{ 'active' if c.id == cid }}" href="/?cid={{ c.id }}">
@@ -101,6 +96,12 @@
         <span class="mono">{{ c.updated }}</span>
       </a>
     {% endfor %}
-  </aside>
+  {% endset %}
+  {% set phone_apps = [
+      {"id": "chats", "name": "会话历史", "href": None},
+      {"id": "new", "name": "新会话", "href": "/?new=1"},
+  ] %}
+  {% set phone_views = {"chats": chats_body} %}
+  {% include "_phone.html" %}
 </div>
 {% endblock %}

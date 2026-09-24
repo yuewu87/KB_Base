@@ -503,7 +503,11 @@ code {
 }
 
 /* ==========================================================================
-   ai对话布局：主区 + 右侧会话历史栏
+   ai对话布局：主区 + 右栏
+   --------------------------------------------------------------------------
+   右栏现在是**那台手机**（四个日志/对话页共用，样式在文件末尾「右侧栏的手机」
+   那一段）。这里只剩主区那一列——`.chat-history` 那条 250px 常驻栏、
+   它的标题、还有「开始新会话」那颗按钮，都随页签一起退休了（2026-09-24）。
    ========================================================================== */
 
 .chat-layout {
@@ -513,58 +517,6 @@ code {
   align-items: start;
   max-width: none;
 }
-
-.chat-history {
-  position: sticky;
-  top: 34px;
-  padding-left: 22px;
-  border-left: 1px solid var(--line);
-  min-height: 240px;
-}
-.chat-history h2 {
-  margin: 0 0 10px;
-  font-size: 12px;
-  font-weight: 600;
-  letter-spacing: .08em;
-  text-transform: uppercase;
-  color: var(--faint);
-}
-
-/* 「开始新会话」——摆在右栏最顶上，比「会话历史」还高。
-   它改的是整页的状态（`/?new=1`），**是个按钮，不是列表项**。
-
-   2026-09-20 连着改了两轮，两轮都是「看着不像按钮」：
-   ① 先用次级按钮那套皮（`--line-strong` 边框 + `--accent-tint` 底）——
-      `--accent-tint` 与页面底色 `--paper` **差 4 个色阶，底看不出来**，
-      画面上就是一行蓝字。用户：「加个框啊，它是个按钮」。
-   ② 改成 `button.primary` 那套（实蓝边 + **白底** + 蓝字）——框有了，用户
-      还是说「还是一个链接的样子」。
-
-   结论：**这个应用里「像按钮」靠的是「有底色」，不是「有边框」。** 对照「记一条」
-   和「发送」，能按的东西都铺着底；白底 + 一根细线，在近白的页面上就是读成
-   「描了个框的链接」。所以这里用 `--accent-soft` 铺底——它在 `--paper` 上看得出来，
-   又是全站按钮的底色（`button.primary:hover`、`.side-btn.active` 都是它）。 */
-.new-chat {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  gap: 6px;
-  margin-bottom: 14px;
-  padding: 9px 12px;
-  border: 1px solid var(--accent);
-  border-radius: var(--r-sm);
-  background: var(--accent-soft);   /* ← 「是按钮」靠的是这一行，不是上面那行边框 */
-  color: var(--accent);
-  font-size: 13px;
-  font-weight: 600;
-  transition: background var(--dur) var(--ease), border-color var(--dur) var(--ease);
-}
-.new-chat:hover {
-  background: var(--accent-line);            /* 比 `--accent-soft` 再深一档，按下去有反馈 */
-  border-color: var(--accent-mid);
-  text-decoration: none;
-}
-.new-chat .icon { width: 15px; height: 15px; color: currentColor; }
 
 /* ---- 消息流 ---- */
 
@@ -710,8 +662,6 @@ code {
    class（`chat.html` 的 `class="bubble {{ m.role }}"`），不限定的话这套
    窄字号、小内边距会一并压到主区上——那本该是侧栏的样子。 */
 
-.chat-history .thread { display: flex; flex-direction: column; gap: 8px; margin-bottom: 16px; }
-
 .chat-history .bubble {
   position: relative;
   padding: 9px 12px;
@@ -819,10 +769,10 @@ button.secondary:hover { background: var(--accent-soft); border-color: var(--acc
    响应式
    ========================================================================== */
 
-@media (max-width: 900px) {
-  .chat-layout { grid-template-columns: minmax(0, 1fr); }
-  .chat-history { position: static; padding-left: 0; border-left: 0; border-top: 1px solid var(--line); padding-top: 18px; min-height: 0; }
-}
+/* 原来这里有一段 `@media (max-width: 900px)`：把 `.chat-layout` 压回单列、
+   把 `.chat-history` 从 sticky 改成静态。两条都没意义了（2026-09-24：右栏换成
+   手机后 `.chat-layout` 本身就是单列，而手机是 `position: fixed`，窄屏下照样
+   收在右边外面），整段删掉——**不留空壳**，空媒体查询只会让人以为漏了内容。 */
 
 @media (max-width: 720px) {
   .main { padding: 22px 18px 48px; }
@@ -844,64 +794,12 @@ button.secondary:hover { background: var(--accent-soft); border-color: var(--acc
 }
 
 /* ==========================================================================
-   箱子与页签（Q93）
+   箱子（Q93）
    --------------------------------------------------------------------------
-   三个日志页的右侧栏改成一列竖排页签 + 内容；箱子就是一天。
-   切换靠 `base.html` 底部那几行脚本——不引入框架。
+   箱子就是一天。三个日志页的右栏列着它们——那一段竖排页签（`.tabs` /
+   `.tab` / `.pane` / `.chat-history.tabbed`）连同 `_tabs.html` 一起退休了
+   （2026-09-24：右栏改成了手机，切换由 `phone.js` 管）。
    ========================================================================== */
-
-/* ---- 竖排页签 ----
-
-   贴着侧栏的**左边缘**向外伸，点哪个哪个高亮。窄栏里横排挤不下，
-   所以用 writing-mode 竖着写。
-
-   **页签钉在顶上（`flex-start`），不居中。** 原来写的是 `justify-content: center`，
-   而 `.tabs` 是弹性列、高度跟着**当前显示的那个面板**走——**切页签 = 换面板 =
-   换高度**，居中的东西于是跟着上下跳。2026-09-20 实测：报告面板 498px、
-   历史面板 240px，两个页签整体上移约 129px，用户拿两张截图问「位置会变化」。
-   钉住之后位置与面板多高无关。 */
-
-.chat-history.tabbed {
-  display: flex;
-  /* 页签与内容之间留出间隔。**原来写的是 0，两个叠在一起**——
-     页签右侧没边框、圆角只给左边，是当「贴在内容上的文件夹页签」做的。
-     2026-09-22 用户看过真页面：「页签和右边的内容之间需要有间隔，现在是贴着的」。
-     隔开之后页签不再贴边，所以 `.tab` 那边也把右边框和右侧圆角补了回来。 */
-  gap: 10px;
-  padding-left: 0;
-}
-
-.tabs {
-  display: flex;
-  flex-direction: column;
-  justify-content: flex-start;   /* ← 钉顶。居中会让它跟着面板高度跳，见上 */
-  gap: 4px;
-  flex: 0 0 22px;
-}
-
-.tab {
-  writing-mode: vertical-rl;
-  text-orientation: upright;
-  letter-spacing: 2px;
-  padding: 9px 3px;
-  border: 1px solid var(--line);
-  border-radius: 5px;      /* 不再贴内容，四角补全（原来是 5px 0 0 5px） */
-  background: var(--line-soft);
-  color: var(--faint);
-  font: inherit;
-  font-size: 12px;
-  cursor: pointer;
-}
-
-.tab.active {
-  background: var(--surface);
-  color: var(--ink);
-  font-weight: 600;
-  box-shadow: -1px 0 0 var(--accent) inset;
-  border-color: var(--line-strong);
-}
-
-.pane { flex: 1; min-width: 0; }
 
 /* ---- 箱子按钮 ----
 
@@ -1204,14 +1102,10 @@ button.side-btn {
 
 .chat-main .searchbar { margin: 0; }
 
-/* 会话历史可能比消息区长得多（12 个会话就 ~576px）。不封顶的话 grid 那一行
-   被它撑高 → **整页出现外层滚动条** → 输入框落到了那个更长的页面底部，
-   而不是视口底部。封顶 + 自己滚，两个滚动区各管各的。 */
-.main-chat .chat-history {
-  max-height: calc(100vh - 34px - 24px);
-  overflow-y: auto;
-  padding-bottom: 8px;
-}
+/* 原来这里还有一条 `.main-chat .chat-history`，给它 `max-height` 封顶 + 自己滚：
+   会话列表比消息区长时会把 grid 那一行撑高，输入框就被顶到外层滚动条的底部。
+   右栏换成手机之后**这条不需要了**——手机是 `position: fixed`（`top` / `bottom`
+   各 14px），高度自己管自己，跟主区那一列没关系了。2026-09-24 删。 */
 
 /* ==========================================================================
    外观面板（左栏底部）

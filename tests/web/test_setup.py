@@ -945,16 +945,30 @@ def test_the_fling_threshold_is_the_tuned_value():
 
 # ---------- 右侧栏的手机 ----------
 
-def test_journal_carries_the_phone_and_its_handle(client):
-    """整理日志上有那台手机和它的把手。
+def test_every_page_carries_the_phone(client):
+    """四个页面都要有那台手机和它的把手。
 
-    ⚠️ **这条这一版只看 `/journal`。** 另外三个页面要到 Task 2 才换上——
-    现在就写「四个页面都要有」的话，这条在这一步**必红**，而 Task 1 的目标
-    本来就是「先在一页上把壳跑通」。Task 2 会把它扩成四个页面。
+    这是 Task 1 那条（当时只看 `/journal`）扩开之后的版本——每换一个页面就多
+    一个要断的对象。漏一个页面的话，那一页的右侧栏就成了**空的**：`<aside>`
+    没了、手机也没来，而页面上只会显得「右边本来就没什么」。
     """
-    html = client.get("/journal").text
-    assert 'class="phone"' in html
-    assert 'class="phone-handle"' in html
+    for path in ("/journal", "/flow", "/runtime", "/"):
+        html = client.get(path).text
+        assert 'class="phone"' in html, f"{path} 上没有手机"
+        assert 'class="phone-handle"' in html, f"{path} 上没有把手"
+
+
+def test_no_page_uses_the_vertical_tabs_anymore(client):
+    """四个页面都不该再出现竖排页签的标记。
+
+    **`_tabs.html` 删掉之后，这条守着它别从哪儿又长回来。**
+    页签那一族类名（`.tabs` / `.tab` / `data-pane`）如果还有一处活着，
+    说明有页面没换干净——而那种漏在页面上看着只是「右栏有点怪」。
+    """
+    for path in ("/journal", "/flow", "/runtime", "/"):
+        html = client.get(path).text
+        assert 'class="tabs"' not in html, f"{path} 还有页签容器"
+        assert "data-pane=" not in html, f"{path} 还有旧的面板标记"
 
 
 def test_phone_js_is_served(client):

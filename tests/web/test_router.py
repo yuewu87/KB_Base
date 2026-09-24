@@ -107,10 +107,15 @@ def test_chat_page_shows_history(client, vault):
 
 
 def test_new_chat_button_starts_a_blank_thread(client, vault):
-    """「开始新会话」点完要给一个**空白**会话——**不回落**到最近那次。
+    """「新会话」点完要给一个**空白**会话——**不回落**到最近那次。
 
     不回落是重点。不带参数进 `/` 是「接着上次说」（侧栏那个「ai对话」就靠它），
-    而点了「开始新会话」的人要的正是**不要**那一次。
+    而点了「新会话」的人要的正是**不要**那一次。
+
+    入口现在住在那台手机的主页上，字面从「开始新会话」缩成了「新会话」
+    （2026-09-24）：手机应用格只有 62px 见方，六个字塞不下。断言跟着改成
+    `>新会话<`——**框住标签本身**，不然会跟下面那句空态提示「新会话。试试」
+    撞上，断出个假绿。
     """
     from kb.core.chat_store import append_message
 
@@ -122,7 +127,7 @@ def test_new_chat_button_starts_a_blank_thread(client, vault):
 
     body = client.get("/?new=1").text
     assert "新会话。试试" in body      # 空白会话
-    assert "开始新会话" in body        # 按钮就在这一页上
+    assert ">新会话<" in body          # 入口就在这一页上
 
     # 手改的坏值不该看到错误页（同 `_pick_day` 那条口径）——**当「要新会话」处理**。
     # `new` 写成 `int` 的话这里会是 422。
@@ -420,8 +425,8 @@ def test_sweep_page_is_html_not_json(client):
     assert r.headers["content-type"].startswith("text/html")
 
 
-def test_flow_page_has_the_chain_tab(client, vault):
-    """右侧栏是「流程图 | 历史」，流程图里画最近一次那条链。
+def test_flow_page_has_the_phone_with_the_chain(client, vault):
+    """工作日志那台手机主页上是「流程图 | 历史」，流程图里画最近一次那条链。
 
     链要真走过才有——先记一条，否则 `latest` 是空的，页面画的是空态。
     """
@@ -431,8 +436,9 @@ def test_flow_page_has_the_chain_tab(client, vault):
     emit("投递", "投了")
 
     r = client.get("/flow")
-    assert "流程图" in r.text
-    assert "历史" in r.text
+    assert 'class="phone"' in r.text
+    assert ">流程图<" in r.text
+    assert ">历史<" in r.text
     assert ">投递<" in r.text          # 流程链上的一步
 
 

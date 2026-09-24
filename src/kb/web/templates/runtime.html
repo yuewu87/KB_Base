@@ -18,9 +18,11 @@
     {% endif %}
   </section>
 
-  <aside class="chat-history">
-    <h2>箱子</h2>
-    {% include "_boxes.html" %}
-  </aside>
+  {% set boxes_body %}{% include "_boxes.html" %}{% endset %}
+  {% set phone_apps = [
+      {"id": "boxes", "name": "箱子", "href": None},
+  ] %}
+  {% set phone_views = {"boxes": boxes_body} %}
+  {% include "_phone.html" %}
 </div>
 {% endblock %}
