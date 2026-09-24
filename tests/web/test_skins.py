@@ -186,3 +186,24 @@ def test_generated_region_is_delimited():
     text = STYLE_CSS.read_text(encoding="utf-8")
     assert BEGIN in text and END in text
     assert text.index(BEGIN) < text.index(END)
+
+
+# ---------- 布局：别让滚动条把整块布局顶歪 ----------
+
+def test_the_page_reserves_room_for_the_scrollbar():
+    """页面要**一直预留**滚动条那条槽，否则切页面 / 切箱子时整块布局会横跳。
+
+    2026-09-23 用户报：「整理日志的右侧栏，切换箱子时宽度会变」。量下来
+    右侧栏自身**恒定 250px**——动的是它的位置：内容高的那一天页面出现纵向
+    滚动条，视口窄掉 15px，整块布局跟着往左缩。
+
+    实测（三个箱子，窗口都是 1440×900）：
+
+        window.innerWidth        1414 / 1414 / 1414     ← 窗口没变
+        documentElement.clientW  1414 / 1399 / 1414     ← 差的一条滚动条
+        .chat-history 的 x       1124 / 1109 / 1124
+
+    钉住 `scrollbar-gutter: stable` 别被删掉。**CSS 内容的断言放在这份
+    文件里**——它本来就逐字读 `style.css`（皮肤那几块）。
+    """
+    assert "scrollbar-gutter: stable" in STYLE_CSS.read_text(encoding="utf-8")

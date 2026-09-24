@@ -89,7 +89,21 @@
 
 * { box-sizing: border-box; }
 
-html { -webkit-text-size-adjust: 100%; }
+html {
+  -webkit-text-size-adjust: 100%;
+
+  /* ⚠️ **别删。** 页面纵向一出现滚动条，视口就窄掉一条滚动条（本机 15px），
+     整块布局跟着往左缩——切箱子、切页面时会看到右边那一栏横着跳一下。
+
+     2026-09-23 实测（整理日志，三个箱子，窗口都是 1440×900）：
+     `window.innerWidth` 三天都是 **1414**，而 `documentElement.clientWidth`
+     是 1414 / **1399** / 1414——差的那 15px 就是滚动条的宽。右侧栏自身
+     恒定 250px，动的是它的 x（1124 → 1109）。
+
+     一直预留这条槽，「有没有滚动条」就不再影响布局。
+     （Safari 不认这个属性，会退回原来的行为；本机是 Edge/Chrome，够用。） */
+  scrollbar-gutter: stable;
+}
 
 body {
   margin: 0;
