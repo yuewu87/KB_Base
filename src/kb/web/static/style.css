@@ -508,7 +508,7 @@ code {
 
 .chat-layout {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) 250px;
+  grid-template-columns: minmax(0, 1fr);
   gap: 30px;
   align-items: start;
   max-width: none;
@@ -1707,3 +1707,115 @@ button.secondary.danger:hover {
 }
 .pet-bubble[hidden] { display: none; }
 .pet-bubble.bad { color: var(--danger); }
+
+/* ---- 右侧栏的手机 ----
+
+   四个页面共用（`_phone.html`）。它是**抽屉**：平时收在视口右边外面，只留一条
+   把手探出来；点把手滑出来，再点收回。
+
+   **颜色一个都不写死**，全走变量：用户要的就是「跟着皮肤变」。
+
+   **层级 40，和桌宠同一层。** 全站现成的层级：`.sidebar` 20 / 手机与桌宠 40 /
+   `.overlay` 50 / `.skin-menu` 60。手机和桌宠不靠 z-index 分高下——手机滑出来时
+   会把它**顶开**（见 `pet.js` 里 `kb:phone` 那段），两者根本不重叠。
+
+   ⚠️ **别给 `.shell` / `body` / `html` 加 `transform` / `filter` / `will-change` /
+   `contain`。** 桌宠那套坐标（`offsetLeft/offsetTop` 相对视口）靠的就是
+   `offsetParent` 为 `null`；加了就整体偏掉，而且**页面不报任何错**。 */
+
+.phone {
+  position: fixed;
+  top: 14px; bottom: 14px; right: 0;
+  width: 250px;
+  z-index: 40;
+  padding: 12px 12px 10px;
+  display: flex; flex-direction: column;
+  border: 1px solid var(--line-strong);
+  border-right: none;
+  border-radius: 24px 0 0 24px;
+  background: var(--paper);
+  box-shadow: var(--shadow-lift);
+  /* 收着的时候整台推到视口右边外面 */
+  transform: translateX(100%);
+  transition: transform .46s cubic-bezier(.22, 1, .36, 1);
+}
+.phone.open { transform: translateX(0); }
+
+/* 把手：**钉在抽屉左边缘、跟着抽屉走**。
+   收着时（`translateX(100%)`）抽屉左边缘正好落在视口右缘，这 28px 探在外面
+   ——那是它唯一能被点到的位置。钉死在屏幕右边的话，抽屉一出来就把它盖住、
+   点不着收不回去（原型上就是这么栽的）。 */
+.phone-handle {
+  position: absolute; left: -28px; top: 50%;
+  transform: translateY(-50%);
+  width: 28px; height: 66px;
+  border: 1px solid var(--line-strong); border-right: none;
+  border-radius: 11px 0 0 11px;
+  background: var(--surface);
+  color: var(--ink);
+  font: inherit; font-size: 15px; cursor: pointer;
+}
+.phone-handle:hover { color: var(--accent-ink); }
+
+.phone-time {
+  text-align: center;
+  font-size: 13px;
+  color: var(--muted);
+  padding-bottom: 6px;
+}
+
+.phone-screen { flex: 1; overflow-y: auto; padding-top: 12px; }
+
+.phone-home {
+  display: flex; flex-wrap: wrap; gap: 10px;
+  align-content: flex-start;
+}
+.phone-app {
+  width: 62px; height: 62px;
+  border: 1px solid var(--line-strong);
+  border-radius: 14px;
+  background: var(--surface);
+  color: var(--ink);
+  font: inherit; font-size: 12px; line-height: 1.2;
+  display: flex; align-items: center; justify-content: center;
+  text-align: center; text-decoration: none;
+  padding: 4px; cursor: pointer;
+}
+.phone-app:hover { border-color: var(--accent); }
+
+.phone-bar {
+  display: flex; align-items: center; gap: 6px;
+  font-size: 12.5px; color: var(--muted);
+  padding-bottom: 8px; margin-bottom: 10px;
+  border-bottom: 1px solid var(--line);
+}
+.phone-bar b { color: var(--ink); }
+.phone-back {
+  border: none; background: none; cursor: pointer;
+  font: inherit; font-size: 15px; color: var(--ink); padding: 0 4px;
+}
+.phone-back:hover { color: var(--accent-ink); }
+
+.phone-home-btn {
+  margin: 8px auto 0;
+  width: 92px; height: 26px;
+  border: 1px solid var(--line-strong);
+  border-radius: 13px;
+  background: var(--surface);
+  color: var(--ink);
+  font: inherit; font-size: 12.5px; cursor: pointer;
+}
+.phone-home-btn:hover { border-color: var(--accent); }
+
+/* 应用内容里的小标题（「最近一次整理」「箱子」…）。
+   **这条是从 `.chat-history h2` 搬过来的**——那些 `<h2>` 现在住在 `.phone-view`
+   里，`.chat-history` 一不上身它们就掉回浏览器默认的大号粗体，
+   一眼就看得出不对。原样保留字号/字距/颜色。 */
+.phone-view h2 {
+  margin: 0 0 10px;
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: .08em;
+  text-transform: uppercase;
+  color: var(--faint);
+}

@@ -8,6 +8,8 @@
   {# 桌宠：本项目第一个独立 .js。`defer` 保证它在 DOM 解析完之后才跑，
      而 `pet.js` 里第一句就是 `getElementById('pet')`。 #}
   <script src="/static/pet.js" defer></script>
+  {# 右侧栏的手机：抽屉开合 + 面板切换。本项目**第二个**独立 .js。 #}
+  <script src="/static/phone.js" defer></script>
 </head>
 <body>
   <div class="shell">
@@ -156,22 +158,6 @@
     {% endfor %}
     <p class="skin-msg" id="skin-msg" hidden></p>
   </div>
-
-  <script>
-    // 竖排页签：点哪个，就只显示它对应的面板。
-    // 只有几行——为这个拖一个框架进来不划算（和侧栏折叠同一个路子）。
-    document.querySelectorAll('.tab').forEach(function (tab) {
-      tab.addEventListener('click', function () {
-        const aside = tab.closest('.tabbed');
-        aside.querySelectorAll('.tab').forEach(function (t) {
-          t.classList.toggle('active', t === tab);
-        });
-        aside.querySelectorAll('.pane').forEach(function (p) {
-          p.hidden = p.dataset.pane !== tab.dataset.panel;
-        });
-      });
-    });
-  </script>
 
   <div class="overlay" id="settings-overlay" hidden>
     <div class="modal" id="settings-modal"></div>

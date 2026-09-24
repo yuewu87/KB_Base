@@ -1,0 +1,46 @@
+{# 右侧栏的手机。**四个页面共用这一份**，各页只负责把两个变量填好再 include：
+
+     phone_apps  = [{"id": "report", "name": "报告", "href": None}, ...]
+                   `href` 不是 None 时那个应用是个**动作**（比如「新会话」），
+                   点它是跳转、不展开内容。
+     phone_views = {"report": "<已经渲染好的 HTML>", ...}
+                   只给 `href` 为 None 的那些应用准备。
+
+   时间由 `phone.js` 填（浏览器自己的钟）——那才是手机该显示的时间，
+   也省得每一页的上下文里都塞一个 `now`。
+
+   ⚠️ **标记形式是定死的**（`phone-app` / `phone-view` / `data-app`）：
+   `tests/web/test_router.py::test_runtime_page_has_no_tabs` 专门断言
+   「页面上没有 `data-pane`」，为的是防「运行日志里偶然出现某个词就无故变红」
+   那类坑（那条 docstring 写着「断结构，别断内容」）。**别改回 `data-pane`。** #}
+
+<aside class="phone" id="phone">
+  <button type="button" class="phone-handle" id="phone-handle"
+          aria-label="打开或收起手机" aria-expanded="false">‹</button>
+
+  <div class="phone-time" id="phone-time"></div>
+
+  <div class="phone-screen">
+    <div class="phone-home" id="phone-home">
+      {% for app in phone_apps %}
+        {% if app.href %}
+          <a class="phone-app" href="{{ app.href }}">{{ app.name }}</a>
+        {% else %}
+          <button type="button" class="phone-app" data-app="{{ app.id }}">{{ app.name }}</button>
+        {% endif %}
+      {% endfor %}
+    </div>
+
+    {% for app in phone_apps if not app.href %}
+      <div class="phone-view" data-app="{{ app.id }}" hidden>
+        <div class="phone-bar">
+          <button type="button" class="phone-back" aria-label="回主页">‹</button>
+          <b>{{ app.name }}</b>
+        </div>
+        {{ phone_views[app.id] | safe }}
+      </div>
+    {% endfor %}
+  </div>
+
+  <button type="button" class="phone-home-btn" id="phone-home-btn">home</button>
+</aside>

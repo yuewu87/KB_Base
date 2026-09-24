@@ -941,3 +941,45 @@ def test_the_fling_threshold_is_the_tuned_value():
     """
     js = (_STATIC / "pet.js").read_text(encoding="utf-8")
     assert "FLING_MIN = 2500" in js
+
+
+# ---------- 右侧栏的手机 ----------
+
+def test_journal_carries_the_phone_and_its_handle(client):
+    """整理日志上有那台手机和它的把手。
+
+    ⚠️ **这条这一版只看 `/journal`。** 另外三个页面要到 Task 2 才换上——
+    现在就写「四个页面都要有」的话，这条在这一步**必红**，而 Task 1 的目标
+    本来就是「先在一页上把壳跑通」。Task 2 会把它扩成四个页面。
+    """
+    html = client.get("/journal").text
+    assert 'class="phone"' in html
+    assert 'class="phone-handle"' in html
+
+
+def test_phone_js_is_served(client):
+    """`static/phone.js` 真能被取到——本项目**第二个**独立 `.js`。"""
+    r = client.get("/static/phone.js")
+    assert r.status_code == 200
+    assert "getElementById('phone')" in r.text
+
+
+def test_the_phone_style_block_is_really_there():
+    """`.phone` 那段样式在 `style.css` 里，而且是「收在右边外面」的。
+
+    **这条挡的是本项目唯一那种「页面看着正常、测试全绿、功能其实没了」**：
+    把 `style.css` 里那段 `.phone` 删掉，上面两条照样过——`class="phone"`
+    还在 HTML 里、`phone.js` 还在被引——但那个 `<aside>` 会退化成一个没有样式、
+    **老老实实占着右侧一列**的方块，而抽屉、把手、滑出全部失效。
+    **页面上不会报任何错。**
+
+    读文件断言的写法照抄 `test_skins.py` 那批（它们也直接读 `style.css`）。
+    """
+    css = (_STATIC / "style.css").read_text(encoding="utf-8")
+    start = css.index("\n.phone {")
+    block = css[start:css.index("}", start)]
+    assert "position: fixed" in block
+    # 收着的时候在视口右边外面——没了这条就成了一条常驻栏
+    assert "translateX(100%)" in block
+    # 层级 40：`.sidebar` 20 / 手机与桌宠 40 / `.overlay` 50 / `.skin-menu` 60
+    assert "z-index: 40" in block

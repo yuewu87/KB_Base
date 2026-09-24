@@ -146,11 +146,15 @@ def test_journal_shows_entries(client):
 
 
 def test_journal_side_report_shows_the_latest_run(client, vault):
-    """「报告」页签里是**最近一次整理**的文字记录，与箱子无关。
+    """「报告」那个应用里是**最近一次整理**的文字记录，与箱子无关。
 
-    不能直接断言那串文字在整页里——它在主区卡片里本来就有，改不改侧栏
+    不能直接断言那串文字在整页里——它在主区卡片里本来就有，改不改右栏
     都过（这条测试的第一版就是这样，等于只测了「有个 sidebar 容器」）。
     把「报告」那个面板单独抠出来看。
+
+    **锚从 `data-pane` 换成了 `data-app`**（页签没了，右栏成了手机，见
+    `_phone.html`）。主页那两颗应用按钮也带 `data-app="report"`，所以锚还要
+    带上 `phone-view` 这个类，才抠得到面板本身、而不是那颗按钮。
     """
     import re
 
@@ -161,7 +165,10 @@ def test_journal_side_report_shows_the_latest_run(client, vault):
     emit("落盘", "新建 计算机/队列串行化.md")
 
     body = client.get("/journal").text
-    pane = re.search(r'data-pane="report">(.*?)data-pane="history"', body, re.S)
+    pane = re.search(
+        r'class="phone-view" data-app="report" hidden>(.*?)'
+        r'class="phone-view" data-app="history"', body, re.S,
+    )
     assert pane, "「报告」面板不在"
     assert "你在网页上投递了一条草稿" in pane.group(1)
     assert "bubble assistant" in pane.group(1)          # 手机聊天式的气泡
@@ -225,13 +232,21 @@ def test_flow_chain_uses_svg_marks_not_text_symbols(client, vault):
     assert body.count("<svg") >= 6          # 六个步骤各一个标记
 
 
-def test_journal_sidebar_has_two_tabs(client):
-    """整理日志的右侧栏是「报告 | 历史」两个竖排页签，默认开「报告」。"""
+def test_journal_sidebar_is_the_phone(client):
+    """整理日志的右栏是那台手机，主页上两个应用：「报告」「历史」。
+
+    这条原来是 `test_journal_sidebar_has_two_tabs`——**改的不是删的**：
+    它守的意图（这一页的右栏看得见那两个东西）一字没变，换的是结构。
+
+    「默认开报告」那半没了：手机默认停在**主页**，两个应用一块儿摆着，
+    没有「哪个默认打开」这回事。
+    """
     body = client.get("/journal").text
-    assert 'class="tabs"' in body
+    assert 'class="phone"' in body
+    assert 'data-app="report"' in body
+    assert 'data-app="history"' in body
     assert ">报告<" in body
     assert ">历史<" in body
-    assert 'class="tab active"' in body
 
 
 # ---------- 模板随手记 ----------

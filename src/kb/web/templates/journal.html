@@ -32,27 +32,26 @@
     {% endif %}
   </section>
 
-  <aside class="chat-history tabbed">
-    {% set tabs = [("report", "报告"), ("history", "历史")] %}
-    {% include "_tabs.html" %}
-
-    <div class="pane" data-pane="report">
-      <h2>最近一次整理</h2>
-      {% if latest %}
-        {% for r in latest %}
-          <div class="bubble assistant">
-            <span class="bubble-at">{{ r.at[-8:] }}</span>{{ r.text }}
-          </div>
-        {% endfor %}
-      {% else %}
-        <p class="muted">还没有整理过。</p>
-      {% endif %}
-    </div>
-
-    <div class="pane" data-pane="history" hidden>
-      <h2>箱子</h2>
-      {% include "_boxes.html" %}
-    </div>
-  </aside>
+  {# 右侧栏那台手机。**先在这里把两个变量填好，再 include 那个共用片段**——
+     手机本身不知道任何一页的内容。 #}
+  {% set report_body %}
+    <h2>最近一次整理</h2>
+    {% if latest %}
+      {% for r in latest %}
+        <div class="bubble assistant">
+          <span class="bubble-at">{{ r.at[-8:] }}</span>{{ r.text }}
+        </div>
+      {% endfor %}
+    {% else %}
+      <p class="muted">还没有整理过。</p>
+    {% endif %}
+  {% endset %}
+  {% set history_body %}{% include "_boxes.html" %}{% endset %}
+  {% set phone_apps = [
+      {"id": "report", "name": "报告", "href": None},
+      {"id": "history", "name": "历史", "href": None},
+  ] %}
+  {% set phone_views = {"report": report_body, "history": history_body} %}
+  {% include "_phone.html" %}
 </div>
 {% endblock %}
