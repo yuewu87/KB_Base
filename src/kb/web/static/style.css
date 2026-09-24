@@ -685,7 +685,6 @@ code {
   white-space: normal;               /* ← 别删，见上面那段 */
   margin-bottom: 14px;
 }
-.phone-view .bubble + .bubble { margin-bottom: 14px; }
 
 /* 小尖：**两个三角叠出来**——外面那个用边框色当描边，里面那个用底色。
    里面那个要**比外面那个高一点**（上沿抬进气泡边框里 3px），把气泡自己那条

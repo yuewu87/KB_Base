@@ -270,6 +270,11 @@
 
   window.addEventListener('kb:phone', function (e) {
     if (!e.detail.open) return;                       // 收回去不追
+    // **正拖着就不推。** 一只手拖着桌宠、另一只手点把手是能做到的——那时
+    // `moveTo` 会让 `drag.ox/oy` 过期，下一次 `pointermove` 会拿旧起点算，
+    // 桌宠当场跳一下；而且给正在拖的元素挂上 `pushing` 会拖起来发黏 320ms。
+    // 单指路径碰不到这条，纯粹是补个双指的洞。
+    if (drag) return;
     var want = e.detail.left - PUSH_GAP - pet.offsetWidth;
     if (pet.offsetLeft <= want) return;               // 没挨上，别动它
 
