@@ -213,6 +213,24 @@ def list_notes(vault_root: Path) -> list[Path]:
     return sorted(found)
 
 
+def counts(vault_root: Path) -> dict[str, int]:
+    """库的规模：`{"notes": N, "drafts": M}`。
+
+    **判据只此一份**——`/setup/state` 与对话的系统提示都调它。
+
+    **为什么住在 `core/`**：对话那次调用在 core 层，够不着 `web/`；而
+    「`router.py` 是薄层、判断下沉」也是本项目的硬规矩。
+
+    **目录不存在时返回 0 不抛**：`list_notes` / `list_drafts` 对不存在的目录
+    本来就返回 `[]`。这个函数会被每一条对话和 `/setup/state`（每个页面首屏）
+    调到，抛出去就是整块界面死掉。
+    """
+    return {
+        "notes": len(list_notes(vault_root)),
+        "drafts": len(list_drafts(vault_root)),
+    }
+
+
 def list_domains(vault_root: Path) -> list[str]:
     """vault 一级目录里的领域名。
 

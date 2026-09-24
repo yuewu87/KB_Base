@@ -10,6 +10,7 @@ from kb.core.vault import (
     PENDING,
     atomic_write,
     clean_title,
+    counts,
     draft_path,
     ensure_topic_index,
     find_draft,
@@ -275,3 +276,27 @@ def test_clean_title(raw, expected):
 def test_clean_title_rejects_empty():
     with pytest.raises(ValueError):
         clean_title("///")
+
+
+# ---------- 库的规模（对话统计与桌宠共用） ----------
+
+def test_counts_counts_notes_and_drafts(tmp_path):
+    """数两样：正式笔记、待整理草稿。**判据只此一份。**"""
+    write_note(
+        tmp_path / "计算机" / "甲.md", {"类型": "概念", "主题": ["计算机"]}, "x"
+    )
+    write_note(
+        tmp_path / "计算机" / "乙.md", {"类型": "概念", "主题": ["计算机"]}, "y"
+    )
+    write_draft(tmp_path, _draft(id="20260915-aaaa"))
+
+    assert counts(tmp_path) == {"notes": 2, "drafts": 1}
+
+
+def test_counts_on_a_dir_that_is_not_a_vault(tmp_path):
+    """目录都不存在时返回 0，**不抛**。
+
+    它会被**每一条对话**和 `/setup/state` 调到——抛出去就是整块界面死掉
+    （`/setup/state` 是每个页面首屏都要打的端点）。
+    """
+    assert counts(tmp_path / "还没有这个目录") == {"notes": 0, "drafts": 0}
