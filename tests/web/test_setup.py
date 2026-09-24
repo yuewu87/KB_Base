@@ -997,3 +997,31 @@ def test_the_phone_style_block_is_really_there():
     assert "translateX(100%)" in block
     # 层级 40：`.sidebar` 20 / 手机与桌宠 40 / `.overlay` 50 / `.skin-menu` 60
     assert "z-index: 40" in block
+
+
+def test_the_phone_bubble_keeps_normal_whitespace():
+    """手机里那个气泡**必须**保住 `white-space: normal`。
+
+    **这条挡的是一条踩过的坑，而且丢了它页面不会报错。** 全局 `.bubble` 是
+    `pre-wrap`（主区对话要靠它保住用户输入的换行）；而手机里那些气泡的内容
+    来自模板，标签前后的换行与缩进会被原样画出来——**每个气泡凭空多一行空白**。
+    这种毛病在截图里不一定看得出来。
+
+    原来这条覆盖挂在 `.chat-history .bubble` 上，`.chat-history` 没了之后
+    必须重新落到 `.phone-view .bubble` 上。丢了就是上面那个症状。
+    """
+    css = (_STATIC / "style.css").read_text(encoding="utf-8")
+    start = css.index("\n.phone-view .bubble {")
+    block = css[start:css.index("}", start)]
+    assert "white-space: normal" in block
+
+
+def test_the_phone_bubble_has_a_tail():
+    """那个朝下的小尖得有规则画出来。
+
+    **断的是「规则在不在」，不是「画得对不对」**——CSS 画出来什么样，
+    本项目没有浏览器测试，只能人眼看（见计划里的人眼清单）。
+    但「整块被删掉」这种漏，测试挡得住。
+    """
+    css = (_STATIC / "style.css").read_text(encoding="utf-8")
+    assert ".phone-view .bubble::after" in css

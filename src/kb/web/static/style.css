@@ -656,39 +656,58 @@ code {
   border-bottom: 1px solid var(--line);
 }
 
-/* ---- 侧栏气泡：手机聊天式 ----
-
-   **限定在 `.chat-history` 里面**：`ai对话` 页主区那串对话气泡用的是同一个
-   class（`chat.html` 的 `class="bubble {{ m.role }}"`），不限定的话这套
-   窄字号、小内边距会一并压到主区上——那本该是侧栏的样子。 */
-
-.chat-history .bubble {
+/* ---- 手机里的消息气泡 ----
+ *
+ * **只在手机里。** `chat.html` 主区那串对话气泡（`.bubble.user` /
+ * `.bubble.assistant`）**一个字不动**——用户 2026-09-24：「只在手机里」。
+ *
+ * 样子照用户那张草图：近直角的矩形 + 左下角一个小尖。**那个尖是个样式，
+ * 不是指示器**——它不指谁、不跟谁走（原话：「模仿聊天的气泡框」）。
+ * 别去纠结它指着谁，也别为它加定位逻辑。
+ *
+ * ⚠️ **`white-space: normal` 这条覆盖不能丢。** 全局 `.bubble` 是 `pre-wrap`
+ * （主区对话要靠它保住用户输入的换行），而这里的气泡内容来自模板，标签前后
+ * 的换行与缩进会被原样画出来——**每个气泡凭空多一行空白**。
+ * 这种毛病在截图里不一定看得出来，测试里有一条专门守着它。
+ *
+ * 相邻气泡的间距比原来大（8px → 14px）：加了尾巴之后挨太近，小尖会戳到
+ * 下一条的框上。 */
+.phone-view .bubble {
   position: relative;
-  padding: 9px 12px;
-  border-radius: 12px;
+  padding: 9px 11px;
+  border-radius: 3px;
   font-size: 12.5px;
-  line-height: 1.6;
+  line-height: 1.55;
   background: var(--surface);
-  border: 1px solid var(--line);
+  border: 1.5px solid var(--line-strong);
   color: var(--ink-soft);
   word-break: break-word;
-  /* **必须覆盖掉全局 `.bubble` 的 `pre-wrap`**：侧栏气泡的内容来自模板，
-     标签前后的换行与缩进会被原样画出来——每个气泡凭空多一行空白。
-     （主区对话气泡要靠 `pre-wrap` 保住用户输入的换行，那边不动。） */
-  white-space: normal;
+  white-space: normal;               /* ← 别删，见上面那段 */
+  margin-bottom: 14px;
 }
-.chat-history .bubble.assistant {
-  border-top-left-radius: 4px;          /* 左边一个小尾巴的圆角 */
-  background: var(--line-soft);
+.phone-view .bubble + .bubble { margin-bottom: 14px; }
+
+/* 小尖：**两个三角叠出来**——外面那个用边框色当描边，里面那个用底色。
+   里面那个要**比外面那个高一点**（上沿抬进气泡边框里 3px），把气泡自己那条
+   底边在尾巴处**盖断**——草图上底线在尾巴处是断开的。不盖的话会有一条横线
+   从尾巴上穿过去（原型上实测过，第一版就是这样）。 */
+.phone-view .bubble::before,
+.phone-view .bubble::after {
+  content: "";
+  position: absolute;
 }
-.chat-history .bubble.user { background: var(--accent-soft); border-color: var(--accent-line); }
-
-/* 直接摆在面板里的气泡**要互相分开**。
-
-   `ai对话` 页那串气泡外面套着 `.thread`，间距是它的 `gap: 8px` 给的；而
-   `整理日志` 的「报告」面板是模板直接 `{% for %}` 循环出来的，**没有那个容器**
-   ——两条相邻气泡于是**一条贴着一条**，看着像一个被切开的方块。 */
-.chat-history .pane .bubble + .bubble { margin-top: 8px; }
+.phone-view .bubble::before {
+  left: 10px; bottom: -10px;
+  border-left: 8px solid transparent;
+  border-right: 8px solid transparent;
+  border-top: 10px solid var(--line-strong);
+}
+.phone-view .bubble::after {
+  left: 11px; bottom: -9px;
+  border-left: 7px solid transparent;
+  border-right: 7px solid transparent;
+  border-top: 12px solid var(--surface);
+}
 
 /* ---- 「次级按钮」这一套样式（胶囊、淡蓝底）----
 
