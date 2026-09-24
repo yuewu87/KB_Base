@@ -24,6 +24,7 @@
   var STOP_AT = 0.02;                  // px/ms，低于它就停
   var DRAG_SLOP = 5;                   // 位移小于它算「点击」
   var PUSH_GAP = 14;                   // 被手机顶开后，离它左边缘留多少
+  var PUSH_OVERSHOOT = 1.18;           // 被手机顶开时，比「刚好让开」多冲出去多少
   var HIDE_AFTER = 4000;               // 气泡多久自己收（毫秒）
 
   var hideTimer = null;
@@ -184,18 +185,6 @@
   pet.addEventListener('pointerdown', function (e) {
     if (raf) { cancelAnimationFrame(raf); raf = null; }
 
-    // **推开那一下可能正走到一半。** 先把当前的**实际**位置钉住、再摘掉过渡，
-    // 否则摘 class 的瞬间它会跳到终点（`transition` 一没，元素直接落到
-    // `left` 的目标值上）。`getBoundingClientRect` 给的是视口坐标，
-    // 跟 `position: fixed` 元素上 `left` 的含义一致。
-    if (pet.classList.contains('pushing')) {
-      var at = pet.getBoundingClientRect();
-      pet.classList.remove('pushing');
-      pet.style.left = at.left + 'px';
-      pet.style.top = at.top + 'px';
-    }
-    clearTimeout(pushTimer);
-
     hideBubble();
     pet.classList.add('dragging');
     vx = vy = 0;
@@ -266,40 +255,34 @@
   //
   // 手机那边只报「我开了没、我左边缘在哪」（`phone.js` 里的 `kb:phone`），
   // 剩下全归这里算——两个文件之间只有这一个接口，谁也不 import 谁。
-  var pushTimer = null;
-
   window.addEventListener('kb:phone', function (e) {
     if (!e.detail.open) return;                       // 收回去不追
     // **正拖着就不推。** 一只手拖着桌宠、另一只手点把手是能做到的——那时
-    // `moveTo` 会让 `drag.ox/oy` 过期，下一次 `pointermove` 会拿旧起点算，
-    // 桌宠当场跳一下；而且给正在拖的元素挂上 `pushing` 会拖起来发黏 320ms。
+    // 会让 `drag.ox/oy` 过期，下一次 `pointermove` 会拿旧起点算，桌宠当场跳一下。
     // 单指路径碰不到这条，纯粹是补个双指的洞。
     if (drag) return;
     var want = e.detail.left - PUSH_GAP - pet.offsetWidth;
     if (pet.offsetLeft <= want) return;               // 没挨上，别动它
 
-    if (raf) { cancelAnimationFrame(raf); raf = null; }   // 别和弹射抢
-    vx = vy = 0;
-
-    pet.classList.add('pushing');                     // 那一下的过渡（见 style.css）
-    clearTimeout(pushTimer);
-    moveTo(clamp(want, 0, maxX()), pet.offsetTop);
-    savePos();
-    // **状态气泡要跟着走。** 上面那次 `moveTo` 顺带摆了一次气泡，但它读到的是
-    // **推走前**的位置（CSS 过渡刚起步）。不补这一段的话，气泡会留在原地、
-    // 桌宠自己滑走；而气泡的 `z-index`（41）比手机（40）高，它会浮在手机上面
-    // 最长 4 秒——看着就是「气泡掉在半空」。
+    // **弹射出去，不是滑过去。** 用户原话「手机弹出时桌宠会被弹开」，
+    // 看过真页面之后又明确了：要「弹射」。
     //
-    // 过渡是 CSS 驱动的，`getBoundingClientRect` 每帧都给得出当前真实位置，
-    // 所以照着一个短循环摆就行，用不着去算缓动曲线。
-    var followUntil = performance.now() + 320;
-    (function follow() {
-      if (bubble.hidden) return;                 // 本来没开着，不用管
-      placeBubble();
-      if (performance.now() < followUntil) requestAnimationFrame(follow);
-    })();
-    // 过一会儿把类摘掉：留着的话，用户拖它的时候会拖着一条延迟
-    pushTimer = setTimeout(function () { pet.classList.remove('pushing'); }, 320);
+    // 桌宠本来就有一套物理（速度、摩擦、撞边反弹）——用它自己那套，
+    // 比挂个 CSS 过渡像回事。
+    //
+    // 速度是**算出来的**，不是拍脑袋给的：`fling()` 每帧走 `v * 16` 再
+    // `v *= FRICTION`，等比数列求和下来总位移 ≈ `v * 16 / (1 - FRICTION)`。
+    // 反解出「要走 d 那么远该给多少初速」就是下面那一行。
+    // 用常量算、不写死数字：以后改摩擦或帧步长，这里自动跟着变。
+    //
+    // `PUSH_OVERSHOOT` 是点富余——正好走满 `want` 会贴着手机的边停下，
+    // 冲出去一点更稳，也更有「被撞开」的样子。
+    var travel = (pet.offsetLeft - want) * PUSH_OVERSHOOT;
+    vx = -travel * (1 - FRICTION) / 16;
+    vy = 0;
+
+    if (raf) { cancelAnimationFrame(raf); raf = null; }   // 别和上一次的弹射叠着跑
+    fling();                                              // 剩下的交给物理
   });
 
   window.addEventListener('resize', function () {
