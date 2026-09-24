@@ -1041,3 +1041,22 @@ def test_the_phone_home_screen_can_actually_be_hidden():
     """
     css = (_STATIC / "style.css").read_text(encoding="utf-8")
     assert ".phone-home[hidden]" in css
+
+
+def test_every_page_loads_phone_js(client):
+    """四个页面都要**引** `phone.js`。
+
+    ⚠️ **和上面那条 `test_phone_js_is_served` 是两件事**，别合并：
+    那条证明的是「文件取得到」，这条证明的是「页面引了它」。
+    把 `base.html` 里那行 `<script src="/static/phone.js" defer>` 删掉，
+    文件照样在、`/static/phone.js` 照样 200，但**手机完全没有交互**——
+    把手点了没反应、顶部时间空着、桌宠也不会被顶开，
+    而**页面上不会报任何错**。
+
+    桌宠那边是一对断言的写法（`test_the_page_carries_the_pet`），
+    这里照同一个路子补上缺的那半。
+    """
+    for path in ("/journal", "/flow", "/runtime", "/"):
+        html = client.get(path).text
+        assert '<script src="/static/phone.js" defer></script>' in html, \
+            f"{path} 没有引 phone.js"
