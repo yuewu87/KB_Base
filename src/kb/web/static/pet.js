@@ -129,6 +129,16 @@
   var vx = 0, vy = 0;                  // px/ms
   var raf = null;
 
+  // 拖动收尾：摘掉抓手光标、清状态、速度归零、记下位置。
+  // `pointerup`(没挪动/没飞)、`pointercancel`、「没按着键的 pointermove」
+  // 三条路共用一份。
+  function endDrag() {
+    pet.classList.remove('dragging');
+    drag = null;
+    vx = vy = 0;
+    savePos();
+  }
+
   // **尺寸从元素上读，不写死。** 写死 46 的话，style.css 里那个
   // `width/height: 46px` 和这里就成了同一个数的两处真相——改一处漏一处，
   // 而且漏了不会有任何东西报错。`offsetWidth` 是布局值，**不受果冻那个
@@ -188,6 +198,10 @@
 
   pet.addEventListener('pointermove', function (e) {
     if (!drag) return;
+    // **没按着键就不是拖动。** 兜住「捕获没拿到、松手又发生在桌宠外面」那条路
+    // ——那时 `pointerup` 压根收不到，`drag` 会一直留着，之后光标划过也会把
+    // 桌宠拖走。症状跟 `pointercancel` 那段注释说的是同一个，只是入口不同。
+    if (e.buttons === 0) { endDrag(); return; }
     var dx = e.clientX - drag.sx, dy = e.clientY - drag.sy;
     // **判合位移，不是单轴。** 按单轴判的话，斜着拖 4px/4px（合位移 5.7px）
     // 会被算成「没挪动」= 一次点击——明明拖了。
@@ -226,12 +240,7 @@
   // `dragging` 那个抓手光标也一直留在身上，得再点一下才复位。
   //
   // 被打断就**停在原地**、不弹射：这一次拖动本来就没正常结束。
-  pet.addEventListener('pointercancel', function () {
-    pet.classList.remove('dragging');
-    drag = null;
-    vx = vy = 0;
-    savePos();
-  });
+  pet.addEventListener('pointercancel', endDrag);
 
   window.addEventListener('resize', function () {
     // ⚠️ **整套坐标都建立在「`position: fixed` 元素的 `offsetLeft/offsetTop`

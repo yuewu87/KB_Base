@@ -23,6 +23,7 @@ from pathlib import Path
 
 from kb.core.actions import describe_actions, run_action
 from kb.core.chat_store import load_chat, new_chat_id, save_chat
+from kb.core.lifecycle import vault_ready
 from kb.core.vault import counts
 from kb.llm.base import LLM, LLMError
 
@@ -41,10 +42,22 @@ def _size_line(vault_root: Path | None) -> str:
     **没库时说实话**，不写「0 篇笔记」——那个看着像库坏了，而「还没有知识库」
     用户一眼就懂下一步该干什么。
 
+    ⚠️ **判据是 `vault_ready`，不是 `vault_root is None`。** 第一版写的
+    `is None`，看着没毛病、其实**判在了不发生的那根轴上**：线上这条路
+    （`vault_guard` → `require_vault`）拿不到 `None`，没配路径就 409 了，
+    所以 `None` 只有测试摸得到；而真正会走到这儿的，是**「路径配了、
+    但那儿不是个库」**——`.env` 里打错一个字符、或者指到一个还没 `init` 的
+    目录。那时 `is None` 判不出来，于是系统提示照写「0 篇笔记 · 0 条待整理」，
+    同一时刻 `/setup/state` 报 `initialized: false`、桌宠气泡说「还没有知识库」
+    ——**三个面互相打脸**。
+
+    而 `lifecycle.vault_ready` 的 docstring 自己写着「**这个判据只有这一份**」
+    「别在任何地方再写一遍」。这里就是那个「任何地方」。
+
     ⚠️ **每轮现算**，不缓存：一轮对话里用户可能刚投了一条，下一轮那个数就该变。
     代价是一次目录扫描（只走目录、不读正文），几十篇是瞬间的事。
     """
-    if vault_root is None:
+    if not vault_ready(vault_root):
         return "还没有知识库"
     counted = counts(vault_root)
     return f"{counted['notes']} 篇笔记 · {counted['drafts']} 条待整理"

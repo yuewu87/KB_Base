@@ -639,12 +639,16 @@ def build_router(
         一模一样。"""
         notes = 0
         drafts = 0
-        # **`vault_ready` 为假时一个都不数。** 原先判的是 `exists()`：`.env`
-        # 填成一个文件时（手滑打错一个字符）`list_notes` 的 `iterdir()` 当场抛
-        # `NotADirectoryError`，而 `/setup/state` 是每个页面首屏、还有 busy
-        # 轮询都要打的端点——它 500 就是整块界面死掉，唯一的出路是再去手改
-        # `.env`。也不能只把 `exists()` 换成 `is_dir()`：一个普通目录会被数出
-        # 一堆「笔记」吓用户，而 `remove_vault` 根本不会碰它。
+        # **`vault_ready` 为假时一个都不数。**
+        #
+        # ⚠️ 挡的**不是**「怕抛异常」——那条已经修在根因上了：`.env` 里路径
+        # 填成一个**文件**时（手滑打错一个字符）`list_notes` 的 `iterdir()`
+        # 会抛 `NotADirectoryError`，而 2026-09-24 把 `list_domains` 里的
+        # `exists()` 改成了 `is_dir()`，那条链现在怎么调都不抛。
+        #
+        # 这里挡的是**另一个**判断：一个普通目录（有目录、没 `.git`）会被
+        # 数出一堆「笔记」吓用户，而 `remove_vault` 根本不会碰它。判据本身在
+        # `lifecycle.vault_ready`，**别在这儿再写一遍**。
         if vault_ready(vault_path):
             counted = counts(vault_path)
             notes, drafts = counted["notes"], counted["drafts"]

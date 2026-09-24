@@ -133,6 +133,7 @@ def test_system_prompt_carries_the_library_size(tmp_path):
     """
     from kb.core.vault import write_note
 
+    (tmp_path / ".git").mkdir()          # 判据是 vault_ready，它认这个
     write_note(
         tmp_path / "计算机" / "甲.md", {"类型": "概念", "主题": ["计算机"]}, "x"
     )
@@ -143,12 +144,20 @@ def test_system_prompt_carries_the_library_size(tmp_path):
     assert "0 条待整理" in prompt
 
 
-def test_system_prompt_says_so_when_there_is_no_vault():
+def test_system_prompt_says_so_when_there_is_no_vault(tmp_path):
     """没库时写「还没有知识库」，**不是「0 篇笔记」**。
 
     后者看着像库坏了；前者才是实话。
+
+    **两个形状都要盖**：没配路径（`None`）、以及**配了路径但那儿不是个库**。
+    后者才是线上真会碰到的那个——`None` 在 `vault_guard` 那儿就 409 了，
+    只有测试递得进来。第一版只判 `None`，于是「路径打错一个字符」时系统提示
+    照写「0 篇笔记 · 0 条待整理」，而同一时刻 `/setup/state` 报
+    `initialized: false`、桌宠气泡说「还没有知识库」——三个面互相打脸。
     """
     assert "还没有知识库" in build_system_prompt(None)
+    # 配了路径、但那儿没有 `.git` → 仍然不是库
+    assert "还没有知识库" in build_system_prompt(tmp_path)
 
 
 def test_run_turn_feeds_the_prompt_with_the_vault(tmp_path):
@@ -158,6 +167,7 @@ def test_run_turn_feeds_the_prompt_with_the_vault(tmp_path):
     """
     from kb.core.vault import write_note
 
+    (tmp_path / ".git").mkdir()          # 判据是 vault_ready，它认这个
     write_note(
         tmp_path / "计算机" / "甲.md", {"类型": "概念", "主题": ["计算机"]}, "x"
     )
