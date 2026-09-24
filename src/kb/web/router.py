@@ -332,7 +332,7 @@ def build_router(
 
     @router.get("/", response_class=HTMLResponse)
     def chat_page(request: Request, cid: str = "", new: str = ""):
-        """对话页。不带 `cid` 就落到最近一次会话——**除非点了「开始新会话」**。
+        """对话页。不带 `cid` 就落到最近一次会话——**除非点了「新会话」**。
 
         `new=1` 是「就是不要那一次」：没有它的话，空白会话没法表达（`cid` 空
         和不传长得一样，都会回落到最近一次），点了按钮的人会发现自己又回到
