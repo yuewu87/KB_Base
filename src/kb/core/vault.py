@@ -221,24 +221,16 @@ def counts(vault_root: Path) -> dict[str, int]:
     **为什么住在 `core/`**：对话那次调用在 core 层，够不着 `web/`；而
     「`router.py` 是薄层、判断下沉」也是本项目的硬规矩。
 
-    **目录不存在时返回 0 不抛**：`list_notes` / `list_drafts` 对不存在的目录
-    本来就返回 `[]`。这个函数会被每一条对话和 `/setup/state`（每个页面首屏）
-    调到，抛出去就是整块界面死掉。
+    **路径不存在、或者那儿根本不是个目录时返回 0、不抛**：这一条**不在这里
+    兜底**，靠下面 `list_domains` 那道 `is_dir()` 守卫——它一挡，`list_notes`
+    整条链就安全了；`list_drafts` 走的是 `inbox.exists()`，本来就不受影响。
 
-    **路径存在但是个文件时同样返回 0**：见下面那道 `is_dir()` 守卫。
+    所以别在这里再摞一道同款判断：**两处守同一件事就是重复判据**，改的时候
+    必然只改一处、另一处变成谎话。
+
+    这件事之所以要紧，是因为这个函数会被**每一条对话**和 `/setup/state`
+    （每个页面首屏）调到——抛出去就是整块界面死掉。
     """
-    # **`is_dir()` 这道守卫不能省。** `list_domains` 判的是 `exists()` 再
-    # `iterdir()`——`.env` 里 `KB_VAULT_PATH` 打错一个字符指到一个已有的**文件**
-    # 上时，`exists()` 为真、`iterdir()` 当场抛 `NotADirectoryError`。
-    #
-    # 对话端点用的 `vault_guard` → `require_vault` **只判「配没配」，不判是不是
-    # 真知识库**，所以那儿拦不住；而 `counts` 会被每一轮对话调到，抛出去就是
-    # 整个对话 500。
-    #
-    # （`router._counts` 另有一道 `vault_ready` 守卫，那是为了「别把一个普通
-    # 目录数成一堆笔记吓用户」——那是另一个判断，不是这条的重复。）
-    if not vault_root.is_dir():
-        return {"notes": 0, "drafts": 0}
     return {
         "notes": len(list_notes(vault_root)),
         "drafts": len(list_drafts(vault_root)),
@@ -250,7 +242,16 @@ def list_domains(vault_root: Path) -> list[str]:
 
     机器目录（`_` 前缀）与隐藏目录（`.` 前缀）不算领域。
     """
-    if not vault_root.exists():
+    # **判 `is_dir()`，不是 `exists()`。** 路径存在、但它是个**文件**时
+    # `exists()` 为真，紧接着下面那行的 `iterdir()` 当场抛
+    # `NotADirectoryError`——`.env` 里 `KB_VAULT_PATH` 打错一个字符指到一个
+    # 已有的文件上，就是这个场景（2026-09-24 实测复现过：改前 `/chat` 200、
+    # 改后 500，栈就落在这一行）。
+    #
+    # 而 `list_notes` 会把异常一路带给 `/setup/state`（每个页面首屏都要打）
+    # 和每一轮对话。症状形状正是本项目最怕的那种：**页面看着一切正常，
+    # 只有一条链全 500**。
+    if not vault_root.is_dir():
         return []
     return sorted(
         p.name
