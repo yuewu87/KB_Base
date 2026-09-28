@@ -7,7 +7,8 @@
     <p class="vault-path">{{ vault_path }}</p>
     <p class="hint">领域：{{ domains | join('　·　') if domains else '还没有领域——去库里建一个一级文件夹' }}</p>
     <div class="vault-actions">
-      <button type="button" class="secondary" onclick="openMigrate()">迁移到别处</button>
+      <button type="button" class="secondary" data-busy="organize migrate"
+              onclick="openMigrate()">迁移到别处</button>
       <button type="button" class="secondary" onclick="openVaultFolder()">打开目录</button>
       {# `secondary danger` 两个 class，**不是光一个 `danger`**——
          形状靠 `button.secondary`，`button.danger` 只换颜色。理由见

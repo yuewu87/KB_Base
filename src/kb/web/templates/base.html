@@ -41,7 +41,7 @@
 
          **这只是界面礼貌**，真拦截在端点上（`vault_guard` 回 409）：
          `kb.bat push` 走 CLI、接入指南里的会话层 AI 走 `/push`，都绕过界面。 #}
-      <a href="/new"
+      <a href="/new" data-busy="migrate"
          class="side-action {{ 'active' if active == 'new' }}{{ ' is-disabled' if not vault_ready }}"
          {% if not vault_ready %}aria-disabled="true" title="还没有知识库，先初始化"
          onclick="return false"{% endif %}>
@@ -85,7 +85,7 @@
       </a>
 
       {# 置灰的理由同上。 #}
-      <a href="/sweep"
+      <a href="/sweep" data-busy="migrate"
          class="side-btn {{ 'active' if active == 'sweep' }}{{ ' is-disabled' if not vault_ready }}"
          {% if not vault_ready %}aria-disabled="true" title="还没有知识库，先初始化"
          onclick="return false"{% endif %}>
@@ -190,7 +190,7 @@
                 onclick="document.getElementById('remove-overlay').hidden = true">取消</button>
         {# 同样 `secondary danger` 两个 class——见设置窗那张卡上的注。 #}
         <button type="button" class="secondary danger" id="remove-go" disabled
-                onclick="confirmRemove()">移除</button>
+                data-busy="migrate remove" onclick="confirmRemove()">移除</button>
       </div>
     </div>
   </div>
@@ -605,12 +605,20 @@
     async function openMigrate() {
       const target = prompt('搬到哪里？填一个绝对路径，而且那个目录必须是空的（不存在也行）。');
       if (!target) return;
-      // **先说一句再动手。** 拷贝是同步的，库大的话页面会连着几十秒没反应
-      // ——不说这一句，用户看到的就是「点了按钮，页面卡死了」，多半会再点
-      // 一次或者直接关窗口。真正的进度条没做（要轮询 `/setup/state` 的
-      // `busy`，见 `docs/03_问题记录.md` Q108），但一句「在搬」和一片死寂
-      // 是两回事。
-      _msg('正在搬…（库大的话要等一会儿，别关这个窗口）', true);
+      // **先说一句再动手，再挂个秒表。** 拷贝是同步的，库大的话这条请求要飞
+      // 几十秒——不说这一句、又不给任何变化，用户看到的就是「点了按钮，页面
+      // 卡死了」，多半会再点一次或者直接关窗口。
+      //
+      // ⚠️ **真正的进度条还是没有**：服务端只回一个总字节数，要分片进度得改
+      // `migrate_vault` 的签名（见 `docs/03_问题记录.md` Q108）。秒表是
+      // 「最少的那点变化」——数字在走，就不像卡死。
+      const t0 = Date.now();
+      const tick = function () {
+        _msg('正在搬…已 ' + Math.round((Date.now() - t0) / 1000) +
+             ' 秒（别关这个窗口）', true);
+      };
+      tick();
+      const ticker = setInterval(tick, 1000);
       try {
         const r = await fetch('/setup/migrate', {
           method: 'POST',
@@ -635,6 +643,8 @@
         location.reload();
       } catch (e) {
         alert('没搬成：' + e);
+      } finally {
+        clearInterval(ticker);
       }
     }
 
@@ -724,6 +734,74 @@
       if (e.key === 'Escape') closeSkins();
     });
     window.addEventListener('resize', closeSkins);
+
+    // ---- 谁在动库：轮询 `/setup/state` 的 busy，把该灰的入口灰掉 ----
+    //
+    // Q108 那张设计状态表要求过：整理中「迁移」灰、迁移中「投递 / 整理 / 移除」
+    // 都灰。后端一直在拦（`busy_guard` 回 409），**前端这半长期没落**——表现是
+    // 「迁移一个几千篇的库期间打开『移除知识库…』：模态正常、数量正常、勾完就能点，
+    // 点下去只拿到一句 409」。
+    //
+    // **谁在什么时候灰，声明在按钮自己身上**（`data-busy="migrate remove"`）——
+    // 加一个入口只改模板一处，不用来这儿再补一个 `if`。
+    //
+    // ⚠️ **和「未初始化」那两处置灰共用 `is-disabled`**，靠的是两者互斥：
+    // 没有库就动不了库，也就不可能 busy。真同框的话下面那句还原 `title`
+    // 会把「还没有知识库，先初始化」一起抹掉。
+    const BUSY_WORDS = {organize: '整理', migrate: '迁移', remove: '移除', sweep: '巡检'};
+
+    function applyBusy(busy) {
+      document.querySelectorAll('[data-busy]').forEach(function (el) {
+        const wants = (el.dataset.busy || '').split(' ');
+        const off = !!busy && wants.indexOf(busy) >= 0;
+        // **`title` 要还回去，不能只 `removeAttribute`**：服务端渲染的那两句
+        // （未初始化）不该被我抹掉，所以先存一份原值。
+        if (el.dataset.busyTitle === undefined) {
+          el.dataset.busyTitle = el.title || '';
+        }
+        el.classList.toggle('is-disabled', off);
+        if (off) {
+          el.setAttribute('aria-disabled', 'true');
+          el.title = '正在' + (BUSY_WORDS[busy] || busy) + '，等它跑完再试';
+        } else {
+          el.removeAttribute('aria-disabled');
+          el.title = el.dataset.busyTitle;
+        }
+      });
+    }
+
+    // **真拦点击用 `preventDefault`，不是 CSS 的 `pointer-events: none`**——
+    // 后者一生效元素就不再收鼠标事件，`title` 那句「为什么点不动」永远悬不出来
+    // （顶上那处置灰的注释说过同一件事）。capture 阶段拦，免得先触发别的监听。
+    document.addEventListener('click', function (e) {
+      const el = e.target.closest && e.target.closest('[data-busy]');
+      if (el && el.classList.contains('is-disabled')) {
+        e.preventDefault();
+        e.stopPropagation();
+      }
+    }, true);
+
+    async function pollBusy() {
+      try {
+        const r = await fetch('/setup/state');
+        if (!r.ok) return;
+        applyBusy((await r.json()).busy);
+      } catch (e) {
+        // **查不到就不动它。** 服务正忙时这个请求也可能慢或失败；保持上一种
+        // 状态，比「抖一下全都亮回来、下一拍又灰下去」好。
+      }
+    }
+
+    // **切走了就别空转。** 3 秒一次、本地服务，成本本来可以忽略，但页面在
+    // 后台还轮询是白烧。`visibilitychange` 也顺手管上——切回来立刻查一次，
+    // 不用等下一个 3 秒。
+    setInterval(function () {
+      if (document.visibilityState === 'visible') pollBusy();
+    }, 3000);
+    document.addEventListener('visibilitychange', function () {
+      if (document.visibilityState === 'visible') pollBusy();
+    });
+    pollBusy();
   </script>
 </body>
 </html>

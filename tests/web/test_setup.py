@@ -1,5 +1,6 @@
 """知识库生命周期的端点。走真 `init_vault` 的库，不是手搓的半骨架。"""
 
+import re
 import shutil
 from pathlib import Path
 
@@ -810,6 +811,21 @@ def test_the_remove_modal_is_not_a_native_confirm(client):
 
 # ---------- 未初始化时置灰两个入口 ----------
 
+_GREYED = re.compile(r'class="[^"]*\bis-disabled\b[^"]*"')
+
+
+def _greyed(html):
+    """页面上**真有元素**带了 `is-disabled` class 的个数。
+
+    ⚠️ **别退回 `html.count('is-disabled')`。** `base.html` 的内联脚本里
+    「谁在什么时候灰」那段也要提这个 class 名（`classList.toggle` /
+    `classList.contains`），数字符串会把它们一并数进来——那三处一落，
+    「未初始化灰两个」当场变成 5，而**功能完全正常**（2026-09-28 真踩到）。
+    断「元素」而不是「字符串出现」，才咬得住本来要保的东西。
+    """
+    return len(_GREYED.findall(html))
+
+
 def test_sidebar_greys_out_the_push_entries_before_init(client):
     """需求表第 1 条：未初始化时投递/整理入口置灰。
 
@@ -818,7 +834,7 @@ def test_sidebar_greys_out_the_push_entries_before_init(client):
     `tests/api/test_busy.py` 钉着。这里只钉模板真的渲染出了那个状态。
     """
     html = client.get("/").text
-    assert html.count('is-disabled') == 2          # 记一条 + 巡检，一个不多
+    assert _greyed(html) == 2                      # 记一条 + 巡检，一个不多
     assert 'aria-disabled="true"' in html
 
 
@@ -878,7 +894,7 @@ def test_sidebar_is_not_greyed_after_init(initialized_vault, env, tmp_path):
     状态码（`/`、`/journal`、`/settings`、`/new` 都回 200），把「设置」也灰掉
     它照样绿——别以为那边还兜着一层。
     """
-    assert "is-disabled" not in _client_for(env, tmp_path).get("/").text
+    assert _greyed(_client_for(env, tmp_path).get("/").text) == 0
 
 
 # ---------- 桌宠 ----------
@@ -1060,3 +1076,53 @@ def test_every_page_loads_phone_js(client):
         html = client.get(path).text
         assert '<script src="/static/phone.js" defer></script>' in html, \
             f"{path} 没有引 phone.js"
+
+
+def test_busy_declares_which_controls_it_greys_out(initialized_vault, env,
+                                                   tmp_path):
+    """「谁在什么时候灰」**声明在按钮自己身上**（`data-busy`），JS 只做对照。
+
+    Q108 那张设计状态表第 3/4 行要求过：整理中迁移按钮灰、迁移中
+    投递/整理/移除都灰。后端一直在拦（409），**前端这半一直没落**——
+    表现是「迁移一个几千篇的库期间打开『移除知识库…』：模态正常、数量正常、
+    勾完就能点，点下去只拿到一句 409」。
+
+    断言按声明写，所以改错一个值就会红（比如迁移按钮漏了 `organize`，
+    变成整理期间也能点）。
+
+    ⚠️ **要一个已初始化的库**：迁移和移除那两颗按钮住在 `_vault_pane.html`
+    的 `{% if vault_ready %}` 分支里，未初始化时整页根本没有它们——拿默认
+    那份 `client` 去断，两条断言都是**假绿**。
+    """
+    data = tmp_path / "data"
+    data.mkdir(exist_ok=True)
+    client = TestClient(
+        create_app(reload_config(env), llm=FakeLLM([]), data_dir=data,
+                   env_file=env)
+    )
+
+    page = client.get("/").text
+    # 记一条、巡检：库正被迁移时不能动（两个，所以数数）
+    assert page.count('data-busy="migrate"') == 2, \
+        "记一条 / 巡检 的 data-busy 不对"
+    # 移除按钮：迁移中、移除中都不该再点。**它在 `base.html` 那个模态里**
+    # （不是设置窗 fragment），所以属于整页。
+    assert 'data-busy="migrate remove"' in page, "移除按钮的 data-busy 不对"
+
+    settings = client.get("/settings").text
+    # 迁移按钮：整理中也要灰——同一时刻只允许一件事
+    assert 'data-busy="organize migrate"' in settings, "迁移按钮少了 organize"
+
+
+def test_every_page_polls_busy(client):
+    """四个页面都要**轮询** `/setup/state` 的 `busy`。
+
+    ⚠️ **和上面那条是两件事**，别合并：那条断「按钮声明了什么」，这条断
+    「页面真去查了」。少了轮询，声明得再对也不会生效——而页面上**不会报
+    任何错**，只是置灰永远不出现（跟 `test_every_page_loads_phone_js`
+    那条「文件在、但页面没引」是同一类缺口：都在断「接上线没有」）。
+    """
+    for path in ("/journal", "/flow", "/runtime", "/"):
+        html = client.get(path).text
+        assert "/setup/state" in html and "setInterval" in html, \
+            f"{path} 没有轮询 busy"
