@@ -11,6 +11,7 @@
 | 指南 | 给谁 | 状态 |
 |---|---|---|
 | [`kn-record/SKILL.md`](kn-record/SKILL.md) | **Claude Code**（skill 形式） | ✅ 可用 |
+| 同一份文件 | **DeepSeek Harness**（skill 形式） | ✅ 可用 |
 
 Codex 的 `AGENTS.md` 版、通用版**还没写**——等这边跑一阵子、措辞稳了再照着改。
 
@@ -18,17 +19,24 @@ Codex 的 `AGENTS.md` 版、通用版**还没写**——等这边跑一阵子、
 
 ## 怎么装
 
-**仓库里那份是源**，改它；装的时候拷到 Claude Code 的 skills 目录：
+**仓库里那份是源**，改它；装的时候拷到两个 agent 的 skills 目录——**同一份文件，两个地方**：
 
 ```bash
+# Claude Code
 mkdir -p "C:/Users/wuyeu/.claude/skills/kn-record"
 cp "E:/Study_Projects/KN_Base/docs/接入指南/kn-record/SKILL.md" \
    "C:/Users/wuyeu/.claude/skills/kn-record/SKILL.md"
+
+# DeepSeek Harness
+mkdir -p "C:/Users/wuyeu/.dsh/skills/kn-record"
+cp "E:/Study_Projects/KN_Base/docs/接入指南/kn-record/SKILL.md" \
+   "C:/Users/wuyeu/.dsh/skills/kn-record/SKILL.md"
 ```
 
-装在**用户级**（`~/.claude/skills/`）而不是项目级，是因为用法是「**在别的项目里干活时，把东西记到这个知识库**」——项目级的话只有待在 `KN_Base` 目录下才生效，那就本末倒置了。
+装在**用户级**而不是项目级，是因为用法是「**在别的项目里干活时，把东西记到这个知识库**」——项目级的话只有待在 `KN_Base` 目录下才生效，那就本末倒置了。两个 agent 同理，只是根目录不同：`~/.claude/skills/` 和 `~/.dsh/skills/`。
 
-> ⚠️ **两份会漂移。** 改了仓库里那份，记得重跑上面那行拷过去。反过来也一样。
+> ⚠️ **三份会漂移**（仓库源 + 两个安装位置）。同步顺序固定成三步：**改仓库源 → 拷到两个 skills 目录 → 核对一致**。
+> 核对用 `Get-FileHash` 比 SHA256，三个 Hash 必须完全相同——**这是「没漂移」的凭据**，别靠印象。
 
 ---
 

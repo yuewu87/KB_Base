@@ -62,7 +62,7 @@ PYTHONIOENCODING=utf-8 "E:/Study_Projects/KN_Base/kb.bat" push --content "..." -
 长内容走文件，避免转义麻烦：
 
 ```bash
-PYTHONIOENCODING=utf-8 "E:/Study_Projects/KN_Base/kb.bat" push --file /tmp/note.md --source 会话
+PYTHONIOENCODING=utf-8 "E:/Study_Projects/KN_Base/kb.bat" push --file "写好的正文.md" --source 会话
 ```
 
 > ⚠️ **多行正文绝对不要写进 `--content`。** Windows 命令行参数里传不了换行——
@@ -77,6 +77,22 @@ PYTHONIOENCODING=utf-8 "E:/Study_Projects/KN_Base/kb.bat" push --file /tmp/note.
 >
 > 所以：`--file` 传**绝对路径**就行，正文写在哪儿都行，**人留在项目目录里**。
 > 真要在别处推，用 `--project 名字` 显式指定；这条确实不挂项目就写 `--project ""`。
+
+### 在 DeepSeek Harness 里
+
+DSH 在 Windows 上给的 shell 是 **PowerShell**，没有 bash 那个 `VAR=值 命令` 的前缀语法。
+同一条命令，前缀得换个写法：
+
+```powershell
+$env:PYTHONIOENCODING='utf-8'; & 'E:\Study_Projects\KN_Base\kb.bat' push --content "要记的内容" --source 会话
+```
+
+规则就两条：
+
+- `PYTHONIOENCODING=utf-8 "路径" …` → `$env:PYTHONIOENCODING='utf-8'; & '路径' …`
+- 路径里的 `/` 换成 `\`
+
+**其余参数原样不动**——`--content`、`--file`、`--source` 都一模一样，只有前缀和路径分隔符要改。
 
 ---
 
@@ -243,6 +259,7 @@ PYTHONIOENCODING=utf-8 "E:/Study_Projects/KN_Base/kb.bat" search "关键词"
 | `已收，id=...` 但用户问「怎么没进库」 | 正常——草稿在收件箱缓冲，**要 `organize` 才会落库** |
 | 命令报连不上服务 | 服务没启动。`kb.bat` 会自己把它拉起来，稍等重试 |
 | 归不了类 | 正常。草稿会留在 `_收件箱/待归类/`，报告里会写清楚为什么；**别硬塞**，也别为了让它归进去而重写内容 |
+| `push` 报 exit 2、提示「取不到项目名」 | 当前目录不在 git 仓库里。换到项目目录、或在 DSH 里传 workdir，或用 `--project ""` |
 
 ---
 
