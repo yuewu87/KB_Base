@@ -10,10 +10,10 @@
 
 | 指南 | 给谁 | 状态 |
 |---|---|---|
-| [`kn-record/SKILL.md`](kn-record/SKILL.md) | **Claude Code**（skill 形式） | ✅ 可用 |
-| 同一份文件 | **DeepSeek Harness**（skill 形式） | ✅ 可用 |
+| [`kn-record/SKILL.md`](kn-record/SKILL.md) | **Claude Code** | ✅ 可用 |
+| 同一份文件 | **DeepSeek Harness** + **Codex** | DSH ✅ 实测；Codex ⚠️ 未实测 |
 
-Codex 的 `AGENTS.md` 版、通用版**还没写**——等这边跑一阵子、措辞稳了再照着改。
+三家读的是**同一套格式**（`<名字>/SKILL.md` + YAML frontmatter），所以**不需要单独的 `AGENTS.md` 版**——Codex 直接吃这份 `SKILL.md`。
 
 ---
 
@@ -27,16 +27,18 @@ mkdir -p "C:/Users/wuyeu/.claude/skills/kn-record"
 cp "E:/Study_Projects/KN_Base/docs/接入指南/kn-record/SKILL.md" \
    "C:/Users/wuyeu/.claude/skills/kn-record/SKILL.md"
 
-# DeepSeek Harness
-mkdir -p "C:/Users/wuyeu/.dsh/skills/kn-record"
+# DeepSeek Harness + Codex（共用这一份）
+mkdir -p "C:/Users/wuyeu/.agents/skills/kn-record"
 cp "E:/Study_Projects/KN_Base/docs/接入指南/kn-record/SKILL.md" \
-   "C:/Users/wuyeu/.dsh/skills/kn-record/SKILL.md"
+   "C:/Users/wuyeu/.agents/skills/kn-record/SKILL.md"
 ```
 
-装在**用户级**而不是项目级，是因为用法是「**在别的项目里干活时，把东西记到这个知识库**」——项目级的话只有待在 `KN_Base` 目录下才生效，那就本末倒置了。两个 agent 同理，只是根目录不同：`~/.claude/skills/` 和 `~/.dsh/skills/`。
+装在**用户级**而不是项目级，是因为用法是「**在别的项目里干活时，把东西记到这个知识库**」——项目级的话只有待在 `KN_Base` 目录下才生效，那就本末倒置了。
 
-> ⚠️ **三份会漂移**（仓库源 + 两个安装位置）。同步顺序固定成三步：**改仓库源 → 拷到两个 skills 目录 → 核对一致**。
-> 核对用 `Get-FileHash` 比 SHA256，三个 Hash 必须完全相同——**这是「没漂移」的凭据**，别靠印象。
+**为什么是两个目录、不是三个**：`~/.agents/skills/` 是 DSH 和 Codex **都认**的共享路径（DSH 按 rank 500 扫它，Codex 的用户级 skill 也在这里），所以它俩共用一份就够了。DSH 原先装在 `~/.dsh/skills/`，2026-09-28 挪过来合并的。
+
+> ⚠️ **两份会漂移**（仓库源 + 两个安装位置）。同步顺序固定成三步：**改仓库源 → 拷到两个 skills 目录 → 核对一致**。
+> 核对用 `Get-FileHash` 比 SHA256，两个 Hash 必须完全相同——**这是「没漂移」的凭据**，别靠印象。
 
 ---
 

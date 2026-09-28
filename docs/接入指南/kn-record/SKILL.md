@@ -78,21 +78,23 @@ PYTHONIOENCODING=utf-8 "E:/Study_Projects/KN_Base/kb.bat" push --file "写好的
 > 所以：`--file` 传**绝对路径**就行，正文写在哪儿都行，**人留在项目目录里**。
 > 真要在别处推，用 `--project 名字` 显式指定；这条确实不挂项目就写 `--project ""`。
 
-### 在 DeepSeek Harness 里
+### 换个 shell
 
-DSH 在 Windows 上给的 shell 是 **PowerShell**，没有 bash 那个 `VAR=值 命令` 的前缀语法。
-同一条命令，前缀得换个写法：
+上面那些命令都是 **bash** 写法。有的 agent 跑在 PowerShell 里——Windows 上的
+**DeepSeek Harness** 和 **Codex** 都是——它没有 bash 那个 `VAR=值 命令` 的前缀语法，
+得换个写法：
+
+| 跑在哪 | 前缀 | 路径 |
+|---|---|---|
+| Claude Code（bash） | `PYTHONIOENCODING=utf-8 "路径" …` | `/` |
+| DSH / Codex（Windows，PowerShell） | `$env:PYTHONIOENCODING='utf-8'; & '路径' …` | `\` |
 
 ```powershell
 $env:PYTHONIOENCODING='utf-8'; & 'E:\Study_Projects\KN_Base\kb.bat' push --content "要记的内容" --source 会话
 ```
 
-规则就两条：
-
-- `PYTHONIOENCODING=utf-8 "路径" …` → `$env:PYTHONIOENCODING='utf-8'; & '路径' …`
-- 路径里的 `/` 换成 `\`
-
-**其余参数原样不动**——`--content`、`--file`、`--source` 都一模一样，只有前缀和路径分隔符要改。
+**要改的只有前缀和路径分隔符，其余参数原样不动**——`--content`、`--file`、`--source`
+在两个 shell 里一模一样。
 
 ---
 
