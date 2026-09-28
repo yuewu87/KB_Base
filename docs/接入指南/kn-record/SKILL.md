@@ -11,6 +11,14 @@ KN_Base 是这个用户自己的知识库。**你是会话层，只负责投递�
 
 ---
 
+## 总纲
+
+**机械的事归代码，判断的事才写进指南。**
+
+判据：这条能不能落成一行 `if`？能，就别写进指南。完整讨论见 [`docs/接入指南/README.md`](../README.md) 里「怎么算写得好」那一节。
+
+---
+
 ## 命令
 
 `kb` **不在 PATH 里**，用完整路径：
@@ -21,6 +29,9 @@ KN_Base 是这个用户自己的知识库。**你是会话层，只负责投递�
 
 # 查
 "E:/Study_Projects/KN_Base/kb.bat" search "关键词"
+
+# 看收件箱攒了几条（用来判断该不该请求整理）
+"E:/Study_Projects/KN_Base/kb.bat" inbox
 
 # 请求整理
 "E:/Study_Projects/KN_Base/kb.bat" organize
