@@ -19,25 +19,32 @@
 
 ## 怎么装
 
-**仓库里那份是源**，改它；装的时候拷到两个 agent 的 skills 目录——**同一份文件，两个地方**：
+**第一步：让 `kb` 能调。** 指南里每条命令都用 `kb`，它是 `kb.bat` 包装出来的命令。
+把 KN_Base 目录加进 PATH——**`kb.bat` 的注释里从头就是这么写的**：
+
+```powershell
+# 用户级 PATH，加一次就够；重开终端生效
+[Environment]::SetEnvironmentVariable("PATH",
+  [Environment]::GetEnvironmentVariable("PATH", "User") + ";<你 clone 的 KN_Base 目录>", "User")
+```
+
+**第二步：把 SKILL.md 拷到 agent 的 skills 目录**——同一份文件，两个地方：
 
 ```bash
 # Claude Code
-mkdir -p "C:/Users/wuyeu/.claude/skills/kn-record"
-cp "E:/Study_Projects/KN_Base/docs/接入指南/kn-record/SKILL.md" \
-   "C:/Users/wuyeu/.claude/skills/kn-record/SKILL.md"
+mkdir -p ~/.claude/skills/kn-record
+cp "<KN_Base>/docs/接入指南/kn-record/SKILL.md" ~/.claude/skills/kn-record/SKILL.md
 
 # DeepSeek Harness + Codex（共用这一份）
-mkdir -p "C:/Users/wuyeu/.agents/skills/kn-record"
-cp "E:/Study_Projects/KN_Base/docs/接入指南/kn-record/SKILL.md" \
-   "C:/Users/wuyeu/.agents/skills/kn-record/SKILL.md"
+mkdir -p ~/.agents/skills/kn-record
+cp "<KN_Base>/docs/接入指南/kn-record/SKILL.md" ~/.agents/skills/kn-record/SKILL.md
 ```
 
 装在**用户级**而不是项目级，是因为用法是「**在别的项目里干活时，把东西记到这个知识库**」——项目级的话只有待在 `KN_Base` 目录下才生效，那就本末倒置了。
 
 **为什么是两个目录、不是三个**：`~/.agents/skills/` 是 DSH 和 Codex **都认**的共享路径（DSH 按 rank 500 扫它，Codex 的用户级 skill 也在这里），所以它俩共用一份就够了。DSH 原先装在 `~/.dsh/skills/`，2026-09-28 挪过来合并的。
 
-> ⚠️ **两份会漂移**（仓库源 + 两个安装位置）。同步顺序固定成三步：**改仓库源 → 拷到两个 skills 目录 → 核对一致**。
+> ⚠️ **两份会漂移**（仓库源 + 两个安装位置）。同步顺序：**改仓库源 → 拷到两个 skills 目录 → 核对一致**。
 > 核对用 `Get-FileHash` 比 SHA256，两个 Hash 必须完全相同——**这是「没漂移」的凭据**，别靠印象。
 
 ---
@@ -46,17 +53,21 @@ cp "E:/Study_Projects/KN_Base/docs/接入指南/kn-record/SKILL.md" \
 
 **① 中文输出在管道里是乱码。**
 
-`kb.bat` 在 Windows 上按 GBK 输出，agent 从管道读回来就是 `���գ�id=...`。**每条命令前面要加 `PYTHONIOENCODING=utf-8`**：
+`kb` 在 Windows 上按 GBK 输出，agent 从管道读回来就是 `���գ�id=...`。**每条命令前面要加 `PYTHONIOENCODING=utf-8`**：
 
 ```bash
-PYTHONIOENCODING=utf-8 "E:/Study_Projects/KN_Base/kb.bat" push --content "..." --source 会话
+PYTHONIOENCODING=utf-8 kb push --content "..." --source 会话
 ```
 
-没写进 `kb.bat` 里，是因为那样**用户在自己的 cmd 窗口里会反过来看到乱码**（控制台是 GBK 的）。管道要 UTF-8、控制台要 GBK，两边掐着——所以让它待在调用侧。
+没在 `kb` 里替调用方设，是因为那样**用户在自己的 cmd 窗口里会反过来看到乱码**（控制台是 GBK 的）。管道要 UTF-8、控制台要 GBK，两边掐着——所以让它待在调用侧。
 
-**② `kb` 不在 PATH 里。**
+**② 指南里的路径曾经全是死链。**
 
-指南里一律写完整路径 `"E:/Study_Projects/KN_Base/kb.bat"`。`kb.bat` 自己用 `%~dp0` 定位工程根，所以**从哪个目录调都行**。
+2026-09-28 之前，指南里每条命令都写成 `"E:/Study_Projects/KN_Base/kb.bat"`——**作者本机的绝对路径**。
+别人 clone 到别处，13 条命令全是死链，报错还像「命令没找到」，看不出是路径问题。
+
+现在改用 `kb`：把 KN_Base 目录加进 PATH 就有了（见上面「怎么装」的第一步），
+**跟路径无关，谁 clone 到哪都一样**。
 
 ---
 

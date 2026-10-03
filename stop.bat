@@ -16,8 +16,11 @@ setlocal
 set "KN_ROOT=%~dp0"
 set "PYTHONPATH=%KN_ROOT%src;%PYTHONPATH%"
 
-if exist "D:\Conda_base\envs\kn_base\python.exe" (
-  "D:\Conda_base\envs\kn_base\python.exe" -m kb.api.cli stop
+REM Which Python: set KB_PYTHON to yours (e.g. the conda env's python.exe);
+REM otherwise the "python" on PATH is used. Either way the deps must be
+REM installed -- see README "install". Keep this file ASCII (CLAUDE.md).
+if defined KB_PYTHON (
+  "%KB_PYTHON%" -m kb.api.cli stop
 ) else (
   python -m kb.api.cli stop
 )

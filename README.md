@@ -38,6 +38,17 @@ pip install -r requirements.txt
 cp .env.example .env                 # Windows cmd: copy .env.example .env
 ```
 
+**想让 `kb` 随处可用**（会话层的 AI 要用它，见 [`docs/接入指南/`](docs/接入指南/)），
+把本项目目录加进 PATH——`kb.bat` 的注释里就是这么写的：
+
+```powershell
+# 用户级 PATH，加一次就够；重开终端生效
+[Environment]::SetEnvironmentVariable("PATH",
+  [Environment]::GetEnvironmentVariable("PATH", "User") + ";<你 clone 的 KN_Base 目录>", "User")
+```
+
+`kb.bat` 自己用 `%~dp0` 定位工程根，所以加一次之后，**在任何目录敲 `kb` 都能用**。
+
 `.env` 里**只需要填模型三件套**（另外两项 `.env.example` 已经给了能用的值）：
 
 ```

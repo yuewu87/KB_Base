@@ -21,23 +21,24 @@ KN_Base 是这个用户自己的知识库。**你是会话层，只负责投递�
 
 ## 命令
 
-`kb` **不在 PATH 里**，用完整路径：
+`kb.bat` 就在 KN_Base 目录里。**把那个目录加进 PATH**，任何地方都能直接敲它——
+它自己用 `%~dp0` 定位工程根，所以**从哪个目录调都行**（见 README「安装」）。
 
 ```bash
 # 投递一条
-"E:/Study_Projects/KN_Base/kb.bat" push --content "要记的内容" --source 会话
+kb.bat push --content "要记的内容" --source 会话
 
 # 查
-"E:/Study_Projects/KN_Base/kb.bat" search "关键词"
+kb.bat search "关键词"
 
 # 看收件箱攒了几条（用来判断该不该请求整理）
-"E:/Study_Projects/KN_Base/kb.bat" inbox
+kb.bat inbox
 
 # 请求整理
-"E:/Study_Projects/KN_Base/kb.bat" organize
+kb.bat organize
 
 # 撤回一条投错的草稿（还能一次给多个 id）
-"E:/Study_Projects/KN_Base/kb.bat" drop 20260918-9e4f
+kb.bat drop 20260918-9e4f
 ```
 
 ### ⚠️ 必须加 `PYTHONIOENCODING=utf-8`
@@ -45,7 +46,7 @@ KN_Base 是这个用户自己的知识库。**你是会话层，只负责投递�
 不加的话，**中文输出全是乱码**（`���գ�id=...`）——`kb.bat` 在 Windows 上按 GBK 输出，读回来就是坏的。所以每条命令都这么写：
 
 ```bash
-PYTHONIOENCODING=utf-8 "E:/Study_Projects/KN_Base/kb.bat" push --content "..." --source 会话
+PYTHONIOENCODING=utf-8 kb.bat push --content "..." --source 会话
 ```
 
 ### 投递只交正文
@@ -62,7 +63,7 @@ PYTHONIOENCODING=utf-8 "E:/Study_Projects/KN_Base/kb.bat" push --content "..." -
 长内容走文件，避免转义麻烦：
 
 ```bash
-PYTHONIOENCODING=utf-8 "E:/Study_Projects/KN_Base/kb.bat" push --file "写好的正文.md" --source 会话
+PYTHONIOENCODING=utf-8 kb.bat push --file "写好的正文.md" --source 会话
 ```
 
 > ⚠️ **多行正文绝对不要写进 `--content`。** Windows 命令行参数里传不了换行——
@@ -84,17 +85,17 @@ PYTHONIOENCODING=utf-8 "E:/Study_Projects/KN_Base/kb.bat" push --file "写好的
 **DeepSeek Harness** 和 **Codex** 都是——它没有 bash 那个 `VAR=值 命令` 的前缀语法，
 得换个写法：
 
-| 跑在哪 | 前缀 | 路径 |
-|---|---|---|
-| Claude Code（bash） | `PYTHONIOENCODING=utf-8 "路径" …` | `/` |
-| DSH / Codex（Windows，PowerShell） | `$env:PYTHONIOENCODING='utf-8'; & '路径' …` | `\` |
+| 跑在哪 | 前缀怎么写 |
+|---|---|
+| Claude Code（bash） | `PYTHONIOENCODING=utf-8 kb.bat push …` |
+| DSH / Codex（Windows，PowerShell） | `$env:PYTHONIOENCODING='utf-8'; kb.bat push …` |
 
 ```powershell
-$env:PYTHONIOENCODING='utf-8'; & 'E:\Study_Projects\KN_Base\kb.bat' push --content "要记的内容" --source 会话
+$env:PYTHONIOENCODING='utf-8'; kb.bat push --content "要记的内容" --source 会话
 ```
 
-**要改的只有前缀和路径分隔符，其余参数原样不动**——`--content`、`--file`、`--source`
-在两个 shell 里一模一样。
+**要改的只有那个前缀，其余参数原样不动**——`--content`、`--file`、`--source`
+在两个 shell 里一模一样。（`kb.bat` 靠 PATH 解析，**跟路径无关**，谁 clone 到哪都一样。）
 
 ---
 
@@ -158,12 +159,12 @@ $env:PYTHONIOENCODING='utf-8'; & 'E:\Study_Projects\KN_Base\kb.bat' push --conte
 
 1. **攒够 10 条，且确认投递内容无误、没有需要改的结论**
    - 「10 条」是量；**「确认无误」是前提**——内容里还有想改的，先别触发
-   - 攒的条数用 `PYTHONIOENCODING=utf-8 "E:/Study_Projects/KN_Base/kb.bat" inbox` 看
+   - 攒的条数用 `PYTHONIOENCODING=utf-8 kb.bat inbox` 看
 2. **用户提到「暂停开发」时** —— 一个阶段收尾，正是沉淀的时机
 3. **用户直接要求整理时** —— 说「整理一下」「可以整理了」之类
 
 ```bash
-PYTHONIOENCODING=utf-8 "E:/Study_Projects/KN_Base/kb.bat" organize
+PYTHONIOENCODING=utf-8 kb.bat organize
 ```
 
 整理会**真改库里的文件**（移动、改名、合并）并**打一个 git commit**。跑完之后把结果讲给用户听——哪几条落了盘、哪几条归不了类留在待归类，**别只说「整理完了」**。
@@ -177,7 +178,7 @@ PYTHONIOENCODING=utf-8 "E:/Study_Projects/KN_Base/kb.bat" organize
 用户说「那条结论要改」「之前记的那个不对」时：
 
 ```bash
-PYTHONIOENCODING=utf-8 "E:/Study_Projects/KN_Base/kb.bat" push --revise "文件名" --content "新的说法" --source 会话
+PYTHONIOENCODING=utf-8 kb.bat push --revise "文件名" --content "新的说法" --source 会话
 ```
 
 - `--revise` 后面是**目标笔记的文件名**，**不含路径、不含 `.md`**（Obsidian 就是按文件名链接的）
@@ -191,8 +192,8 @@ PYTHONIOENCODING=utf-8 "E:/Study_Projects/KN_Base/kb.bat" push --revise "文件�
 **投出去的草稿不是定案**——它还在收件箱里缓冲，没整理就还能撤。
 
 ```bash
-PYTHONIOENCODING=utf-8 "E:/Study_Projects/KN_Base/kb.bat" drop 20260918-9e4f
-PYTHONIOENCODING=utf-8 "E:/Study_Projects/KN_Base/kb.bat" drop 20260918-9654 20260918-9e4f   # 一次几条
+PYTHONIOENCODING=utf-8 kb.bat drop 20260918-9e4f
+PYTHONIOENCODING=utf-8 kb.bat drop 20260918-9654 20260918-9e4f   # 一次几条
 ```
 
 **什么时候用：**
@@ -203,7 +204,7 @@ PYTHONIOENCODING=utf-8 "E:/Study_Projects/KN_Base/kb.bat" drop 20260918-9654 202
 
 **规矩跟投递一样，一个字都不许绕：**
 
-- **只走 `kb drop`，绝不手改**知识库（vault）**里的文件** —— 绕过服务就没有串行化、没有校验，
+- **只走 `kb.bat drop`，绝不手改**知识库（vault）**里的文件** —— 绕过服务就没有串行化、没有校验，
   等于把「写入只此一路」开了口子。**哪怕只改一行 frontmatter 也不行**
 - 删掉的草稿**不留痕迹**（不记日志、不打 commit），这是有意的——删等于「当没发生过」
 
@@ -225,7 +226,7 @@ PYTHONIOENCODING=utf-8 "E:/Study_Projects/KN_Base/kb.bat" drop 20260918-9654 202
 不点出来，他看不见这个库在干活，也就不会信它、不会往里头投。
 
 ```bash
-PYTHONIOENCODING=utf-8 "E:/Study_Projects/KN_Base/kb.bat" search "关键词"
+PYTHONIOENCODING=utf-8 kb.bat search "关键词"
 ```
 
 **正文就在结果里**——每条命中都跟着标题、标签、路径和**完整正文**。
