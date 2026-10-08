@@ -27,7 +27,14 @@ from kb.core.lifecycle import vault_ready
 from kb.core.vault import counts
 from kb.llm.base import LLM, LLMError
 
-MAX_ROUNDS = 4
+# **4 轮太小。** 用户在一条消息里列十几个条目、要求「每条单独存」是个常见用法，
+# 而 `push` 一次只投一条（`actions.py`）——4 轮只够 4 条，到顶就截断成那句
+# 「我转的圈数太多了」。2026-10-08 真撞上过：一条消息列了 10+ 个概念，
+# 界面转圈 29 秒，只存进 4 条（`data/chats/20261008-7611.json` + 当天的流程日志）。
+#
+# 12 覆盖得了「一次列一批」这类用法。再往上就是拿等待时间换条目数了——
+# 每轮都是一次对话 LLM + 一条完整整理链，代价不小。
+MAX_ROUNDS = 12
 
 _FENCE = re.compile(r"^```[a-zA-Z]*\s*|\s*```$")
 
