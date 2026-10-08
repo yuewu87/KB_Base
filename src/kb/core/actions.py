@@ -34,9 +34,6 @@ ACTIONS: dict[str, dict] = {
 }
 
 
-# 动作 → 中文。**和 `lifecycle._BUSY_LABELS` 是两回事**：那个说「谁在动 vault」，
-# 这个说「对话正在干什么」，别合并。漏配时走 `.get(action, action)` 兜底，
-# 顶多吐个英文动作名，不像 `Busy` 那样必须当场炸。
 ACTION_LABELS = {
     "search": "查库", "push": "投递", "revise": "修改", "organize": "整理",
 }
@@ -56,7 +53,10 @@ def run_action(
 ) -> str:
     """执行一个动作，返回**给人看的文本**。
 
-    **从不抛异常**——出错也返回文本，让对话能把它说给用户听。
+    **自己出错一律返回文本、不抛**——让对话能把它说给用户听。但它**管不住
+    调用方传进来的回调**：线上那份 `organize_fn`（`api/http.py`）会走到
+    `require_vault`，没配库就当场抛。所以调用方（`chat.run_turn_stream`）
+    对它另有一层 `try/except`——别以为这里不抛就万事大吉。
 
     ⚠️ **返回值同时给两边看**：模型拿它当工具结果，前端拿它当「这一步干了什么」
     （`chat.handle` 会把它整条存进会话历史）。所以开头要有动作名——人一眼知道
@@ -101,7 +101,7 @@ def run_action(
             text = organize_fn("push", params["content"], None)
     elif name == "revise":
         if organize_fn is None:
-            text = "投递通道没接上（调用方没传 push 回调）。"
+            text = "修改通道没接上（调用方没传 revise 回调）。"
         else:
             text = organize_fn("revise", params["content"], params["target"])
     elif name == "organize":

@@ -290,15 +290,18 @@ def test_chat_404_on_unknown_session(client, vault):
 
 
 def test_chat_persists_the_steps_and_the_final_reply(vault):
-    """落盘留 [用户那句] + [过程] + [最终回复]。
+    """落盘留 [用户那句] + [过程] + [最终回复]，**靠 role 分开**。
 
     ⚠️ **这条取代了旧版的「只留 user + 最终 assistant」。** 旧版把过程全丢了，
     用户回头看会话时看不见「它干了什么」；现在留着，但两条老顾虑各有交代：
-    - **「回答」只有一条**：中间那轮的 `say`（「我记一下」）也进历史（回看要用），
-      但它不冒充回答——`reply` 仍然取最后那条 assistant，前端把中间那些画成步骤。
+    - **「回答」只有一条**：中间那轮的 `say`（「我记一下」）进历史时标成 `step`，
+      只有最后的 `assistant` 是回复——刷新后前端只看 role 就能把过程画成小字步骤。
     - **`tool` 轮不膨胀**：存的是 `run_action` 的返回值（动作的结果摘要，带动作名），
-      不是整篇正文；「工具结果（动作）：」那层壳留给 `_render_history` 按角色加，
-      所以它不出现在正文里。
+      不是整篇正文。
+    - **两层前缀，别混**：`**工具结果**：` 是 `_render_history` 渲染时按 role 加的
+      （**不带动作名**，只给模型看）；`投递：` 是 `run_action` 自己加的（给前端看，
+      也是历史里存着的那部分）。旧那种含动作名的 `工具结果（push）：` **整个删掉了**
+      ——不是把这层挪去别处。
     """
     from kb.core.chat_store import load_chat
     from kb.core.vault import list_notes
@@ -319,7 +322,7 @@ def test_chat_persists_the_steps_and_the_final_reply(vault):
     # 回复是结论，不是中间那句过渡语
     assert data["reply"] == "记好了"
     assert [m["role"] for m in chat["messages"]] == [
-        "user", "assistant", "tool", "assistant"
+        "user", "step", "tool", "assistant"
     ]
     assert chat["messages"][-1]["content"] == "记好了"
     assert chat["messages"][2]["content"].startswith("投递：")

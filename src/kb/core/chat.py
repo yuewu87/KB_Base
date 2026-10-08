@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import json
 import re
+from collections.abc import Iterator
 from pathlib import Path
 
 from kb.core.actions import ACTION_LABELS, describe_actions, run_action
@@ -123,7 +124,7 @@ def parse_reply(raw: str) -> dict:
     return data
 
 
-_ROLE_LABEL = {"user": "用户", "assistant": "助手", "tool": "工具结果"}
+_ROLE_LABEL = {"user": "用户", "assistant": "助手", "step": "步骤", "tool": "工具结果"}
 
 
 def _render_history(messages: list[dict]) -> str:
@@ -133,6 +134,10 @@ def _render_history(messages: list[dict]) -> str:
     否则同一轮里工具结果会被冠上「助手」，模型看到的是「我上一条说：
     工具结果（search）…」——那是它自己说的话，不是它拿到的数据，
     它会当成「我已经说过了」而不去用。
+
+    **`step`（中间几轮的过渡语）同理**，也不能叫「助手」：模型会以为自己
+    已经把结论说过了，于是该总结时不总结（它是**过程**，不是**回答**——
+    回答只有最后那条 `assistant`，见 `run_turn_stream`）。
     """
     lines = []
     for m in messages:
@@ -148,7 +153,7 @@ def run_turn_stream(
     llm: LLM,
     *,
     organize_fn=None,
-):
+) -> Iterator[dict]:
     """跑一轮对话，**边跑边吐事件**。
 
     事件是**给人看的步骤流**（设计见
@@ -160,15 +165,27 @@ def run_turn_stream(
         {"type": "error",  "text": ...}                 出错（含撞上限）
         {"type": "done",   "messages": [...], "rounds": n}   收尾
 
-    **`done` 一定在最后**，且**一定**会被吐出来（正常结束、出错、撞上限三条路都吐）
-    ——调用方靠它落盘，少吐一次那轮对话就丢了。
+    **`done` 一定在最后，且一定被吐出来**——正常结束、LLM 出错、输出解析失败、
+    动作抛异常、撞满上限，条条路都吐。调用方靠它落盘，少吐一次那轮对话就丢了。
+
+    ## 落进 `messages` 的 role —— 「过程」和「回复」靠它分开
+
+    | role | 是什么 | 几条 |
+    |---|---|---|
+    | `user` | 用户这一句 | 1 |
+    | `step` | 中间几轮模型的 `say`（过渡语，如「我这就去查」） | 0..n |
+    | `tool` | 动作结果（`run_action` 的返回值） | 0..n |
+    | `assistant` | **最终回复**，全局一条（出错时就是那串报错文本） | 1 |
+
+    流式时前端按**事件类型**画；但**刷新后重画读的是会话历史、只能按 role 判断**
+    ——role 不说清楚，中间那些过渡语就会被画成回复气泡，一问两答（正是这次要避免的）。
     """
     messages = list(history)
     messages.append({"role": "user", "content": user_message})
     system = build_system_prompt(vault_root)
 
-    def finish(rounds: int):
-        yield {"type": "done", "messages": messages, "rounds": rounds}
+    def done(rounds: int) -> dict:
+        return {"type": "done", "messages": messages, "rounds": rounds}
 
     for round_no in range(1, MAX_ROUNDS + 1):
         try:
@@ -177,7 +194,7 @@ def run_turn_stream(
             text = f"我这边出错了：{exc}"
             messages.append({"role": "assistant", "content": text})
             yield {"type": "error", "text": text}
-            yield from finish(round_no)
+            yield done(round_no)
             return
 
         try:
@@ -186,19 +203,23 @@ def run_turn_stream(
             text = f"我输出的格式不对：{exc}"
             messages.append({"role": "assistant", "content": text})
             yield {"type": "error", "text": text}
-            yield from finish(round_no)
+            yield done(round_no)
             return
 
         say = reply["say"]
         action = reply["action"]
 
         if not action:
-            messages.append({"role": "assistant", "content": say})
-            yield {"type": "say", "text": say}
-            yield from finish(round_no)
+            # **`say` 可能为空**（模型回了条空话、又不要动作）——空的既别吐事件，
+            # 也别落历史：一条空的 `assistant` 在前端就是一行光秃秃的「**助手**：」，
+            # 回看时像坏了。
+            if say:
+                messages.append({"role": "assistant", "content": say})
+                yield {"type": "say", "text": say}
+            yield done(round_no)
             return
 
-        # **`say` 可能为空**（模型直接给动作不说话）——空的别吐，前端会画个空气泡
+        # 同一条规矩（见上）：空的别吐，前端会画个空气泡
         if say:
             yield {"type": "say", "text": say}
         yield {
@@ -207,10 +228,24 @@ def run_turn_stream(
             "text": f"正在{ACTION_LABELS.get(action, action)}…",
         }
 
-        result = run_action(action, reply["params"], vault_root, llm, organize_fn=organize_fn)
+        try:
+            result = run_action(
+                action, reply["params"], vault_root, llm, organize_fn=organize_fn
+            )
+        except Exception as exc:      # 故意兜全部——异常源是外面传进来的回调
+            # **`run_action` 自己承诺不抛，但它管不住调用方传进来的回调。**
+            # 线上那份 `organize_fn`（`api/http.py`）会走到 `require_vault`，
+            # 没配库就当场抛。异常若从生成器里逃出去，`done` 就吐不出来——
+            # 调用方一个字节都落不下盘，那轮对话永久丢失（docstring 已打包票）。
+            # 所以在这儿兜住，把异常当结果往下走：事件流照走、`done` 照吐。
+            result = f"这一步没办成：{exc}"
         yield {"type": "result", "text": result}
 
-        messages.append({"role": "assistant", "content": say})
+        # 这一轮的 `say` 是**过程**不是回答，存成 `step`（见 docstring 那张表）：
+        # 混成 `assistant` 的话，刷新后前端分不出「步骤」和「回复」，又是两答。
+        # 空的（模型只给了动作没说话）不存。
+        if say:
+            messages.append({"role": "step", "content": say})
         messages.append({"role": "tool", "content": result})
 
     # 到达上限——模型还在要动作，说明它没收住。用一句固定话收尾，
@@ -219,7 +254,7 @@ def run_turn_stream(
     text = "我转的圈数太多了，先停下。你再说一句我接着办。"
     messages.append({"role": "assistant", "content": text})
     yield {"type": "error", "text": text}
-    yield from finish(MAX_ROUNDS)
+    yield done(MAX_ROUNDS)
 
 
 def run_turn(
@@ -235,7 +270,13 @@ def run_turn(
     返回 `(新的完整消息列表, 实际跑了几轮)`。调用方负责落盘。
 
     **它只是 `run_turn_stream` 的一个消费者**——同步的调用方（`handle`、
-    `POST /chat` 那条 JSON 端点）继续用它，行为一个字没变。
+    `POST /chat` 那条 JSON 端点）继续用它，签名和返回值形状没变。
+
+    ⚠️ **但消息列表的「内容」确实变了**，按消息下断言的地方要跟着看：
+    - `tool` 轮的 `content` 从 `f"工具结果（{action}）：\\n{result}"` 变成裸
+      `result`——那层壳改由 `_render_history` 按角色加（正文同时要给前端看）
+    - 中间几轮的 `say` 从 `assistant` 变成 `step`（过程与回复分开，见
+      `run_turn_stream` 的 docstring）
     """
     rounds = 0
     messages: list[dict] = []
@@ -260,7 +301,8 @@ def handle(
     """一轮对话的完整处理：读历史 → 跑 → 落盘。返回 `(会话 id, 回复)`。
 
     **Web 层与 HTTP 端点共用这一份**——否则对话会有两份实现，
-    「落盘只留 user / assistant」这条规则也会跟着分叉。
+    「怎么落盘」这条规则（过程留着、但 `reply` 只取最后那条 `assistant`）
+    也会跟着分叉。
 
     ⚠️ 第一个参数是 `data_dir`（= `config.DATA_DIR`），**不是工程根**——
     传错会话就落进仓库了，见 `chat_store` 的模块说明。
@@ -278,9 +320,10 @@ def handle(
 
     # **过程要留着**（用户要能回头看「它干了什么」），但两条老顾虑得各自有交代：
     #
-    # - **「一问两答」**：`reply` 仍然只取**最后**那条 assistant——「回答」始终只有
-    #   一条。中间几轮的 `say`（「我这就去查」）同样落在历史里（回看过程要靠它），
-    #   但它们不是回答：按 spec 定的分层，前端把它们和 `tool` 轮一起画成步骤。
+    # - **「一问两答」**：`reply` 只取**最后**那条 `assistant`；过程**另有角色**
+    #   ——中间几轮的 `say` 是 `step`、动作结果是 `tool`（见 `run_turn_stream`
+    #   的 docstring 那张表）。**刷新后**前端只看 role 就能把过程画成小字步骤、
+    #   把回复画成气泡，不必猜「哪条 assistant 是步骤」。
     # - **「越堆越长」**：`tool` 轮存的是 `run_action` 的返回值——动作自己的结果
     #   摘要（带动作名，几行以内），不是整篇正文；`search` 例外（它带正文，
     #   模型答题靠它，Q103）。再加 `chat_store._MSG_LIMIT = 200` 兜住总量。

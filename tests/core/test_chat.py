@@ -228,12 +228,48 @@ def test_run_turn_stream_emits_error_at_max_rounds(tmp_path):
     assert events[-1]["type"] == "done"
 
 
+def test_run_turn_stream_still_emits_done_when_the_action_blows_up(tmp_path):
+    """动作抛异常（线上就是「没配库」那条）也要吐 `done`。
+
+    `run_action` 只保证**自己**不抛——它管不住调用方传进来的回调
+    （`api/http.py` 那份会走到 `require_vault`）。异常若逃出生成器，
+    `done` 就没了，那轮对话一个字节都落不下盘。
+    """
+    def boom(*_):
+        raise RuntimeError("没配库")
+
+    llm = FakeLLM([
+        _reply("我记一下", action="push", params={"content": "X"}),
+        _reply("先不记了"),
+    ])
+    events = list(run_turn_stream(tmp_path, [], "记一下 X", llm, organize_fn=boom))
+    kinds = [e["type"] for e in events]
+
+    assert kinds == ["say", "action", "result", "say", "done"]
+    assert "没配库" in [e["text"] for e in events if e["type"] == "result"][0]
+
+
+def test_run_turn_stream_skips_an_empty_say(tmp_path):
+    """模型回一条空话、又不要动作——不吐空事件，也不落一条空 assistant。
+
+    空了还照吐，前端就会画一个空气泡；照存，回看时是一行光秃秃的
+    「**助手**：」，像坏了。
+    """
+    llm = FakeLLM([_reply("", action=None)])
+    events = list(run_turn_stream(tmp_path, [], "在吗", llm))
+
+    assert [e["type"] for e in events] == ["done"]
+    assert events[-1]["messages"] == [{"role": "user", "content": "在吗"}]
+
+
 # ---------- 落盘 ----------
 
-def test_handle_keeps_the_steps_but_not_the_chatter(tmp_path):
+def test_handle_keeps_the_steps_but_only_the_last_one_is_the_reply(tmp_path):
     """过程要留下（存进会话），但**过渡语不能冒充回复**。
 
-    `reply` 必须是最后那条 assistant（结论），不是「我这就去查」。
+    ⚠️ 「过渡语留下了」和「它不是回复」是两件事，靠 role 分开（见
+    `run_turn_stream` 的 docstring）：中间那句 `say` 存成 `step`，只有最后的
+    `assistant` 是回复——刷新后前端分不出来就会画成两条回复（一问两答）。
     """
     llm = FakeLLM([
         _reply("我这就去查", action="search", params={"query": "x"}),
@@ -244,7 +280,8 @@ def test_handle_keeps_the_steps_but_not_the_chatter(tmp_path):
     assert reply == "查到了 1 篇"                     # 回复是结论
     chat = load_chat(tmp_path, chat_id)
     roles = [m["role"] for m in chat["messages"]]
-    assert roles == ["user", "assistant", "tool", "assistant"]   # 过程留下了
+    assert roles == ["user", "step", "tool", "assistant"]   # 过程留下了，回复只一条
+    assert chat["messages"][1]["content"] == "我这就去查"    # 过渡语也在，但是步骤
     # 「给人看的样子」= `run_action` 的返回值本身。**`search` 是唯一的例外**：
     # 它返回的是带正文的多行文本（模型靠它答题，见
     # `test_run_search_puts_the_body_in_the_result`），不裹「查库：」那层壳，
