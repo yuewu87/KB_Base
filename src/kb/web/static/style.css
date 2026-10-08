@@ -337,7 +337,8 @@ body.collapsed .side-action {
 
 .searchbar { display: flex; gap: 9px; margin: 0 0 24px; }
 
-.searchbar input {
+.searchbar input,
+.searchbar textarea {
   flex: 1;
   min-width: 0;
   padding: 11px 15px;
@@ -349,11 +350,23 @@ body.collapsed .side-action {
   color: var(--ink);
   transition: border-color var(--dur) var(--ease), box-shadow var(--dur) var(--ease);
 }
-.searchbar input::placeholder { color: var(--faint); }
-.searchbar input:focus {
+.searchbar input::placeholder,
+.searchbar textarea::placeholder { color: var(--faint); }
+.searchbar input:focus,
+.searchbar textarea:focus {
   outline: none;
   border-color: var(--accent-mid);
   box-shadow: 0 0 0 3px var(--accent-ring);
+}
+
+/* 多行输入（ai对话那个框）。**高度由 JS 自增管**（见 `chat.html` 里那段），
+   所以不给拖拽手柄——给了的话用户拖出来的高度会被下一次输入覆盖掉，白拖。
+   `max-height` 是防它长到把上面的对话顶出屏幕，超了出滚动条。 */
+.searchbar textarea {
+  resize: none;
+  overflow-y: auto;
+  max-height: 160px;
+  line-height: 1.5;
 }
 
 .searchbar button {

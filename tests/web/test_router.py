@@ -141,6 +141,29 @@ def test_chat_post_redirects_back(client, vault):
     assert resp.headers["location"].startswith("/")
 
 
+def test_chat_post_keeps_newlines(client, vault):
+    """多行消息要**原样保留换行**，一路到落盘都不许压。
+
+    ⚠️ **它守不住真正的元凶。** 那个 bug 出在浏览器：输入框原本是单行
+    `<input>`，`\\n` 在进 `input.value` 的那一刻就被浏览器换成了空格，
+    **根本没提交出来**——pytest 跑不了浏览器，测不到那一段（2026-10-08
+    用户报「输入多行最终被压成一行」，根因就是这个）。
+
+    这条守的是**后半段**：从表单提交到落盘，服务端一个字都不许动。
+    前端那半靠人眼看，理由写在 `chat.html` 里 `textarea` 那段注释上。
+    """
+    text = "第一行\n第二行\n第三行"
+    resp = client.post("/", data={"message": text}, follow_redirects=False)
+    assert resp.status_code == 303
+
+    chats = sorted((vault / "chats").glob("*.json"))
+    assert chats, "没有会话落盘"
+    messages = json.loads(chats[-1].read_text(encoding="utf-8"))["messages"]
+    mine = [m for m in messages if m["role"] == "user"]
+    assert mine, "落盘的会话里没有 user 消息"
+    assert mine[-1]["content"] == text, "换行被压掉了"
+
+
 # ---------- 整理日志 ----------
 
 def test_journal_shows_entries(client):

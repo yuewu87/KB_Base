@@ -44,7 +44,13 @@
     <form class="searchbar" method="post" action="/">
       <input type="hidden" name="cid" value="{{ cid }}">
       <label for="message" class="sr-only">要说的话</label>
-      <input id="message" name="message" placeholder="说点什么……" autofocus autocomplete="off">
+      {# ⚠️ **必须是 `textarea`，不能改回 `input`。** 单行 `input` 在 DOM 层面
+         就存不下换行（浏览器把 `\n` 换成空格），敲或粘贴多行时**还没提交就丢了**
+         ——而对话框里「一次说几件事」是常态。见 `docs/03_问题记录.md` Q117。
+
+         `rows="1"` 是起步高度，长了由下面那段 JS 自增。 #}
+      <textarea id="message" name="message" rows="1"
+                placeholder="说点什么……" autofocus autocomplete="off"></textarea>
       <button type="submit">发送</button>
     </form>
   </section>
@@ -61,7 +67,7 @@
     document.querySelector('.chat-main form').addEventListener('submit', function (e) {
       const form = e.currentTarget;
       const thread = form.closest('.chat-main').querySelector('.thread');
-      const text = form.querySelector('input[name="message"]').value.trim();
+      const text = form.querySelector('[name="message"]').value.trim();
       // 空消息别画——服务端会拒掉它，画出来反而像发出去了
       if (!text) return;
 
@@ -83,6 +89,34 @@
       btn.disabled = true;
       btn.textContent = '思考中…';
     });
+
+    // ---- 多行输入：回车换行、Ctrl+Enter 提交 ----
+    //
+    // 换成 `textarea` 之后回车得**重新安排**：`input` 里回车是提交，`textarea` 里
+    // 默认是换行。这里**保持默认**（回车换行），另给 Ctrl+Enter 提交——
+    // 「发送」按钮一直在，两者不冲突。
+    //
+    // 高度自增：先归零再读 `scrollHeight`，这样删字缩回去也管用。
+    // 上限由 CSS 的 `max-height` 兜着（超了就出滚动条，见 style.css 里那条注释）。
+    (function () {
+      const box = document.querySelector('.chat-main textarea[name="message"]');
+      if (!box) return;
+      const form = box.closest('form');
+
+      const grow = function () {
+        box.style.height = 'auto';
+        box.style.height = box.scrollHeight + 'px';
+      };
+      box.addEventListener('input', grow);
+      grow();
+
+      box.addEventListener('keydown', function (e) {
+        if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) {
+          e.preventDefault();
+          form.requestSubmit();   // 走正常提交路径，上面那个监听器照样把气泡画出来
+        }
+      });
+    })();
   </script>
 
   {# ⚠️ 「新会话」是个**动作**，不是内容面板——它是 `<a href>` 跳转，
