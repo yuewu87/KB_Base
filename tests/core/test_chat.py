@@ -41,6 +41,20 @@ def test_parse_reply_bad_json_raises():
         parse_reply("这不是 JSON")
 
 
+def test_parse_reply_rejects_a_non_string_action():
+    """`action` 只认字符串和 null，别的类型当场当格式错误。
+
+    不拦的话，后面 `ACTION_LABELS.get(action, action)` 会抛
+    `TypeError: unhashable type: 'list'`——异常从生成器里逃出去，`done` 就没了。
+    """
+    import pytest
+
+    from kb.core.chat import ChatError
+
+    with pytest.raises(ChatError):
+        parse_reply(json.dumps({"say": "好", "action": ["push"], "params": {}}))
+
+
 def test_run_turn_no_action_ends_immediately(tmp_path):
     llm = FakeLLM([_reply("好的，我记下了")])
     messages, rounds = run_turn(tmp_path, [], "记一下 X", llm)
@@ -109,6 +123,26 @@ def test_render_history_labels_tool_separately():
     ])
     assert "**工具结果**：没找到" in text
     assert "**助手**：没找到" not in text
+
+
+def test_render_history_labels_step_separately():
+    """中间几轮的过渡语（`step`）也不能叫「助手」。
+
+    叫「助手」的话，模型看到的是「我上一条说：我这就去查」——它会以为自己
+    已经交代过了，于是该总结时不总结。它是**过程**，不是**回答**。
+    """
+    from kb.core.chat import _render_history
+
+    text = _render_history([
+        {"role": "user", "content": "查锁表"},
+        {"role": "step", "content": "我这就去查"},
+        {"role": "tool", "content": "找到 1 篇"},
+        {"role": "assistant", "content": "查到了"},
+    ])
+    assert "**步骤**：我这就去查" in text
+    assert "**助手**：我这就去查" not in text
+    # 最后那条仍然是「助手」——回复的身份没被过程挤掉
+    assert "**助手**：查到了" in text
 
 
 def test_run_turn_labels_tool_result_in_same_turn(tmp_path):
@@ -247,6 +281,20 @@ def test_run_turn_stream_still_emits_done_when_the_action_blows_up(tmp_path):
 
     assert kinds == ["say", "action", "result", "say", "done"]
     assert "没配库" in [e["text"] for e in events if e["type"] == "result"][0]
+
+
+def test_run_turn_stream_still_emits_done_on_a_non_string_action(tmp_path):
+    """模型把 `action` 写成列表——算格式错误，但 `done` 一样要吐。
+
+    这就是「`done` 一定吐」那条保证的反面用例：不校验的话
+    `ACTION_LABELS.get(["push"], ...)` 抛 `TypeError`，异常逃出生成器，
+    调用方一个字节都落不下盘。
+    """
+    llm = FakeLLM([_reply("我记一下", action=["push"], params={})])
+    events = list(run_turn_stream(tmp_path, [], "记一下", llm))
+
+    assert [e["type"] for e in events] == ["error", "done"]
+    assert "格式" in events[0]["text"]
 
 
 def test_run_turn_stream_skips_an_empty_say(tmp_path):

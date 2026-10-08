@@ -121,6 +121,12 @@ def parse_reply(raw: str) -> dict:
     data.setdefault("params", {})
     if not isinstance(data["params"], dict):
         raise ChatError("params 必须是对象")
+    # **`action` 只认字符串和 null。** 不校验的话，模型回 `{"action": ["push"]}`
+    # 这种形状时，`ACTION_LABELS.get(action, action)` 会当场抛
+    # `TypeError: unhashable type: 'list'`——异常从生成器里逃出去，`done` 就
+    # 吐不出来，那轮对话一个字节都落不下盘（`run_turn_stream` 打过这个包票）。
+    if data["action"] is not None and not isinstance(data["action"], str):
+        raise ChatError("action 必须是字符串或 null")
     return data
 
 
@@ -287,6 +293,40 @@ def run_turn(
             messages = event["messages"]
             rounds = event["rounds"]
     return messages, rounds
+
+
+def handle_stream(
+    data_dir: Path,
+    vault_root: Path,
+    chat_id: str | None,
+    message: str,
+    llm: LLM,
+    *,
+    organize_fn=None,
+):
+    """`handle` 的流式版：过程**边跑边吐**，`done` 之前先把会话落盘。
+
+    ⚠️ **落盘必须发生在 `done` 之前**——前端收到 `done` 就去刷新侧栏，
+    那一刻会话文件得已经在磁盘上了。（复用同一条规矩的用例见
+    `test_chat_post_keeps_newlines`：它拿到 `done` 里的 `chat_id` 就直接去
+    磁盘上读那份会话。）
+
+    `done` 事件里带 `chat_id`（前端拿它更新地址栏）；`run_turn_stream` 吐的
+    `done` 带的是 `messages/rounds`，形状**在这里转一道手**——那两个是落盘
+    用的，前端一个都不需要（要重画整条对话就整页跳转、回服务端渲染）。
+    """
+    if chat_id:
+        chat = load_chat(data_dir, chat_id)
+        history = chat["messages"] if chat else []
+    else:
+        history, chat_id = [], new_chat_id()
+
+    for event in run_turn_stream(vault_root, history, message, llm, organize_fn=organize_fn):
+        if event["type"] == "done":
+            save_chat(data_dir, chat_id, event["messages"])
+            yield {"type": "done", "chat_id": chat_id, "rounds": event["rounds"]}
+        else:
+            yield event
 
 
 def handle(
