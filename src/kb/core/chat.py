@@ -21,7 +21,7 @@ import json
 import re
 from pathlib import Path
 
-from kb.core.actions import describe_actions, run_action
+from kb.core.actions import ACTION_LABELS, describe_actions, run_action
 from kb.core.chat_store import load_chat, new_chat_id, save_chat
 from kb.core.lifecycle import vault_ready
 from kb.core.vault import counts
@@ -141,6 +141,87 @@ def _render_history(messages: list[dict]) -> str:
     return "\n\n".join(lines)
 
 
+def run_turn_stream(
+    vault_root: Path,
+    history: list[dict],
+    user_message: str,
+    llm: LLM,
+    *,
+    organize_fn=None,
+):
+    """跑一轮对话，**边跑边吐事件**。
+
+    事件是**给人看的步骤流**（设计见
+    `docs/superpowers/specs/2026-10-08-对话流式-design.md`）：
+
+        {"type": "say",    "text": ...}                 模型每轮说的话
+        {"type": "action", "name": ..., "text": ...}    动作开始
+        {"type": "result", "text": ...}                 动作结果
+        {"type": "error",  "text": ...}                 出错（含撞上限）
+        {"type": "done",   "messages": [...], "rounds": n}   收尾
+
+    **`done` 一定在最后**，且**一定**会被吐出来（正常结束、出错、撞上限三条路都吐）
+    ——调用方靠它落盘，少吐一次那轮对话就丢了。
+    """
+    messages = list(history)
+    messages.append({"role": "user", "content": user_message})
+    system = build_system_prompt(vault_root)
+
+    def finish(rounds: int):
+        yield {"type": "done", "messages": messages, "rounds": rounds}
+
+    for round_no in range(1, MAX_ROUNDS + 1):
+        try:
+            raw = llm.complete(system, _render_history(messages))
+        except LLMError as exc:
+            text = f"我这边出错了：{exc}"
+            messages.append({"role": "assistant", "content": text})
+            yield {"type": "error", "text": text}
+            yield from finish(round_no)
+            return
+
+        try:
+            reply = parse_reply(raw)
+        except ChatError as exc:
+            text = f"我输出的格式不对：{exc}"
+            messages.append({"role": "assistant", "content": text})
+            yield {"type": "error", "text": text}
+            yield from finish(round_no)
+            return
+
+        say = reply["say"]
+        action = reply["action"]
+
+        if not action:
+            messages.append({"role": "assistant", "content": say})
+            yield {"type": "say", "text": say}
+            yield from finish(round_no)
+            return
+
+        # **`say` 可能为空**（模型直接给动作不说话）——空的别吐，前端会画个空气泡
+        if say:
+            yield {"type": "say", "text": say}
+        yield {
+            "type": "action",
+            "name": action,
+            "text": f"正在{ACTION_LABELS.get(action, action)}…",
+        }
+
+        result = run_action(action, reply["params"], vault_root, llm, organize_fn=organize_fn)
+        yield {"type": "result", "text": result}
+
+        messages.append({"role": "assistant", "content": say})
+        messages.append({"role": "tool", "content": result})
+
+    # 到达上限——模型还在要动作，说明它没收住。用一句固定话收尾，
+    # 不取它最后一轮的 say（那句通常是「我这就去查」之类的过渡语，
+    # 说出来会让人以为还在办）。
+    text = "我转的圈数太多了，先停下。你再说一句我接着办。"
+    messages.append({"role": "assistant", "content": text})
+    yield {"type": "error", "text": text}
+    yield from finish(MAX_ROUNDS)
+
+
 def run_turn(
     vault_root: Path,
     history: list[dict],
@@ -149,45 +230,22 @@ def run_turn(
     *,
     organize_fn=None,
 ) -> tuple[list[dict], int]:
-    """跑一轮对话。
+    """跑一轮对话（同步版）。
 
     返回 `(新的完整消息列表, 实际跑了几轮)`。调用方负责落盘。
+
+    **它只是 `run_turn_stream` 的一个消费者**——同步的调用方（`handle`、
+    `POST /chat` 那条 JSON 端点）继续用它，行为一个字没变。
     """
-    messages = list(history)
-    messages.append({"role": "user", "content": user_message})
-    system = build_system_prompt(vault_root)
-
-    for round_no in range(1, MAX_ROUNDS + 1):
-        try:
-            raw = llm.complete(system, _render_history(messages))
-        except LLMError as exc:
-            messages.append({"role": "assistant", "content": f"我这边出错了：{exc}"})
-            return messages, round_no
-
-        try:
-            reply = parse_reply(raw)
-        except ChatError as exc:
-            messages.append({"role": "assistant", "content": f"我输出的格式不对：{exc}"})
-            return messages, round_no
-
-        say = reply["say"]
-        action = reply["action"]
-
-        if not action:
-            messages.append({"role": "assistant", "content": say})
-            return messages, round_no
-
-        result = run_action(action, reply["params"], vault_root, llm, organize_fn=organize_fn)
-        messages.append({"role": "assistant", "content": say})
-        messages.append({"role": "tool", "content": f"工具结果（{action}）：\n{result}"})
-
-    # 到达上限——模型还在要动作，说明它没收住。用一句固定话收尾，
-    # 不取它最后一轮的 say（那句通常是「我这就去查」之类的过渡语，
-    # 说出来会让人以为还在办）。
-    messages.append(
-        {"role": "assistant", "content": "我转的圈数太多了，先停下。你再说一句我接着办。"}
-    )
-    return messages, MAX_ROUNDS
+    rounds = 0
+    messages: list[dict] = []
+    for event in run_turn_stream(
+        vault_root, history, user_message, llm, organize_fn=organize_fn
+    ):
+        if event["type"] == "done":
+            messages = event["messages"]
+            rounds = event["rounds"]
+    return messages, rounds
 
 
 def handle(

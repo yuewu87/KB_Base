@@ -2,7 +2,13 @@
 
 import json
 
-from kb.core.chat import MAX_ROUNDS, build_system_prompt, parse_reply, run_turn
+from kb.core.chat import (
+    MAX_ROUNDS,
+    build_system_prompt,
+    parse_reply,
+    run_turn,
+    run_turn_stream,
+)
 from kb.llm.base import FakeLLM
 
 
@@ -48,8 +54,12 @@ def test_run_turn_executes_action_then_reports(tmp_path):
     ])
     messages, rounds = run_turn(tmp_path, [], "锁表是怎么说的", llm)
     assert rounds == 2
-    # 中间那轮的工具结果要进历史，模型才看得到
-    assert any("工具结果" in m["content"] for m in messages)
+    # 中间那轮的工具结果要进历史，模型才看得到。
+    # 断言的是**动作算出来的那串文本本身**——`tool` 轮没裹「工具结果（搜索）：」
+    # 那层壳了：它现在要同时给人看（前端直接渲染），壳在 `_render_history`
+    # 渲染时按角色加（见 `run_turn_stream`）。
+    tool = next(m for m in messages if m["role"] == "tool")
+    assert "没找到关于「锁表」" in tool["content"]
     assert messages[-1]["content"] == "查到了，没有相关笔记"
 
 
@@ -184,3 +194,33 @@ def test_run_turn_feeds_the_prompt_with_the_vault(tmp_path):
     run_turn(tmp_path, [], "库里有多少条", _Spy([_reply("1 篇")]))
 
     assert "1 篇笔记" in seen[0]
+
+
+# ---------- 流式事件 ----------
+
+def test_run_turn_stream_emits_say_then_action_then_result(tmp_path):
+    """一次带动作的跑，事件顺序是 say → action → result → done。"""
+    llm = FakeLLM([
+        _reply("好，我这就去存", action="search", params={"query": "x"}),
+        _reply("查完了"),
+    ])
+    events = list(run_turn_stream(tmp_path, [], "查一下 x", llm))
+    kinds = [e["type"] for e in events]
+
+    assert kinds == ["say", "action", "result", "say", "done"]
+    # 动作事件要带上动作名，前端才有机会按动作区分
+    assert [e for e in events if e["type"] == "action"][0]["name"] == "search"
+    # 最后那个 done 要把完整消息列表带出来，调用方靠它落盘
+    assert events[-1]["messages"][-1]["role"] == "assistant"
+
+
+def test_run_turn_stream_emits_error_at_max_rounds(tmp_path):
+    """撞满上限时吐一个 error 事件——前端照着画红气泡。"""
+    llm = FakeLLM([
+        _reply(action="search", params={"query": "x"}) for _ in range(MAX_ROUNDS)
+    ])
+    events = list(run_turn_stream(tmp_path, [], "一直查", llm))
+
+    assert events[-2]["type"] == "error"
+    assert "圈数" in events[-2]["text"]
+    assert events[-1]["type"] == "done"

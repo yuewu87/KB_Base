@@ -34,6 +34,14 @@ ACTIONS: dict[str, dict] = {
 }
 
 
+# 动作 → 中文。**和 `lifecycle._BUSY_LABELS` 是两回事**：那个说「谁在动 vault」，
+# 这个说「对话正在干什么」，别合并。漏配时走 `.get(action, action)` 兜底，
+# 顶多吐个英文动作名，不像 `Busy` 那样必须当场炸。
+ACTION_LABELS = {
+    "search": "查库", "push": "投递", "revise": "修改", "organize": "整理",
+}
+
+
 def describe_actions() -> str:
     """给 LLM 看的动作清单。"""
     lines = []
