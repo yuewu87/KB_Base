@@ -6,6 +6,7 @@ from kb.core.chat import (
     MAX_ROUNDS,
     build_system_prompt,
     handle,
+    handle_stream,
     parse_reply,
     run_turn,
     run_turn_stream,
@@ -335,3 +336,32 @@ def test_handle_keeps_the_steps_but_only_the_last_one_is_the_reply(tmp_path):
     # `test_run_search_puts_the_body_in_the_result`），不裹「查库：」那层壳，
     # 所以这里断的是它自己那句「没找到…」。空库里搜什么都不命中。
     assert chat["messages"][2]["content"].startswith("没找到关于")
+
+
+def test_handle_stream_saves_the_chat_before_it_says_done(tmp_path):
+    """`done` 吐出来的时候，会话**已经在磁盘上**——这是它最要紧的契约。
+
+    前端一收到 `done` 就整页跳转（`router.chat_post` → `chat.html`），跳过去
+    是服务端**重新读一次会话文件**渲染的。落盘要是排在 `done` 后面（哪怕只晚
+    一行），用户刷新出来的就是一段少了自己刚说那句话的对话——而这看着只是
+    「怎么没记住」，看不出是时序问题。
+
+    ⚠️ **别写成 `list(handle_stream(...))` 再断言「文件在」**：那样测的是
+    「整轮跑完之后在不在」，落盘排在 `done` 之后照样绿。必须**在迭代过程中**
+    收到 `done` 的那一刻就去读盘，才钉得住这个先后。
+    （`run_turn_stream` 自己不管落盘，所以这条时序只由 `handle_stream` 保证。）
+    """
+    llm = FakeLLM([_reply("好的")])
+
+    seen = []
+    for event in handle_stream(tmp_path, tmp_path, None, "记一下 X", llm):
+        seen.append(event)
+        if event["type"] == "done":
+            # 就这一刻——**还在循环里**，会话文件就该读得到了
+            chat = load_chat(tmp_path, event["chat_id"])
+            assert chat is not None, "done 都吐出来了，会话还没落盘"
+            assert [
+                m["content"] for m in chat["messages"] if m["role"] == "user"
+            ] == ["记一下 X"]
+
+    assert seen[-1]["type"] == "done"        # `done` 一定在最后，条条路都吐

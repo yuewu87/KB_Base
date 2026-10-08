@@ -384,11 +384,25 @@ def build_router(
           ——那条路同样是「页面表单，回 409 JSON 很难看」。
         - **下面生成器里那个 `with organizing():` 才是真持有**：它跨过整个流，
           跑到哪个字节都不放。只查不占的话，两句话之间别人插进来照样能开工，
-          「同一时刻只允许一件事」当场作废。
+          「同一时刻只允许一件事」当场作废。——**这两句之间确实留着一条窄缝**
+          （查完、到生成器真占上锁之前），那时别人挤进来，这一轮会以一条
+          `error` 事件收场（409 已经当不成状态码了）。缝很窄，但它是真的。
+
+        同一条「必须在响应头之前判掉」还管着**取库和取模型**：`vault()` 没配库
+        是 409、`get_llm()` 建不出来是 500，两者原先都写在端点体里，自然在响应
+        头之前。搬进生成器之后，那个 409 会**落进下面的 `except` 变成 200 +
+        一行 error 事件**，前端 `!resp.ok` 那条分支再也接不到——用户看到的是
+        「服务这边炸了：409 …」，而该说的是「还没有知识库，先去建一个」。
+        （2026-10-08 复查实测：`status: 200`。当时没有一条测试钉着它。）
         """
         # 忙就当场拒——**不能排在这儿等**，那会把「正在整理」变成一串排队请求
         if busy.what is not None:
             raise HTTPException(status_code=409, detail=busy.refusal)
+        # ⚠️ **这两句必须在「返回响应之前」跑完**，不能挪进 `gen`：
+        # 进了流之后响应头已经发出去（200），409 / 500 都无从谈起。
+        # 取一次存进变量，生成器里用。
+        vault_root = vault()
+        llm = get_llm()
 
         def gen():
             # ⚠️ **锁要包在生成器里面。** 包在 `return StreamingResponse(...)`
@@ -397,10 +411,10 @@ def build_router(
                 with organizing():
                     for event in handle_stream(
                         data_dir,
-                        vault(),
+                        vault_root,
                         cid or None,
                         message,
-                        get_llm(),
+                        llm,
                         organize_fn=organize_fn,
                     ):
                         yield json.dumps(event, ensure_ascii=False) + "\n"

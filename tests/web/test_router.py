@@ -6,7 +6,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from kb.api.http import create_app
-from kb.config import Config
+from kb.config import NO_VAULT_MESSAGE, Config
 from kb.core.vault import write_note
 from kb.llm.base import FakeLLM, LLMError
 from kb.web import skins
@@ -184,6 +184,47 @@ def test_chat_post_keeps_newlines(client, vault):
     mine = [m for m in messages if m["role"] == "user"]
     assert mine, "落盘的会话里没有 user 消息"
     assert mine[-1]["content"] == text, "换行被压掉了"
+
+
+def test_chat_post_without_a_vault_is_a_409_not_a_stream(tmp_path):
+    """没建库时 `POST /` 要回**真 409**，不是 200 + 流里一条 error。
+
+    这是在流式改造里掉过一次的：`vault()` 原先写在端点体里，`vault_guard`
+    当场抛 409；搬进生成器之后那个异常落进了兜底的 `except`，于是
+    `StreamingResponse` 照样以 **200** 开头，错误只剩一行
+    `{"type":"error","text":"服务这边炸了：409: …"}`——前端 `!resp.ok` 那条
+    分支再也接不到，用户看到的是「服务这边炸了」，而该说的是「还没有知识库」。
+
+    **当时没有任何一条测试钉着它，所以全绿。** 这条就是那只钉子。
+    （`tests/api/test_busy.py` 里那条忙时 409 是同款：同为「必须在响应头发出
+    之前判掉」的事，两处一起才盖住。）
+
+    库不建，所以不用 `client` / `vault` 夹具（它们给的 `.env` 和配置都齐了，
+    走不到这条 409）。
+    """
+    env = tmp_path / ".env"
+    env.write_text(
+        "KB_LLM_API_KEY=k\nKB_LLM_BASE_URL=http://x\nKB_LLM_MODEL=m\n",
+        encoding="utf-8",
+    )
+    data = tmp_path / "data"
+    data.mkdir()
+    c = TestClient(
+        create_app(
+            Config(
+                llm_api_key="k", llm_base_url="http://x", llm_model="m",
+                vault_path=None, port=None,
+            ),
+            llm=_TwoChainLLM(), data_dir=data, env_file=env,
+        )
+    )
+
+    resp = c.post("/", data={"message": "记一下 X"}, follow_redirects=False)
+
+    assert resp.status_code == 409
+    # 文案用常量比，不手抄——它只有 `config` 那一份
+    assert resp.json()["detail"] == NO_VAULT_MESSAGE
+    assert "ndjson" not in resp.headers["content-type"]   # 它压根没变成流
 
 
 # ---------- 整理日志 ----------

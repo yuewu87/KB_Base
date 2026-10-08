@@ -589,7 +589,8 @@ code {
   color: var(--danger);
 }
 
-/* 「思考中…」——只在 JS 画出来的那一瞬间存在，整页 POST 回来就没了。
+/* 「思考中…」——JS 在**流式读**的那几十秒里画出来的占位气泡，第一条事件
+   （或者第一次出错）一到就被撤掉（`chat.html` 里的 `clearWaiting`）。
    它要像一条**还没到**的话：颜色淡下去、轻轻呼吸，别让人以为这就是回答。
    （`prefers-reduced-motion` 由文件末尾那条统一关掉。） */
 .bubble.thinking {

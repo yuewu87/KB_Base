@@ -83,9 +83,19 @@
       e.preventDefault();
 
       const thread = chatForm.closest('.chat-main').querySelector('.thread');
-      const text = chatForm.querySelector('[name="message"]').value.trim();
+      const box = chatForm.querySelector('[name="message"]');
+      const text = box.value.trim();
       // 空消息别画——服务端会拒掉它，画出来反而像发出去了
       if (!text) return;
+
+      // **发出去就把框清空**，那几十秒里不留旧文本。留着的话，这一轮还在跑
+      // 的时候按 Ctrl+Enter（走 `form.requestSubmit()`，**它不看按钮的
+      // disabled**）会把同一条消息再发一次——撞上这一轮的锁，收获一条
+      // 「没发出去（HTTP 409）」红气泡。（下面 keydown 那处还有一道闸。）
+      // 缩回一行高交给多行输入那段逻辑：它挂在 `input` 上，所以在这儿发一个
+      // `input` 事件，而不是把「先归零再读 scrollHeight」抄第二遍。
+      box.value = '';
+      box.dispatchEvent(new Event('input'));
 
       const empty = thread.querySelector('.empty');
       if (empty) empty.remove();
@@ -138,9 +148,11 @@
         });
 
         if (!resp.ok) {
-          // 409（别人正在整理 / 还没建库）走这条：body 是一句人话，不是
-          // NDJSON。不单独接住的话，下面会拿它当事件流去解析，一个气泡
-          // 也画不出来——正好落进上面说的「停在思考中」。
+          // 409（别人正在整理 / 还没建库）走这条——**服务端把这两件事都判在
+          // 响应开头之前**（`router.chat_post`：先问「忙不忙」、再取库路径），
+          // 所以它们是真 409，而不是流里的一条 error。body 是一句人话，
+          // 不是 NDJSON；不单独接住的话，下面会拿它当事件流去解析，
+          // 一个气泡也画不出来——正好落进上面说的「停在思考中」。
           clearWaiting();
           add('step bad', '没发出去（HTTP ' + resp.status + '）：' + await resp.text());
           return;
@@ -194,6 +206,12 @@
 
       box.addEventListener('keydown', function (e) {
         if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) {
+          // **这一轮没跑完就不许再发。** `requestSubmit()` 不看按钮的 `disabled`
+          // ——上面那段提交逻辑把它 disable 了也拦不住它，于是同一条消息会发
+          // 第二次，撞上第一轮占着的锁。（上面「发出去就清空输入框」挡得住
+          // 大多数情况，这是双保险。）
+          const btn = form.querySelector('button[type="submit"]');
+          if (btn && btn.disabled) return;
           e.preventDefault();
           form.requestSubmit();   // 走正常提交路径，上面那个监听器照样把气泡画出来
         }
