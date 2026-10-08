@@ -41,7 +41,10 @@
       {% endif %}
     </div>
 
-    <form class="searchbar" method="post" action="/">
+    {# `id` 是给下面那段读流的 JS 用的；`method` / `action` **留着当兜底**——
+       JS 没加载时浏览器照样整页 POST，看到的是一串 JSON 行而不是错误页。
+       （服务端那个端点是同一路径同一套字段名，见 `router.chat_post`。） #}
+    <form class="searchbar" id="chat-form" method="post" action="/">
       <input type="hidden" name="cid" value="{{ cid }}">
       <label for="message" class="sr-only">要说的话</label>
       {# ⚠️ **必须是 `textarea`，不能改回 `input`。** 单行 `input` 在 DOM 层面
@@ -56,38 +59,117 @@
   </section>
 
   <script>
-    // 点发送之后**先显示出来**：你自己那句话 + 一条「思考中」。
+    // ---- 发消息：读 NDJSON 流，一步步画出来 ----
     //
-    // 一轮对话是**同步**跑的（要调模型，里面还可能真的去投递、整理），
-    // 这段时间页面上什么都不动——点完发送像是没反应，人会再点一次，
-    // 于是同一条消息被投两遍。
+    // 一轮对话是**同步跑**的（要调模型，里面还可能真的去投递、整理），
+    // 原先整页 POST 时那几十秒页面上什么都不动——点完发送像是没反应，
+    // 人会再点一次，于是同一条消息被投两遍（Q116：转圈 29 秒，其实在干活）。
     //
-    // 不用 fetch 改成异步：整页 POST 的路子更简单，而且失败时浏览器
-    // 自带的错误页比手写的「网络错误」更说得清。这里只需要把等待画出来。
-    document.querySelector('.chat-main form').addEventListener('submit', function (e) {
-      const form = e.currentTarget;
-      const thread = form.closest('.chat-main').querySelector('.thread');
-      const text = form.querySelector('[name="message"]').value.trim();
+    // 现在服务端**边跑边吐**（NDJSON，一行一个事件，见 `router.chat_post`），
+    // 这里边收边画。事件与气泡的对应：
+    //   `say`              → 助手气泡（模型这一轮说的话）
+    //   `action` / `result` → 过程气泡（`.step`：正在干什么 / 干成了什么）
+    //   `error`            → 过程气泡 + 红（`.step.bad`）
+    //   `done`             → 整页跳到 `/?cid=…`
+    //
+    // ⚠️ **`done` 走整页跳转是刻意的**：侧栏、地址栏、整条会话的重画全交给
+    // 服务端渲染，前端不维护第二份「会话长什么样」——两边各画一套迟早分叉。
+    //
+    // ⚠️ **`catch` 里那条红气泡不能省。** 整页 POST 那会儿网络断了有浏览器
+    // 自带的错误页兜着（Q104 选它图的就是这个）；改成流式之后那份兜底没了，
+    // 不画的话页面会**停在「思考中…」**上，或者干脆白屏。
+    const chatForm = document.getElementById('chat-form');
+    chatForm.addEventListener('submit', async function (e) {
+      e.preventDefault();
+
+      const thread = chatForm.closest('.chat-main').querySelector('.thread');
+      const text = chatForm.querySelector('[name="message"]').value.trim();
       // 空消息别画——服务端会拒掉它，画出来反而像发出去了
       if (!text) return;
 
       const empty = thread.querySelector('.empty');
       if (empty) empty.remove();
 
-      const mine = document.createElement('div');
-      mine.className = 'bubble user';
-      mine.textContent = text;
-      thread.appendChild(mine);
+      // 画一条气泡并滚到它。**滚的是最后一条**：过程一条条往下堆时，
+      // 用户的眼睛该跟着走。
+      const add = function (cls, body) {
+        const el = document.createElement('div');
+        el.className = 'bubble ' + cls;
+        el.textContent = body;
+        thread.appendChild(el);
+        el.scrollIntoView({block: 'nearest'});
+        return el;
+      };
 
-      const waiting = document.createElement('div');
-      waiting.className = 'bubble assistant thinking';
-      waiting.textContent = '思考中…';
-      thread.appendChild(waiting);
-      waiting.scrollIntoView({block: 'nearest'});
+      add('user', text);
 
-      const btn = form.querySelector('button[type="submit"]');
+      // 「思考中…」先占个位：第一件事跑出来之前总得有点动静。
+      // 用 `.step` 而不是 `.assistant`——它是**过程**，别长得像一条回复。
+      let waiting = add('step thinking', '思考中…');
+      const clearWaiting = function () {
+        if (waiting) { waiting.remove(); waiting = null; }
+      };
+
+      const btn = chatForm.querySelector('button[type="submit"]');
       btn.disabled = true;
       btn.textContent = '思考中…';
+
+      // 一行一条事件。**只画完整的行**——最后那段可能被切在中间，留在 `buf`
+      // 里等下一块（`resp.body` 的分块边界和行边界没有任何关系）。
+      // 返回 true 表示「这轮完了」：`done` 已经去跳页，别再往下读了。
+      const draw = function (line) {
+        const ev = JSON.parse(line);
+        if (ev.type === 'done') {
+          location.href = '/?cid=' + ev.chat_id;
+          return true;
+        }
+        clearWaiting();                 // 第一件事出来了，「思考中」就该让位
+        if (ev.type === 'say') add('assistant', ev.text);
+        else if (ev.type === 'action' || ev.type === 'result') add('step', ev.text);
+        else if (ev.type === 'error') add('step bad', ev.text);
+        return false;
+      };
+
+      try {
+        const resp = await fetch('/', {
+          method: 'POST',
+          headers: {'Content-Type': 'application/x-www-form-urlencoded'},
+          body: new URLSearchParams(new FormData(chatForm)),
+        });
+
+        if (!resp.ok) {
+          // 409（别人正在整理 / 还没建库）走这条：body 是一句人话，不是
+          // NDJSON。不单独接住的话，下面会拿它当事件流去解析，一个气泡
+          // 也画不出来——正好落进上面说的「停在思考中」。
+          clearWaiting();
+          add('step bad', '没发出去（HTTP ' + resp.status + '）：' + await resp.text());
+          return;
+        }
+
+        const reader = resp.body.getReader();
+        const decoder = new TextDecoder();
+        let buf = '';
+        for (;;) {
+          const chunk = await reader.read();
+          if (chunk.done) break;
+          // `{stream: true}` 不能省：一个汉字可能被切在两个 chunk 里，
+          // 不带它解码会吐出一个替换字符（「�」）。
+          buf += decoder.decode(chunk.value, {stream: true});
+          const lines = buf.split('\n');
+          buf = lines.pop();            // 最后那段只可能是半行，留着
+          for (const line of lines) {
+            if (line.trim() && draw(line)) return;
+          }
+        }
+        // 收尾：末行不带换行时它还留在 `buf` 里
+        if (buf.trim()) draw(buf);
+      } catch (err) {
+        clearWaiting();
+        add('step bad', '连接断了：' + err.message + '（刷新一下再来）');
+      } finally {
+        btn.disabled = false;
+        btn.textContent = '发送';
+      }
     });
 
     // ---- 多行输入：回车换行、Ctrl+Enter 提交 ----

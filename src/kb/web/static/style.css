@@ -562,6 +562,33 @@ code {
 
 .bubble.assistant { align-self: flex-start; }
 
+/* 对话里的「过程」气泡——`role=step` 的过渡语，和动作的 `action` / `result`
+   状态（流式时是 JS 现画的那几条，刷新后是模板按 role 渲染的那几条）。
+
+   ⚠️ **必须和 `.bubble.assistant` 长得不一样。** 它是**过程**不是回复，
+   混成一样就成了 `chat.handle` 注释里说的「一问两答，对话流很吵」。
+
+   ⚠️ **两条渲染路共用这一个 class**：流式时那段 JS 画的是
+   `bubble step`，刷新后模板画的是 `bubble {{ m.role }}`（`m.role == "step"`）。
+   两边一致，靠的就是 role 名和这个 class 名。
+
+   虚线框 + 无色底 + 小一号字：一眼分得出「它还在办」和「它答完了」。 */
+.bubble.step {
+  align-self: flex-start;
+  background: none;
+  border: 1px dashed var(--line);
+  color: var(--faint);
+  font-size: 12.5px;
+  padding: 6px 11px;
+}
+
+/* 出错的过程气泡（流式时是 `error` 事件、以及前端自己的连接/HTTP 失败）。
+   红用现成的 `--danger`——它比正红暗，跟全站「不要太亮」的基调一致。 */
+.bubble.step.bad {
+  border-color: var(--danger);
+  color: var(--danger);
+}
+
 /* 「思考中…」——只在 JS 画出来的那一瞬间存在，整页 POST 回来就没了。
    它要像一条**还没到**的话：颜色淡下去、轻轻呼吸，别让人以为这就是回答。
    （`prefers-reduced-motion` 由文件末尾那条统一关掉。） */
