@@ -34,6 +34,10 @@ ACTIONS: dict[str, dict] = {
 }
 
 
+# ⚠️ **它和 `lifecycle._BUSY_LABELS` 是两回事，别合并。** 那个说「谁在动
+# vault」（整理 / 迁移 / 移除 / 巡检），这个说「对话正在干什么」——两边的名目
+# 不同源，约束也不一样：`_BUSY_LABELS` 漏配了 `Busy.acquire` 会**当场抛**，
+# 这里漏配只走下面 `run_action` 里 `.get(name, name)` 的兜底。
 ACTION_LABELS = {
     "search": "查库", "push": "投递", "revise": "修改", "organize": "整理",
 }
