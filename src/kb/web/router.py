@@ -11,12 +11,13 @@
 
 from __future__ import annotations
 
+import json
 import time
 from collections.abc import Callable
 from pathlib import Path
 
 from fastapi import APIRouter, Form, HTTPException, Request
-from fastapi.responses import HTMLResponse, RedirectResponse
+from fastapi.responses import HTMLResponse, RedirectResponse, StreamingResponse
 from fastapi.templating import Jinja2Templates
 from pydantic import BaseModel
 
@@ -24,7 +25,7 @@ from kb.api import runtime
 from kb.api.http import busy_guard, push_and_organize, run_sweep, vault_guard
 from kb.config import NO_VAULT_MESSAGE, Config
 from kb.core import settings, sweep, sweep_state
-from kb.core.chat import handle
+from kb.core.chat import handle_stream
 from kb.core.chat_store import list_chats, load_chat
 from kb.core.flow import STEPS, latest_run_rows
 from kb.core.flow import list_days as flow_days
@@ -357,18 +358,59 @@ def build_router(
     # 会把另一个的请求全吃掉（表单进 JSON 端点 = 422，反之亦然）。
     @router.post("/")
     def chat_post(message: str = Form(...), cid: str = Form("")):
-        # 对话层能触发整理（`organize_fn` 里那个 `organize` 动作），
-        # 所以**整轮对话都要占锁**——见 `api/http.py` 的 `/chat`。
-        with organizing():
-            chat_id, _ = handle(
-                data_dir,
-                vault(),
-                cid or None,
-                message,
-                get_llm(),
-                organize_fn=organize_fn,
-            )
-        return RedirectResponse(f"/?cid={chat_id}", status_code=303)
+        """发一条消息——**流式**返回过程（NDJSON，每行一个事件）。
+
+        ⚠️ **这里推翻了 Q104 定下的「整页 POST」。** 当初选它是因为「简单 +
+        网络断了时浏览器自带的错误页更说得清」；但那样**跑的过程中什么都看不见**
+        （`docs/03_问题记录.md` Q116 记的那次：转圈 29 秒，其实在干活）。
+        改成流式后错误得**自己画**——所以下面 `except` 里补一个 `error` 事件，
+        前端（`chat.html`）也配了红气泡和 `catch`。
+
+        **表单字段名没变**（还是 `message` / `cid`），所以 `chat.html` 那个
+        `<form>` 的整页 POST 仍是兜底：JS 没加载时浏览器提交它，看到的是一串
+        JSON 行而不是错误页。
+
+        ## 占锁拆成了两处，缺一不可
+
+        对话层能触发整理（`organize_fn` 里那个 `organize` 动作），所以
+        **整轮对话都要占锁**——`tests/api/test_busy.py` 钉着这条。
+
+        但**流式把「占锁」劈成了两半**：`StreamingResponse` 一开口就先把响应头
+        （200）发出去了，之后再抛 409 也到不了浏览器，只会变成一句「服务这边
+        炸了：409 …」。所以：
+
+        - **这里先问一句「忙不忙」**（只读，不占锁）：忙就当场 409，那句人话
+          （`Busy.refusal`）来得及送出去。写法照抄 `_run_sweep_or_report`
+          ——那条路同样是「页面表单，回 409 JSON 很难看」。
+        - **下面生成器里那个 `with organizing():` 才是真持有**：它跨过整个流，
+          跑到哪个字节都不放。只查不占的话，两句话之间别人插进来照样能开工，
+          「同一时刻只允许一件事」当场作废。
+        """
+        # 忙就当场拒——**不能排在这儿等**，那会把「正在整理」变成一串排队请求
+        if busy.what is not None:
+            raise HTTPException(status_code=409, detail=busy.refusal)
+
+        def gen():
+            # ⚠️ **锁要包在生成器里面。** 包在 `return StreamingResponse(...)`
+            # 外面是错的：端点函数一返回就释放了，生成器还没开始跑，等于没占。
+            try:
+                with organizing():
+                    for event in handle_stream(
+                        data_dir,
+                        vault(),
+                        cid or None,
+                        message,
+                        get_llm(),
+                        organize_fn=organize_fn,
+                    ):
+                        yield json.dumps(event, ensure_ascii=False) + "\n"
+            except Exception as exc:      # noqa: BLE001 —— 见 docstring
+                yield json.dumps(
+                    {"type": "error", "text": f"服务这边炸了：{exc}"},
+                    ensure_ascii=False,
+                ) + "\n"
+
+        return StreamingResponse(gen(), media_type="application/x-ndjson")
 
     @router.get("/new", response_class=HTMLResponse)
     def new_note(request: Request, t: str = ""):

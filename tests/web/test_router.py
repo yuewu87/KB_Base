@@ -134,11 +134,27 @@ def test_new_chat_button_starts_a_blank_thread(client, vault):
     assert client.get("/?new=abc").status_code == 200
 
 
-def test_chat_post_redirects_back(client, vault):
-    # 表单 POST 落在 `/`：`/chat` 是服务端的 JSON 端点，两者同名会互相遮蔽
+def _events(resp) -> list[dict]:
+    """把 NDJSON 响应拆成事件列表——每行一个 JSON。"""
+    return [json.loads(line) for line in resp.text.strip().split("\n") if line.strip()]
+
+
+def test_chat_post_streams_ndjson_events(client):
+    """`POST /` 现在吐 NDJSON：每行一个事件，最后一行是 done。
+
+    （它取代了原来的 `test_chat_post_redirects_back`——那条断的 303
+    正是 Q104 定下、这次要推翻的「整页 POST」。）
+    """
     resp = client.post("/", data={"message": "记一下 X"}, follow_redirects=False)
-    assert resp.status_code == 303
-    assert resp.headers["location"].startswith("/")
+
+    assert resp.status_code == 200
+    assert "ndjson" in resp.headers["content-type"]
+    events = _events(resp)
+    assert events[-1]["type"] == "done"
+    assert all("type" in e for e in events)
+    # **`done` 带的是 `chat_id`**（前端拿它更新地址栏），不是 `run_turn_stream`
+    # 那份 `messages` —— 形状在 `handle_stream` 里转了一道手
+    assert events[-1]["chat_id"]
 
 
 def test_chat_post_keeps_newlines(client, vault):
@@ -151,14 +167,20 @@ def test_chat_post_keeps_newlines(client, vault):
 
     这条守的是**后半段**：从表单提交到落盘，服务端一个字都不许动。
     前端那半靠人眼看，理由写在 `chat.html` 里 `textarea` 那段注释上。
+
+    改成流式之后 `done` 事件只带 `chat_id`、不带 `messages`（前端拿它更新
+    地址栏就够），所以这里从 `done` 里取到 id 再**去磁盘上读**那份会话——
+    要守的本来就是「落盘的内容」，直读文件反而最直接，也顺带钉住了
+    「`done` 吐出来的时候会话已经在磁盘上了」这条时序。
     """
     text = "第一行\n第二行\n第三行"
     resp = client.post("/", data={"message": text}, follow_redirects=False)
-    assert resp.status_code == 303
+    chat_id = _events(resp)[-1]["chat_id"]
 
-    chats = sorted((vault / "chats").glob("*.json"))
-    assert chats, "没有会话落盘"
-    messages = json.loads(chats[-1].read_text(encoding="utf-8"))["messages"]
+    # `data_dir` 就是这个 vault（见 `client` fixture），会话落在 `chats/` 下
+    path = vault / "chats" / f"{chat_id}.json"
+    assert path.is_file(), "done 都吐出来了，会话却没落盘"
+    messages = json.loads(path.read_text(encoding="utf-8"))["messages"]
     mine = [m for m in messages if m["role"] == "user"]
     assert mine, "落盘的会话里没有 user 消息"
     assert mine[-1]["content"] == text, "换行被压掉了"
