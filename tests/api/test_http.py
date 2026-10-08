@@ -289,14 +289,16 @@ def test_chat_404_on_unknown_session(client, vault):
     assert resp.status_code == 404
 
 
-def test_chat_persists_only_user_and_final_reply(vault):
-    """落盘只留 [这一句用户消息] + [最终回复]——中间的全丢。
+def test_chat_persists_the_steps_and_the_final_reply(vault):
+    """落盘留 [用户那句] + [过程] + [最终回复]。
 
-    两类都丢：
-    - `tool` 是过程不是对话，存下去下次会当历史回喂，越堆越长
-    - **中间几轮的 `say` 也丢**：模型每个动作轮都会说一句话，于是
-      「记一下 X」会落成「我这就去记」+「记好了」两条回复——一问两答。
-      （这条是端到端跑真实 LLM 时看出来的，计划里没有。）
+    ⚠️ **这条取代了旧版的「只留 user + 最终 assistant」。** 旧版把过程全丢了，
+    用户回头看会话时看不见「它干了什么」；现在留着，但两条老顾虑各有交代：
+    - **「回答」只有一条**：中间那轮的 `say`（「我记一下」）也进历史（回看要用），
+      但它不冒充回答——`reply` 仍然取最后那条 assistant，前端把中间那些画成步骤。
+    - **`tool` 轮不膨胀**：存的是 `run_action` 的返回值（动作的结果摘要，带动作名），
+      不是整篇正文；「工具结果（动作）：」那层壳留给 `_render_history` 按角色加，
+      所以它不出现在正文里。
     """
     from kb.core.chat_store import load_chat
     from kb.core.vault import list_notes
@@ -314,10 +316,14 @@ def test_chat_persists_only_user_and_final_reply(vault):
     # 先确认动作真的跑过（否则下面那条断言会因为「没产生工具结果」而恒真）。
     # Q88 之后投递当场整理——草稿被消费掉了，所以要验的是笔记建出来了。
     assert [p.stem for p in list_notes(vault)] == ["并发写锁"]
-    assert [m["role"] for m in chat["messages"]] == ["user", "assistant"]
+    # 回复是结论，不是中间那句过渡语
+    assert data["reply"] == "记好了"
+    assert [m["role"] for m in chat["messages"]] == [
+        "user", "assistant", "tool", "assistant"
+    ]
     assert chat["messages"][-1]["content"] == "记好了"
+    assert chat["messages"][2]["content"].startswith("投递：")
     assert all("工具结果" not in m["content"] for m in chat["messages"])
-    assert all("我记一下" not in m["content"] for m in chat["messages"])
 
 
 def test_chat_push_runs_organize_immediately(vault):

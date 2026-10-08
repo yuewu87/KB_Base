@@ -5,10 +5,12 @@ import json
 from kb.core.chat import (
     MAX_ROUNDS,
     build_system_prompt,
+    handle,
     parse_reply,
     run_turn,
     run_turn_stream,
 )
+from kb.core.chat_store import load_chat
 from kb.llm.base import FakeLLM
 
 
@@ -224,3 +226,27 @@ def test_run_turn_stream_emits_error_at_max_rounds(tmp_path):
     assert events[-2]["type"] == "error"
     assert "圈数" in events[-2]["text"]
     assert events[-1]["type"] == "done"
+
+
+# ---------- 落盘 ----------
+
+def test_handle_keeps_the_steps_but_not_the_chatter(tmp_path):
+    """过程要留下（存进会话），但**过渡语不能冒充回复**。
+
+    `reply` 必须是最后那条 assistant（结论），不是「我这就去查」。
+    """
+    llm = FakeLLM([
+        _reply("我这就去查", action="search", params={"query": "x"}),
+        _reply("查到了 1 篇"),
+    ])
+    chat_id, reply = handle(tmp_path, tmp_path, None, "查一下", llm)
+
+    assert reply == "查到了 1 篇"                     # 回复是结论
+    chat = load_chat(tmp_path, chat_id)
+    roles = [m["role"] for m in chat["messages"]]
+    assert roles == ["user", "assistant", "tool", "assistant"]   # 过程留下了
+    # 「给人看的样子」= `run_action` 的返回值本身。**`search` 是唯一的例外**：
+    # 它返回的是带正文的多行文本（模型靠它答题，见
+    # `test_run_search_puts_the_body_in_the_result`），不裹「查库：」那层壳，
+    # 所以这里断的是它自己那句「没找到…」。空库里搜什么都不命中。
+    assert chat["messages"][2]["content"].startswith("没找到关于")

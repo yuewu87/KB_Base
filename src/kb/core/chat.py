@@ -276,19 +276,17 @@ def handle(
         (m["content"] for m in reversed(messages) if m["role"] == "assistant"), ""
     )
 
-    # 落盘只留 [这一句用户消息] + [最终回复]，中间的全丢：
+    # **过程要留着**（用户要能回头看「它干了什么」），但两条老顾虑得各自有交代：
     #
-    # - `tool` 是过程不是对话，存下去下次会当历史回喂给模型，越堆越长
-    # - **中间几轮的 `say` 也要丢**：模型每个动作轮都会说一句话，
-    #   于是「记一下 X」会落成「我这就去记」+「记好了，编号 …」两条回复
-    #   ——一问两答，对话流看着很吵。用户要的是结论。
+    # - **「一问两答」**：`reply` 仍然只取**最后**那条 assistant——「回答」始终只有
+    #   一条。中间几轮的 `say`（「我这就去查」）同样落在历史里（回看过程要靠它），
+    #   但它们不是回答：按 spec 定的分层，前端把它们和 `tool` 轮一起画成步骤。
+    # - **「越堆越长」**：`tool` 轮存的是 `run_action` 的返回值——动作自己的结果
+    #   摘要（带动作名，几行以内），不是整篇正文；`search` 例外（它带正文，
+    #   模型答题靠它，Q103）。再加 `chat_store._MSG_LIMIT = 200` 兜住总量。
     save_chat(
         data_dir,
         chat_id,
-        [
-            *history,
-            {"role": "user", "content": message},
-            {"role": "assistant", "content": reply},
-        ],
+        [*history, *messages[len(history):]],
     )
     return chat_id, reply

@@ -43,6 +43,22 @@ def test_run_search_puts_the_body_in_the_result(tmp_path):
     assert "并发写入会锁表，得串行化。" in result
 
 
+def test_run_action_prefixes_the_result_with_the_action_label(tmp_path):
+    """结果开头带动作名——它同时给两边看：模型当工具结果，前端当「这一步干了什么」。
+
+    断言的是**整串**，不是 `in`：这层壳就是给前端渲染用的，前缀错一个字
+    界面上就露出来。`search` 是唯一的例外（正文不能压，见上面那两条）。
+    """
+    result = run_action(
+        "push",
+        {"content": "x"},
+        tmp_path,
+        llm=None,
+        organize_fn=lambda *_: "存好了",
+    )
+    assert result == "投递：存好了"
+
+
 def test_run_action_rejects_unknown_name(tmp_path):
     result = run_action("放火", {}, tmp_path, llm=None)
     assert "未知动作" in result

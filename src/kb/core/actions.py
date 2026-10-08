@@ -57,6 +57,11 @@ def run_action(
     """执行一个动作，返回**给人看的文本**。
 
     **从不抛异常**——出错也返回文本，让对话能把它说给用户听。
+
+    ⚠️ **返回值同时给两边看**：模型拿它当工具结果，前端拿它当「这一步干了什么」
+    （`chat.handle` 会把它整条存进会话历史）。所以开头要有动作名——人一眼知道
+    在干什么；长度要短——它会进历史、也会被回喂给模型（见 `chat.handle` 里那段
+    注释）。**`search` 是唯一的例外**，见下面那条分支。
     """
     if name not in ACTIONS:
         return f"未知动作：{name}"
@@ -69,6 +74,8 @@ def run_action(
     if name == "search":
         hits = search_notes(vault_root, params["query"])
         if not hits:
+            # **这条不裹动作名。** 空结果也是模型要读的答复，裹上「查库：」
+            # 只是给它多一层噪音；而下面那条（带正文）更不能裹——见那里的注释。
             return f"没找到关于「{params['query']}」的内容。"
         blocks = [f"找到 {len(hits)} 篇："]
         for hit in hits:
@@ -77,22 +84,31 @@ def run_action(
             # **正文必须在这里。** 这段文本是模型能看到的全部——它的返回值
             # 直接进了对话上下文，而 search 是它唯一的查库动作。只给标题，
             # 它就只能在「我不知道」和编内容之间选（Q103）。
+            #
+            # 也**不能压成一行**（上面那条通用规则在这里例外）：正文就是模型
+            # 的答案来源。前端渲染时自己截断。
             blocks.append(f"## {hit.title}（{rel}）标签：{tags}\n\n{hit.body.strip()}")
         return "\n\n".join(blocks)
 
     if name == "push":
         if organize_fn is None:
-            return "投递通道没接上（调用方没传 push 回调）。"
-        return organize_fn("push", params["content"], None)
-
-    if name == "revise":
+            text = "投递通道没接上（调用方没传 push 回调）。"
+        else:
+            text = organize_fn("push", params["content"], None)
+    elif name == "revise":
         if organize_fn is None:
-            return "投递通道没接上（调用方没传 push 回调）。"
-        return organize_fn("revise", params["content"], params["target"])
-
-    if name == "organize":
+            text = "投递通道没接上（调用方没传 push 回调）。"
+        else:
+            text = organize_fn("revise", params["content"], params["target"])
+    elif name == "organize":
         if organize_fn is None:
-            return "整理通道没接上（调用方没传 organize 回调）。"
-        return organize_fn("organize", "", None)
+            text = "整理通道没接上（调用方没传 organize 回调）。"
+        else:
+            text = organize_fn("organize", "", None)
+    else:
+        text = f"动作 {name} 没有实现。"
 
-    return f"动作 {name} 没有实现。"
+    # 末尾统一包一层动作名。漏配时走 `.get(name, name)` 兜底——顶多吐个英文
+    # 动作名，不像 `lifecycle._BUSY_LABELS` 那样必须当场炸。
+    label = ACTION_LABELS.get(name, name)
+    return f"{label}：{text}"
