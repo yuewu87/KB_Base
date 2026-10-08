@@ -38,16 +38,25 @@ pip install -r requirements.txt
 cp .env.example .env                 # Windows cmd: copy .env.example .env
 ```
 
-**想让 `kb` 随处可用**（会话层的 AI 要用它，见 [`docs/接入指南/`](docs/接入指南/)），
-把本项目目录加进 PATH——`kb.bat` 的注释里就是这么写的：
+**想让 `kb.bat` 随处可用**（会话层的 AI 要用它，见 [`docs/接入指南/`](docs/接入指南/)），
+要配两样——都是用户级，加一次就够，**重开终端生效**：
 
 ```powershell
-# 用户级 PATH，加一次就够；重开终端生效
+# ① 把本项目目录加进 PATH
 [Environment]::SetEnvironmentVariable("PATH",
   [Environment]::GetEnvironmentVariable("PATH", "User") + ";<你 clone 的 KN_Base 目录>", "User")
+
+# ② 告诉它用哪个 python —— 指向你装了依赖的那个
+[Environment]::SetEnvironmentVariable("KB_PYTHON", "<那个 python.exe 的完整路径>", "User")
 ```
 
-`kb.bat` 自己用 `%~dp0` 定位工程根，所以加一次之后，**在任何目录敲 `kb` 都能用**。
+`kb.bat` 自己用 `%~dp0` 定位工程根，所以配完之后，**在任何目录敲 `kb.bat` 都能用**。
+
+> ⚠️ **写全名 `kb.bat`**：bash 不做 Windows 的 PATHEXT 展开，光敲 `kb` 会 `command not found`
+> （PowerShell / cmd 里两个都行）。
+>
+> ⚠️ **`KB_PYTHON` 不设会怎样**：它会退回 PATH 上的 `python`——那个很可能不是你装了依赖的环境，
+> 症状是 `No module named 'dotenv'`，**看着像「依赖没装」，其实是选错了 python**。
 
 `.env` 里**只需要填模型三件套**（另外两项 `.env.example` 已经给了能用的值）：
 
@@ -57,7 +66,7 @@ KB_LLM_BASE_URL=https://api.deepseek.com
 KB_LLM_MODEL=deepseek-flash
 ```
 
-空着不会静默降级——**除了 `kb stop`，每条 `kb` 命令都会当场停下**并说清缺哪一项。
+空着不会静默降级——**除了 `kb.bat stop`，每条命令都会当场停下**并说清缺哪一项。
 
 ## 用法
 
@@ -65,11 +74,11 @@ KB_LLM_MODEL=deepseek-flash
 写 `.gitignore`、`git init`、首次提交。之后：
 
 ```bash
-kb push --content "并发写入会锁表，最后用队列串行化解决" --source 会话
-kb inbox                                  # 看攒了几条
-kb organize                               # 整理落库
-kb search "缩放"
-kb drop 20260918-9e4f                     # 投错了就撤（可给多个 id）
+kb.bat push --content "并发写入会锁表，最后用队列串行化解决" --source 会话
+kb.bat inbox                              # 看攒了几条
+kb.bat organize                           # 整理落库
+kb.bat search "缩放"
+kb.bat drop 20260918-9e4f                 # 投错了就撤（可给多个 id）
 ```
 
 **谁决定什么时候整理：** 会话 AI 判断。规则写在 [`docs/接入指南/`](docs/接入指南/)

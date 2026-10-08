@@ -19,14 +19,22 @@
 
 ## 怎么装
 
-**第一步：让 `kb` 能调。** 指南里每条命令都用 `kb`，它是 `kb.bat` 包装出来的命令。
-把 KN_Base 目录加进 PATH——**`kb.bat` 的注释里从头就是这么写的**：
+**第一步：让 `kb.bat` 能调。** 指南里每条命令都用它，它是 KN_Base 目录里那个包装脚本。
+要配两样——都是用户级，加一次就够，**重开终端生效**：
 
 ```powershell
-# 用户级 PATH，加一次就够；重开终端生效
+# ① 把 KN_Base 目录加进 PATH
 [Environment]::SetEnvironmentVariable("PATH",
   [Environment]::GetEnvironmentVariable("PATH", "User") + ";<你 clone 的 KN_Base 目录>", "User")
+
+# ② 告诉它用哪个 python —— 指向你装了依赖的那个
+[Environment]::SetEnvironmentVariable("KB_PYTHON", "<那个 python.exe 的完整路径>", "User")
 ```
+
+> ⚠️ **命令要写全名 `kb.bat`**：bash 不做 Windows 的 PATHEXT 展开，光敲 `kb` 会 `command not found`。
+>
+> ⚠️ **`KB_PYTHON` 不设会怎样**：退回 PATH 上的 `python`——很可能不是你装了依赖的那个，
+> 症状是 `No module named 'dotenv'`，看着像「依赖没装」，其实是选错了 python。
 
 **第二步：把 SKILL.md 拷到 agent 的 skills 目录**——同一份文件，两个地方：
 
@@ -53,20 +61,20 @@ cp "<KN_Base>/docs/接入指南/kn-record/SKILL.md" ~/.agents/skills/kn-record/S
 
 **① 中文输出在管道里是乱码。**
 
-`kb` 在 Windows 上按 GBK 输出，agent 从管道读回来就是 `���գ�id=...`。**每条命令前面要加 `PYTHONIOENCODING=utf-8`**：
+`kb.bat` 在 Windows 上按 GBK 输出，agent 从管道读回来就是 `���գ�id=...`。**每条命令前面要加 `PYTHONIOENCODING=utf-8`**：
 
 ```bash
-PYTHONIOENCODING=utf-8 kb push --content "..." --source 会话
+PYTHONIOENCODING=utf-8 kb.bat push --content "..." --source 会话
 ```
 
-没在 `kb` 里替调用方设，是因为那样**用户在自己的 cmd 窗口里会反过来看到乱码**（控制台是 GBK 的）。管道要 UTF-8、控制台要 GBK，两边掐着——所以让它待在调用侧。
+没在脚本里替调用方设，是因为那样**用户在自己的 cmd 窗口里会反过来看到乱码**（控制台是 GBK 的）。管道要 UTF-8、控制台要 GBK，两边掐着——所以让它待在调用侧。
 
 **② 指南里的路径曾经全是死链。**
 
 2026-09-28 之前，指南里每条命令都写成 `"E:/Study_Projects/KN_Base/kb.bat"`——**作者本机的绝对路径**。
 别人 clone 到别处，13 条命令全是死链，报错还像「命令没找到」，看不出是路径问题。
 
-现在改用 `kb`：把 KN_Base 目录加进 PATH 就有了（见上面「怎么装」的第一步），
+现在改用 `kb.bat`：把 KN_Base 目录加进 PATH 就有了（见上面「怎么装」的第一步），
 **跟路径无关，谁 clone 到哪都一样**。
 
 ---
