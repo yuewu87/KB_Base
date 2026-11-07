@@ -2,8 +2,9 @@
 
 **薄层**——只做「取数据 + 渲染」，判断逻辑全在 `core/`。
 
-**对话不在这里实现**（Q84）：跑一轮对话的是 `core.chat.handle`，能做的动作
-由服务侧的闭包给。Web 只是调用方——两份实现迟早会分叉。
+**对话不在这里实现**（Q84）：网页这条对话走 `core.chat.handle_stream`
+（2026-10-08 改成流式；服务端的 JSON 端点 `/chat` 仍用 `core.chat.handle`），
+能做的动作由服务侧的闭包给。Web 只是调用方——两份实现迟早会分叉。
 
 会话历史的落点（`data_dir`）同样由 `create_app` 传进来：Web 层自己拼路径
 迟早会拼成仓库根的 `chats/`，那条路径没被 gitignore 覆盖（见 `chat_store`）。
@@ -12,6 +13,7 @@
 from __future__ import annotations
 
 import json
+import logging
 import time
 from collections.abc import Callable
 from pathlib import Path
@@ -418,7 +420,18 @@ def build_router(
                         organize_fn=organize_fn,
                     ):
                         yield json.dumps(event, ensure_ascii=False) + "\n"
+            except HTTPException as exc:
+                # **上面那条窄缝里挤进来的 409**（查完「忙不忙」、到这儿真占锁
+                # 之间别人抢到了）。它不是「服务这边炸了」，而是一句该原样
+                # 转给用户的「被挡住了」——`exc.detail` 就是 `Busy.refusal`。
+                yield json.dumps(
+                    {"type": "error", "text": exc.detail}, ensure_ascii=False
+                ) + "\n"
             except Exception as exc:      # noqa: BLE001 —— 见 docstring
+                # **到这儿只剩真 bug 和 IO 失败**：LLM 出错、输出解析失败、
+                # 动作异常都已被 `run_turn_stream` 转成事件了。所以必须留痕
+                # ——只吐一行 error 事件的话，线上这个 bug 刷新一次就没了。
+                logging.getLogger(__name__).exception("对话流中途失败")
                 yield json.dumps(
                     {"type": "error", "text": f"服务这边炸了：{exc}"},
                     ensure_ascii=False,

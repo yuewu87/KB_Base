@@ -150,8 +150,11 @@ def test_chat_post_streams_ndjson_events(client):
     assert resp.status_code == 200
     assert "ndjson" in resp.headers["content-type"]
     events = _events(resp)
-    assert events[-1]["type"] == "done"
-    assert all("type" in e for e in events)
+    # 假模型（`CHAT_REPLY`）只会「说一句、不要动作」，所以事件序列是死的：
+    # 一条 `say` + 一条收尾的 `done`。
+    # ⚠️ **别写成 `all("type" in e for e in events)`**——那几乎恒真，
+    # 连「一条事件都没吐」都拦不住（空列表上 `all()` 是 True）。
+    assert [e["type"] for e in events] == ["say", "done"]
     # **`done` 带的是 `chat_id`**（前端拿它更新地址栏），不是 `run_turn_stream`
     # 那份 `messages` —— 形状在 `handle_stream` 里转了一道手
     assert events[-1]["chat_id"]

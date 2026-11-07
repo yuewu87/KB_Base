@@ -88,6 +88,16 @@
       // 空消息别画——服务端会拒掉它，画出来反而像发出去了
       if (!text) return;
 
+      // ⚠️ **请求体必须在「清空输入框」之前定下来。**
+      // `FormData` 读的是控件的**当前值**——先清空、再 `new FormData(chatForm)`，
+      // 发出去就是一个空的 `message=`（2026-11-08 复查实测）：服务端照收空串，
+      // 整轮对话拿空消息跑，用户输入根本到不了服务端。
+      // 所以直接用已经取好的 `text` 拼，不经过 FormData——顺序就无从搞错了。
+      const body = new URLSearchParams({
+        cid: chatForm.querySelector('[name="cid"]').value,
+        message: text,
+      });
+
       // **发出去就把框清空**，那几十秒里不留旧文本。留着的话，这一轮还在跑
       // 的时候按 Ctrl+Enter（走 `form.requestSubmit()`，**它不看按钮的
       // disabled**）会把同一条消息再发一次——撞上这一轮的锁，收获一条
@@ -144,17 +154,31 @@
         const resp = await fetch('/', {
           method: 'POST',
           headers: {'Content-Type': 'application/x-www-form-urlencoded'},
-          body: new URLSearchParams(new FormData(chatForm)),
+          body,                          // 上面已经拼好（清空输入框之前）
         });
 
         if (!resp.ok) {
           // 409（别人正在整理 / 还没建库）走这条——**服务端把这两件事都判在
           // 响应开头之前**（`router.chat_post`：先问「忙不忙」、再取库路径），
-          // 所以它们是真 409，而不是流里的一条 error。body 是一句人话，
-          // 不是 NDJSON；不单独接住的话，下面会拿它当事件流去解析，
-          // 一个气泡也画不出来——正好落进上面说的「停在思考中」。
+          // 所以它们是真 409，而不是流里的一条 error。
+          //
+          // ⚠️ **body 不是一句裸文本**：FastAPI 的 `HTTPException` 回的是
+          // `{"detail": "…"}`（`api/http.py` 里也是这么描述的）。直接画出来
+          // 用户会看到带花括号的 JSON，所以先解一下；解不开（比如中间某个
+          // 代理回的 HTML 错误页）就原样显示。
+          const raw = await resp.text();
+          let detail = raw;
+          try {
+            detail = JSON.parse(raw).detail || raw;
+          } catch (err) { /* 不是 JSON，原样 */ }
           clearWaiting();
-          add('step bad', '没发出去（HTTP ' + resp.status + '）：' + await resp.text());
+          add('step bad', '没发出去（HTTP ' + resp.status + '）：' + detail);
+          // 用户敲的东西还回去——409 是「稍后再试」，不该让他重打一遍。
+          // （他要是已经又敲了新的，就别覆盖。）
+          if (!box.value) {
+            box.value = text;
+            box.dispatchEvent(new Event('input'));
+          }
           return;
         }
 
@@ -173,8 +197,18 @@
             if (line.trim() && draw(line)) return;
           }
         }
-        // 收尾：末行不带换行时它还留在 `buf` 里
-        if (buf.trim()) draw(buf);
+        // 收尾：`decode()` 不带参数 = 把 decoder 内部还压着的字节全吐出来。
+        // 连接正好断在一个多字节字符中间时，最后那几个字节还留在它那儿——
+        // 不 flush 的话末字符会丢。
+        buf += decoder.decode();
+        // 末行不带换行时，它还留在 `buf` 里
+        if (buf.trim() && draw(buf)) return;
+        if (waiting) {
+          // 流「干净地」结束了，却**一个事件都没收到**（`done` 也没来）：
+          // 服务端那条路静悄悄地断了。不处理的话「思考中…」会永远停在那儿。
+          clearWaiting();
+          add('step bad', '连接断了：没收到任何回复（刷新一下再来）');
+        }
       } catch (err) {
         clearWaiting();
         add('step bad', '连接断了：' + err.message + '（刷新一下再来）');

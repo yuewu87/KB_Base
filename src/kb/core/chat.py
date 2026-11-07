@@ -303,7 +303,7 @@ def handle_stream(
     llm: LLM,
     *,
     organize_fn=None,
-):
+) -> Iterator[dict]:
     """`handle` 的流式版：过程**边跑边吐**，`done` 之前先把会话落盘。
 
     ⚠️ **落盘必须发生在 `done` 之前**——前端收到 `done` 就去刷新侧栏，
@@ -340,9 +340,9 @@ def handle(
 ) -> tuple[str, str]:
     """一轮对话的完整处理：读历史 → 跑 → 落盘。返回 `(会话 id, 回复)`。
 
-    **Web 层与 HTTP 端点共用这一份**——否则对话会有两份实现，
-    「怎么落盘」这条规则（过程留着、但 `reply` 只取最后那条 `assistant`）
-    也会跟着分叉。
+    **服务端的 JSON 端点（`api/http.py` 的 `/chat`）还在用它。** 网页那条路
+    2026-10-08 改成了流式（`handle_stream`），但「怎么落盘」这条规则两边
+    是同一份——过程留着、`reply` 只取最后那条 `assistant`。
 
     ⚠️ 第一个参数是 `data_dir`（= `config.DATA_DIR`），**不是工程根**——
     传错会话就落进仓库了，见 `chat_store` 的模块说明。
